@@ -782,7 +782,6 @@ pm_nl_check_endpoint()
 	line=$(mptcp_lib_pm_nl_get_endpoint "${ns}" "${_id}")
 	expected_line=$(mptcp_lib_pm_nl_format_endpoints \
 		"${_id},${addr},${_flags//","/" "},${dev},${_port}")
-
 	if [ "$line" = "$expected_line" ]; then
 		print_ok
 	else
