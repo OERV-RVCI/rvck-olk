@@ -13,8 +13,6 @@
 #include <uapi/linux/mptcp.h>
 #include <net/genetlink.h>
 
-#include "mptcp_pm_gen.h"
-
 #define MPTCP_SUPPORTED_VERSION	1
 
 /* MPTCP option bits */
