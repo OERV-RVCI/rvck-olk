@@ -1624,11 +1624,13 @@ static int hns_roce_cmq_query_hw_info(struct hns_roce_dev *hr_dev)
 
 static void hns_roce_cmq_query_hw_id(struct hns_roce_dev *hr_dev)
 {
+	#define HNS_IB_INVALID_ID 0XFFFF
+
 	struct hns_roce_hw_id_query_cmq *resp;
 	struct hns_roce_cmq_desc desc;
 	int ret;
 
-	if (hr_dev->is_vf)
+	if (hr_dev->is_vf || hr_dev->pci_dev->revision <= PCI_REVISION_ID_HIP08)
 		goto invalid_val;
 
 	hns_roce_cmq_setup_basic_desc(&desc, HNS_ROCE_OPC_QUERY_HW_ID, true);
@@ -7421,6 +7423,45 @@ static const enum hns_roce_opcode_type scc_opcode[] = {
 	HNS_ROCE_OPC_CFG_DIP_PARAM,
 };
 
+static int hns_roce_v2_config_cnp_pri_param(struct hns_roce_dev *hr_dev)
+{
+	struct hns_roce_cnp_pri_param *cnp_pri_param;
+	struct hns_roce_cmq_desc desc;
+	int ret;
+
+	hns_roce_cmq_setup_basic_desc(&desc, HNS_ROCE_OPC_CFG_CNP_PRI, false);
+	cnp_pri_param = hr_dev->cnp_pri_param;
+	desc.data[0] = cnp_pri_param->param;
+
+	ret = hns_roce_cmq_send(hr_dev, &desc, 1);
+	if (ret)
+		ibdev_err_ratelimited(&hr_dev->ib_dev,
+				      "failed to configure cnp pri param, opcode: 0x%x, ret = %d.\n",
+				      le16_to_cpu(desc.opcode), ret);
+	return ret;
+}
+
+static int hns_roce_v2_query_cnp_pri_param(struct hns_roce_dev *hr_dev)
+{
+	struct hns_roce_cnp_pri_param *cnp_pri_param;
+	struct hns_roce_cmq_desc desc;
+	int ret;
+
+	hns_roce_cmq_setup_basic_desc(&desc, HNS_ROCE_OPC_CFG_CNP_PRI, true);
+	ret = hns_roce_cmq_send(hr_dev, &desc, 1);
+	if (ret) {
+		ibdev_err_ratelimited(&hr_dev->ib_dev,
+				      "failed to query cnp pri param, opcode: 0x%x, ret = %d.\n",
+				      le16_to_cpu(desc.opcode), ret);
+		return ret;
+	}
+
+	cnp_pri_param = hr_dev->cnp_pri_param;
+	cnp_pri_param->param = desc.data[0];
+
+	return 0;
+}
+
 static int hns_roce_v2_config_scc_param(struct hns_roce_dev *hr_dev,
 					enum hns_roce_scc_algo algo)
 {
@@ -7546,6 +7587,8 @@ static const struct hns_roce_hw hns_roce_hw_v2 = {
 	.bond_init = hns_roce_bond_init,
 	.bond_is_active = hns_roce_bond_is_active,
 	.get_bond_netdev = hns_roce_get_bond_netdev,
+	.config_cnp_pri_param = hns_roce_v2_config_cnp_pri_param,
+	.query_cnp_pri_param = hns_roce_v2_query_cnp_pri_param,
 };
 
 static const struct pci_device_id hns_roce_hw_v2_pci_tbl[] = {
