@@ -953,6 +953,7 @@ struct hns_roce_caps {
 	u8		cong_cap;
 	enum hns_roce_cong_type default_cong_type;
 	u32 max_ack_req_msg_len;
+	u3 fw_cap;
 };
 
 enum hns_roce_device_state {
