@@ -1309,6 +1309,8 @@ static int iomap_write_delalloc_release(struct inode *inode,
 		 * cache, if data page was dropped between seek for data and
 		 * hole, data_end may be equal to start_byte, just let it keep
 		 * seeking.
+		 * If we race with post-direct I/O invalidation of the page cache,
+		 * there might be no data left at start_byte.
 		 */
 		if (data_end == start_byte)
 			continue;
