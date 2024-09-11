@@ -48,7 +48,7 @@ static __always_inline void __monitorx(const void *eax, unsigned long ecx,
 
 static __always_inline void __mwait(unsigned long eax, unsigned long ecx)
 {
-	mds_idle_clear_cpu_buffers();
+	x86_idle_clear_cpu_buffers();
 
 	/*
 	 * Use the instruction mnemonic with implicit operands, as the LLVM
@@ -95,7 +95,7 @@ static __always_inline void __mwaitx(unsigned long eax, unsigned long ebx,
 
 static __always_inline void __sti_mwait(unsigned long eax, unsigned long ecx)
 {
-	mds_idle_clear_cpu_buffers();
+	x86_idle_clear_cpu_buffers();
 
 	asm volatile("sti; mwait" :: "a" (eax), "c" (ecx));
 }
