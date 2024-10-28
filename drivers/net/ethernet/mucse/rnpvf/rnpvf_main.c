@@ -5572,7 +5572,6 @@ static void rnpvf_assign_netdev_ops(struct net_device *dev)
 static u8 rnpvf_vfnum(struct rnpvf_hw *hw)
 {
 	u16 vf_num = -1;
-	u32 pfvfnum_reg;
 
 #if CONFIG_BAR4_PFVFNUM
 	int ring, v;
@@ -5580,7 +5579,7 @@ static u8 rnpvf_vfnum(struct rnpvf_hw *hw)
 
 	func = ((hw->pdev->devfn & 0x1) ? 1 : 0);
 	for (ring = 0; ring < 128; ring += 2) {
-		v = rd32(hw, RNP_DMA_RX_START(ring));
+		v = rd32(hw, 0x8010 + 0x100 * ring);
 		if ((v & 0xFFFF) == hw->pdev->vendor) {
 			continue;
 		} else {
@@ -5591,6 +5590,8 @@ static u8 rnpvf_vfnum(struct rnpvf_hw *hw)
 	}
 	return vf_num;
 #else
+	u32 pfvfnum_reg;
+
 	pfvfnum_reg =
 		(VF_NUM_REG_N10 & (pci_resource_len(hw->pdev, 0) - 1));
 	vf_num = readl(hw->hw_addr_bar0 + pfvfnum_reg);
