@@ -26,6 +26,7 @@
 #include "psp-dev.h"
 
 #include "hygon/sp-dev.h"
+#include "hygon/ccp-mdev.h"
 
 /* used for version string AA.BB.CC.DD */
 #define AA				GENMASK(31, 24)
@@ -359,6 +360,14 @@ static int sp_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (ret)
 		goto free_irqs;
 
+	if (is_vendor_hygon()) {
+		ret = ccp_dev_wrapper_alloc(pdev);
+		if (ret) {
+			dev_err(dev, "ccp_dev_wrapper_alloc failed (%d)\n", ret);
+			goto free_irqs;
+		}
+	}
+
 	return 0;
 
 free_irqs:
@@ -386,6 +395,9 @@ static void sp_pci_remove(struct pci_dev *pdev)
 
 	if (!sp)
 		return;
+
+	if (is_vendor_hygon())
+		ccp_dev_wrapper_free(pdev);
 
 	sp_destroy(sp);
 

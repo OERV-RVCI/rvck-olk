@@ -57,6 +57,7 @@
 #define MCCP_CONFIG_SPACE_SIZE			0xff
 
 #define MCCP_VFIO_PCI_OFFSET_SHIFT		40
+#define MCCP_PCI_BAR2_RES_MAP_LEN		0x8000
 #define MCCP_VFIO_PCI_OFFSET_TO_INDEX(off) \
 				(off >> MCCP_VFIO_PCI_OFFSET_SHIFT)
 #define MCCP_VFIO_PCI_INDEX_TO_OFFSET(index) \
@@ -772,7 +773,14 @@ static int hct_get_region_info(struct mdev_device *mdev,
 	case VFIO_PCI_CONFIG_REGION_INDEX:
 		size = pdev->cfg_size;
 		break;
-	case VFIO_PCI_BAR0_REGION_INDEX ... VFIO_PCI_BAR5_REGION_INDEX:
+	case VFIO_PCI_BAR2_REGION_INDEX:
+		size = MCCP_PCI_BAR2_RES_MAP_LEN;
+		break;
+	case VFIO_PCI_BAR0_REGION_INDEX:
+	case VFIO_PCI_BAR1_REGION_INDEX:
+	case VFIO_PCI_BAR3_REGION_INDEX:
+	case VFIO_PCI_BAR4_REGION_INDEX:
+	case VFIO_PCI_BAR5_REGION_INDEX:
 		size = pci_resource_len(pdev, bar_index);
 		break;
 	default:
@@ -1903,9 +1911,11 @@ static long hct_share_ioctl(struct file *file, unsigned int ioctl, unsigned long
 			ret = 0;
 		break;
 	case MCCP_SHARE_OP_GET_PASID:
+		mutex_lock(&hct_data.lock);
 		pasid = find_first_zero_bit(hct_data.pasids, MCCP_PASID_SIZE);
 		if (pasid >= MCCP_PASID_SIZE) {
 			ret = -EINVAL;
+			mutex_unlock(&hct_data.lock);
 			break;
 		}
 		private->pasid = pasid;
@@ -1913,6 +1923,7 @@ static long hct_share_ioctl(struct file *file, unsigned int ioctl, unsigned long
 		bitmap_set(hct_data.pasids, pasid, 1);
 		if (copy_to_user((void __user *)arg, &dev_ctrl, sizeof(dev_ctrl)))
 			ret = -EINVAL;
+		mutex_unlock(&hct_data.lock);
 		break;
 	case MCCP_SHARE_OP_GET_VERSION:
 		memcpy(dev_ctrl.version, VERSION_STRING, sizeof(VERSION_STRING));
