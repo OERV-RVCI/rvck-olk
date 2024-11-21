@@ -38,6 +38,29 @@ struct arm_spe_recording {
 	bool			*wrapped;
 };
 
+static struct perf_cpu_map *cpu_map__new_sysfs_online(void)
+{
+	struct perf_cpu_map *cpus = NULL;
+	FILE *onlnf;
+
+	onlnf = fopen("/sys/devices/system/cpu/online", "r");
+	if (onlnf) {
+		cpus = perf_cpu_map__read(onlnf);
+		fclose(onlnf);
+	}
+	return cpus;
+}
+
+static struct perf_cpu_map *perf_cpu_map__new_online_cpus(void)
+{
+	struct perf_cpu_map *cpus = cpu_map__new_sysfs_online();
+
+	if (cpus)
+		return cpus;
+
+	return perf_cpu_map__default_new();
+}
+
 /*
  * arm_spe_find_cpus() returns a new cpu map, and the caller should invoke
  * perf_cpu_map__put() to release the map after use.
