@@ -253,6 +253,9 @@ static s32 rnpm_read_posted_mbx(struct rnpm_hw *hw, u32 *msg, u16 size,
 	struct rnpm_mbx_info *mbx = &hw->mbx;
 	s32 ret_val = RNPM_ERR_MBX;
 
+	if (pci_channel_offline(hw->pdev))
+		return -EIO;
+
 	if (!mbx->ops.read)
 		goto out;
 
@@ -281,6 +284,9 @@ static s32 rnpm_write_posted_mbx(struct rnpm_hw *hw, u32 *msg, u16 size,
 	struct rnpm_mbx_info *mbx = &hw->mbx;
 	s32 ret_val = RNPM_ERR_MBX;
 
+	if (pci_channel_offline(hw->pdev))
+		return -EIO;
+
 	/* exit if either we can't write or there isn't a defined timeout */
 	if (!mbx->ops.write || !mbx->timeout)
 		goto out;
@@ -306,6 +312,9 @@ out:
 static s32 rnpm_check_for_msg_pf(struct rnpm_hw *hw, enum MBX_ID mbx_id)
 {
 	s32 ret_val = RNPM_ERR_MBX;
+
+	if (pci_channel_offline(hw->pdev))
+		return -EIO;
 
 	if (mbx_id == MBX_CM3CPU) {
 		if (rnpm_mbx_get_req(hw, CPU2PF_COUNTER) != hw->mbx.cpu_req) {
@@ -333,6 +342,9 @@ static s32 rnpm_check_for_msg_pf(struct rnpm_hw *hw, enum MBX_ID mbx_id)
 static s32 rnpm_check_for_ack_pf(struct rnpm_hw *hw, enum MBX_ID mbx_id)
 {
 	s32 ret_val = RNPM_ERR_MBX;
+
+	if (pci_channel_offline(hw->pdev))
+		return -EIO;
 
 	if (mbx_id == MBX_CM3CPU) {
 		if (rnpm_mbx_get_ack(hw, CPU2PF_COUNTER) != hw->mbx.cpu_ack) {
@@ -363,6 +375,9 @@ static s32 rnpm_obtain_mbx_lock_pf(struct rnpm_hw *hw, enum MBX_ID mbx_id)
 	s32 ret_val = -EPERM;
 	u32 CTRL_REG = (mbx_id == MBX_CM3CPU) ? PF2CPU_MBOX_CTRL :
 						      PF2VF_MBOX_CTRL(mbx_id);
+
+	if (pci_channel_offline(hw->pdev))
+		return -EIO;
 
 	while (try_cnt-- > 0) {
 		/* Take ownership of the buffer */
@@ -398,6 +413,9 @@ static s32 rnpm_write_mbx_pf(struct rnpm_hw *hw, u32 *msg, u16 size,
 	u32 CTRL_REG = (mbx_id == MBX_CM3CPU) ? PF2CPU_MBOX_CTRL :
 						      PF2VF_MBOX_CTRL(mbx_id);
 	u32 wait_msg_free_cnt = 4;
+
+	if (pci_channel_offline(hw->pdev))
+		return -EIO;
 
 	if (size > RNPM_VFMAILBOX_SIZE) {
 		rnpm_info("%s: size:%d should <%d\n", __func__, size,
@@ -478,6 +496,9 @@ static s32 rnpm_read_mbx_pf(struct rnpm_hw *hw, u32 *msg, u16 size,
 						     PF_VF_SHM_DATA(mbx_id);
 	u32 CTRL_REG = (mbx_id == MBX_CM3CPU) ? PF2CPU_MBOX_CTRL :
 						      PF2VF_MBOX_CTRL(mbx_id);
+
+	if (pci_channel_offline(hw->pdev))
+		return -EIO;
 
 	if (size > RNPM_VFMAILBOX_SIZE) {
 		rnpm_info("%s: size:%d should <%d\n", __func__, size,
@@ -560,10 +581,10 @@ static int rnpm_mbx_configure_pf(struct rnpm_hw *hw, int nr_vec, bool enable)
 	int idx = 0;
 	u32 v;
 
-	// dump_stack();
+	if (pci_channel_offline(hw->pdev))
+		return -EIO;
 
 	if (enable) {
-		// hw->mbx.irq_enabled = true;
 		for (idx = 0; idx < RNPM_MAX_VF_FUNCTIONS; idx++) {
 			v = mbx_rd32(hw, VF2PF_COUNTER(idx));
 			hw->mbx.vf_req[idx] = v & 0xffff;
@@ -594,8 +615,6 @@ static int rnpm_mbx_configure_pf(struct rnpm_hw *hw, int nr_vec, bool enable)
 		// allow CM3CPU to PF MBX IRQ
 		wr32(hw, CPU_PF_MBOX_MASK, 0);
 	} else {
-		// hw->mbx.irq_enabled = false;
-
 		wr32(hw, PF_VF_MBOX_MASK_LO, 0xffffffff); // disable irq
 		wr32(hw, PF_VF_MBOX_MASK_HI, 0xffffffff); // disable irq
 
@@ -645,8 +664,8 @@ s32 rnpm_init_mbx_params_pf(struct rnpm_hw *hw)
 			dma_alloc_coherent(&hw->pdev->dev, mbx->reply_dma_size,
 					   &mbx->reply_dma_phy, GFP_ATOMIC);
 		if (!mbx->reply_dma) {
-			rnpm_err("%s: dma_alloc_coherent failed! %p\n", __func__,
-				 mbx->reply_dma);
+			rnpm_err("%s: dma_alloc_coherent failed! %p\n",
+				 __func__, mbx->reply_dma);
 			mbx->reply_dma = NULL;
 			mbx->reply_dma_size = 0;
 		}

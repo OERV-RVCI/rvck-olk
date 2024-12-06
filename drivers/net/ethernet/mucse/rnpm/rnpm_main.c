@@ -4035,6 +4035,9 @@ void control_mac_rx(struct rnpm_adapter *adapter, bool on)
 	u32 value = 0;
 	u32 count = 0;
 
+	if (pci_channel_offline(hw->pdev))
+		return;
+
 	if (on) {
 		wr32(hw, RNPM_ETH_RX_PROGFULL_THRESH_PORT(adapter->port),
 		     RECEIVE_ALL_THRESH);
@@ -4426,6 +4429,8 @@ void rnpm_down(struct rnpm_adapter *adapter)
 	struct net_device *netdev = adapter->netdev;
 	struct rnpm_hw *hw = &adapter->hw;
 	int i, retry = 200;
+	bool is_pci_dead = pci_channel_offline(adapter->pdev);
+	bool is_pci_online = !is_pci_dead;
 
 	rnpm_dbg("%s %s port=%d!!!\n", netdev->name, __func__, adapter->port);
 	rnpm_logd(LOG_FUNC_ENTER, "enter %s %s\n", __func__,
@@ -4442,7 +4447,7 @@ void rnpm_down(struct rnpm_adapter *adapter)
 	usleep_range(10000, 20000);
 
 	/* disable all enabled rx queues */
-	for (i = 0; i < adapter->num_rx_queues; i++) {
+	for (i = 0; i < adapter->num_rx_queues && is_pci_online; i++) {
 		rnpm_disable_rx_queue(adapter, adapter->rx_ring[i]);
 		/* only handle when srio enable or mutiport mode and change rx length
 		 * setup
@@ -4486,6 +4491,7 @@ void rnpm_down(struct rnpm_adapter *adapter)
 	del_timer_sync(&adapter->service_timer);
 	// maybe bug here if call tx real hang reset
 	cancel_work_sync(&adapter->service_task);
+	clear_bit(__RNPM_SERVICE_SCHED, &adapter->state);
 
 	while (retry) {
 		if (rnpm_wait_irq_miss_check_done(adapter))
@@ -4500,7 +4506,7 @@ void rnpm_down(struct rnpm_adapter *adapter)
 	}
 
 	/* disable transmits in the hardware now that interrupts are off */
-	for (i = 0; i < adapter->num_tx_queues; i++) {
+	for (i = 0; i < adapter->num_tx_queues && is_pci_online; i++) {
 		struct rnpm_hw *hw = &adapter->hw;
 		struct rnpm_ring *tx_ring = adapter->tx_ring[i];
 		int count = tx_ring->count;
@@ -5854,6 +5860,9 @@ static int rnpm_reset_pf(struct rnpm_pf_adapter *pf_adapter)
 #ifdef NO_MBX_VERSION
 	unsigned long flags;
 #endif
+
+	if (pci_channel_offline(pf_adapter->pdev))
+		return -EIO;
 
 	wr32(pf_adapter, RNPM_DMA_AXI_EN, 0);
 #define TIMEOUT_COUNT (1000)
@@ -8935,6 +8944,10 @@ static void rnpm_remove(struct pci_dev *pdev)
 {
 	struct rnpm_pf_adapter *pf_adapter = pci_get_drvdata(pdev);
 	int i;
+
+	if (pci_channel_offline(pdev))
+		dev_info(&pdev->dev, "%s:%s card pluged out, pci-err-stat:%d\n",
+			 __func__, pci_name(pdev), pdev->error_state);
 
 	set_bit(__RNPM_DOWN, &pf_adapter->state);
 
