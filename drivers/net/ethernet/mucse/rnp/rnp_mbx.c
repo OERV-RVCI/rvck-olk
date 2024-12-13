@@ -248,6 +248,9 @@ static s32 rnp_write_posted_mbx(struct rnp_hw *hw, u32 *msg, u16 size,
 	struct rnp_mbx_info *mbx = &hw->mbx;
 	s32 ret_val = RNP_ERR_MBX;
 
+	if (pci_channel_offline(hw->pdev))
+		return -EIO;
+
 	/* exit if either we can't write or there isn't a defined timeout */
 	if (!mbx->ops.write || !mbx->timeout)
 		goto out;
@@ -275,6 +278,9 @@ static s32 rnp_check_for_msg_pf(struct rnp_hw *hw, enum MBX_ID mbx_id)
 	s32 ret_val = RNP_ERR_MBX;
 	u16 hw_req_count = 0;
 	struct rnp_mbx_info *mbx = &hw->mbx;
+
+	if (pci_channel_offline(hw->pdev))
+		return -EIO;
 
 	if (mbx_id == MBX_CM3CPU) {
 		hw_req_count = rnp_mbx_get_req(hw, CPU2PF_COUNTER(mbx));
@@ -312,6 +318,9 @@ static s32 rnp_check_for_ack_pf(struct rnp_hw *hw, enum MBX_ID mbx_id)
 {
 	s32 ret_val = RNP_ERR_MBX;
 	struct rnp_mbx_info *mbx = &hw->mbx;
+
+	if (pci_channel_offline(hw->pdev))
+		return -EIO;
 
 	if (mbx_id == MBX_CM3CPU) {
 		if (rnp_mbx_get_ack(hw, CPU2PF_COUNTER(mbx)) !=
@@ -382,6 +391,9 @@ static s32 rnp_write_mbx_pf(struct rnp_hw *hw, u32 *msg, u16 size,
 			PF2CPU_MBOX_CTRL(mbx) :
 			PF2VF_MBOX_CTRL(mbx, mbx_id);
 
+	if (pci_channel_offline(hw->pdev))
+		return -EIO;
+
 	if (size > RNP_VFMAILBOX_SIZE) {
 		rnp_err("%s: size:%d should <%d\n", __func__, size,
 			RNP_VFMAILBOX_SIZE);
@@ -445,6 +457,9 @@ static s32 rnp_read_mbx_pf(struct rnp_hw *hw, u32 *msg, u16 size,
 	u32 CTRL_REG = (mbx_id == MBX_CM3CPU) ?
 			PF2CPU_MBOX_CTRL(mbx) :
 			PF2VF_MBOX_CTRL(mbx, mbx_id);
+
+	if (pci_channel_offline(hw->pdev))
+		return -EIO;
 	if (size > RNP_VFMAILBOX_SIZE) {
 		rnp_err("%s: size:%d should <%d\n", __func__, size,
 			RNP_VFMAILBOX_SIZE);
@@ -515,6 +530,8 @@ static int rnp_mbx_configure_pf(struct rnp_hw *hw, int nr_vec, bool enable)
 	u32 v;
 	struct rnp_mbx_info *mbx = &hw->mbx;
 
+	if (pci_channel_offline(hw->pdev))
+		return -EIO;
 	if (enable) {
 		for (idx = 0; idx < hw->max_vfs; idx++) {
 			v = mbx_rd32(hw, VF2PF_COUNTER(mbx, idx));

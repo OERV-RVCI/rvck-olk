@@ -235,6 +235,15 @@ int rnp_disable_sriov(struct rnp_adapter *adapter)
 	/* clean this */
 	adapter->vlan_count = 0;
 	msleep(100);
+
+	if (pci_channel_offline(adapter->pdev) == false) {
+		/* only do if not ncsi card */
+		if (!hw->ncsi_en)
+			hw->ops.set_mac_rx(hw, false);
+
+		hw->ops.set_sriov_status(hw, false);
+	}
+
 	/* only do if not ncsi card */
 	if (!hw->ncsi_en)
 		hw->ops.set_mac_rx(hw, false);

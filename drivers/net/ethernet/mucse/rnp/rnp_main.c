@@ -45,7 +45,7 @@ char rnp_driver_name[] = "rnp";
 static const char rnp_driver_string[] =
 	"mucse 1/10/25/40 Gigabit PCI Express Network Driver";
 
-#define DRV_VERSION "0.3.7"
+#define DRV_VERSION "0.3.8"
 #include "version.h"
 
 const char rnp_driver_version[] = DRV_VERSION GIT_COMMIT;
@@ -82,6 +82,8 @@ static struct pci_device_id rnp_pci_tbl[] = {
 		.driver_data = board_n10 },
 	{ PCI_DEVICE(PCI_VENDOR_ID_MUCSE, PCI_DEVICE_ID_N10_X1),
 		.driver_data = board_n10 },
+	{ PCI_DEVICE(PCI_VENDOR_ID_MUCSE, PCI_DEVICE_ID_N10_TP),
+	  .driver_data = board_n10 },
 	{ PCI_DEVICE(PCI_VENDOR_ID_MUCSE, PCI_DEVICE_ID_N400),
 		.driver_data = board_n400 },
 	{ PCI_DEVICE(PCI_VENDOR_ID_MUCSE, PCI_DEVICE_ID_N400C),
@@ -3530,6 +3532,8 @@ void rnp_down(struct rnp_adapter *adapter)
 	int i;
 	int free_tx_ealay = 0;
 	int err = 0;
+	bool is_pci_dead = pci_channel_offline(adapter->pdev);
+	bool is_pci_online = !is_pci_dead;
 	/* signal that we are down to the interrupt handler */
 	set_bit(__RNP_DOWN, &adapter->state);
 
@@ -3570,7 +3574,7 @@ void rnp_down(struct rnp_adapter *adapter)
 	netif_tx_disable(netdev);
 
 	/* disable all enabled rx queues */
-	for (i = 0; i < adapter->num_rx_queues; i++) {
+	for (i = 0; i < adapter->num_rx_queues && is_pci_online; i++) {
 		rnp_disable_rx_queue(adapter, adapter->rx_ring[i]);
 		/* only handle when srio enable and change rx length setup */
 		if ((adapter->flags & RNP_FLAG_SRIOV_ENABLED) &&
@@ -3611,7 +3615,7 @@ void rnp_down(struct rnp_adapter *adapter)
 	}
 
 	/* disable transmits in the hardware now that interrupts are off */
-	for (i = 0; i < adapter->num_tx_queues; i++) {
+	for (i = 0; i < adapter->num_tx_queues && is_pci_online; i++) {
 		struct rnp_ring *tx_ring = adapter->tx_ring[i];
 		int count = tx_ring->count;
 		int head;
@@ -7028,6 +7032,11 @@ err_pci_reg:
 static void rnp_remove(struct pci_dev *pdev)
 {
 	struct rnp_adapter *adapter = pci_get_drvdata(pdev);
+
+	if (pci_channel_offline(pdev)) {
+		dev_info(&pdev->dev, "%s:%s card pluged out ,pci-err-stat:%d\n", __func__,
+			 pci_name(pdev), pdev->error_state);
+	}
 
 #ifdef CONFIG_PCI_IOV
 	/* we always clean sriov if pf removed */

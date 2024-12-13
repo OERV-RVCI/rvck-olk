@@ -1689,8 +1689,12 @@ static int rnp_add_ethtool_fdir_entry(struct rnp_adapter *adapter,
 	}
 
 	/* if this sw_idx used before, use the old one */
-	if (input->filter.formatted.flow_type ==
-		   RNP_ATR_FLOW_TYPE_IPV4) {
+	if (input->filter.formatted.flow_type == RNP_ATR_FLOW_TYPE_ETHER) {
+		/* it is a layer2 proto */
+		/* no need to setup other */
+
+	} else if (input->filter.formatted.flow_type ==
+			RNP_ATR_FLOW_TYPE_IPV4) {
 		/* Copy input into formatted structures */
 		input->filter.formatted.src_ip[0] =
 			fsp->h_u.usr_ip4_spec.ip4src;

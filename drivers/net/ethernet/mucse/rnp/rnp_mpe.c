@@ -197,7 +197,8 @@ quit:
 
 void rnp_rpu_mpe_stop(struct rnp_adapter *adapter)
 {
-	if (adapter->rpu_inited) {
+	if (adapter->rpu_inited &&
+	    pci_channel_offline(adapter->pdev) == false) {
 		rnp_start_rpu(adapter->hw.rpu_addr, 0);
 		rnp_reset_mpe_and_rpu(&adapter->hw);
 	}

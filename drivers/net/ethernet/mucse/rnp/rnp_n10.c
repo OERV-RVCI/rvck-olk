@@ -1527,6 +1527,9 @@ static void rnp_set_mac_rx_hw_ops_n10(struct rnp_hw *hw, bool status)
 	struct rnp_mac_info *mac = &hw->mac;
 	struct rnp_eth_info *eth = &hw->eth;
 
+	if (pci_channel_offline(hw->pdev))
+		return;
+
 	if (status) {
 		eth_wr32(eth, RNP10_ETH_RX_PROGFULL_THRESH_PORT,
 			 RECEIVE_ALL_THRESH);
@@ -2149,11 +2152,19 @@ rnp_update_hw_status_hw_ops_n10(struct rnp_hw *hw,
 		mac_rd32(mac, RNP10_MAC_STATS_BROADCAST_LOW);
 	hw_stats->mac_rx_broadcast +=
 		((u64)mac_rd32(mac, RNP10_MAC_STATS_BROADCAST_HIGH) << 32);
-
 	hw_stats->mac_rx_multicast =
 		mac_rd32(mac, RNP10_MAC_STATS_MULTICAST_LOW);
 	hw_stats->mac_rx_multicast +=
 		((u64)mac_rd32(mac, RNP10_MAC_STATS_MULTICAST_HIGH) << 32);
+	hw_stats->mac_rx_pause_count =
+		mac_rd32(mac, RNP10_MAC_STATS_RX_PAUSE_COUNT_LOW);
+	hw_stats->mac_rx_pause_count +=
+		((u64)mac_rd32(mac, RNP10_MAC_STATS_RX_PAUSE_COUNT_HIGH) << 32);
+	hw_stats->mac_tx_pause_count =
+		mac_rd32(mac, RNP10_MAC_STATS_TX_PAUSE_COUNT_LOW);
+	hw_stats->mac_tx_pause_count +=
+		((u64)mac_rd32(mac, RNP10_MAC_STATS_TX_PAUSE_COUNT_HIGH) << 32);
+
 }
 
 enum n10_priv_bits {
@@ -2240,6 +2251,8 @@ static struct rnp_stats rnp10_hwstrings_stats[] = {
 	RNP_HW_STAT("rx_csum_offload_good", hw_csum_rx_good),
 	RNP_HW_STAT("rx_broadcast_count", hw_stats.mac_rx_broadcast),
 	RNP_HW_STAT("rx_multicast_count", hw_stats.mac_rx_multicast),
+	RNP_HW_STAT("mac_rx_pause_count", hw_stats.mac_rx_pause_count),
+	RNP_HW_STAT("mac_tx_pause_count", hw_stats.mac_tx_pause_count),
 
 };
 
@@ -3903,7 +3916,9 @@ static const struct ethtool_ops rnp10_ethtool_ops = {
 	.get_ethtool_stats = rnp10_get_ethtool_stats,
 	.get_coalesce = rnp_get_coalesce,
 	.set_coalesce = rnp_set_coalesce,
-	.supported_coalesce_params = ETHTOOL_COALESCE_USECS,
+	.supported_coalesce_params = ETHTOOL_COALESCE_USECS |
+				     ETHTOOL_COALESCE_MAX_FRAMES_IRQ |
+				     ETHTOOL_COALESCE_MAX_FRAMES,
 	.get_rxnfc = rnp_get_rxnfc,
 	.set_rxnfc = rnp_set_rxnfc,
 	.get_channels = rnp_get_channels,
@@ -4054,6 +4069,9 @@ static void rnp_mac_set_rx_n10(struct rnp_mac_info *mac, bool status)
 	struct rnp_adapter *adapter = (struct rnp_adapter *)hw->back;
 	u32 value = 0;
 	u32 count = 0;
+
+	if (pci_channel_offline(hw->pdev))
+		return;
 
 	if (status) {
 		do {
