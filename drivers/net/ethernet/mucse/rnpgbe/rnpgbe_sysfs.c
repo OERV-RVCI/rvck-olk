@@ -7,7 +7,6 @@
 #include <linux/kobject.h>
 #include <linux/device.h>
 #include <linux/netdevice.h>
-#include <linux/hwmon.h>
 #include <linux/ctype.h>
 
 #include "rnpgbe.h"
@@ -15,6 +14,10 @@
 #include "rnpgbe_type.h"
 #include "rnpgbe_mbx.h"
 #include "rnpgbe_mbx_fw.h"
+
+#ifdef RNPGBE_HWMON
+#include <linux/hwmon.h>
+#endif /* RNPGBE_HWMON */
 
 struct maintain_req {
 	int magic;
@@ -58,7 +61,7 @@ static int print_desc(char *buf, void *data, int len)
 	return ret;
 }
 
-#ifdef RNP_HWMON
+#ifdef RNPGBE_HWMON
 static ssize_t rnpgbe_hwmon_show_location(struct device __always_unused *dev,
 					  struct device_attribute *attr,
 					  char *buf)
@@ -140,26 +143,26 @@ static int rnpgbe_add_hwmon_attr(struct rnpgbe_adapter *adapter,
 	rnpgbe_attr = &adapter->rnpgbe_hwmon_buff->hwmon_list[n_attr];
 
 	switch (type) {
-	case RNP_HWMON_TYPE_LOC:
+	case RNPGBE_HWMON_TYPE_LOC:
 		rnpgbe_attr->dev_attr.show = rnpgbe_hwmon_show_location;
 		snprintf(rnpgbe_attr->name, sizeof(rnpgbe_attr->name),
 			 "temp%u_label", offset + 1);
 		break;
-	case RNP_HWMON_TYPE_NAME:
+	case RNPGBE_HWMON_TYPE_NAME:
 		rnpgbe_attr->dev_attr.show = rnpgbe_hwmon_show_name;
 		snprintf(rnpgbe_attr->name, sizeof(rnpgbe_attr->name), "name");
 		break;
-	case RNP_HWMON_TYPE_TEMP:
+	case RNPGBE_HWMON_TYPE_TEMP:
 		rnpgbe_attr->dev_attr.show = rnpgbe_hwmon_show_temp;
 		snprintf(rnpgbe_attr->name, sizeof(rnpgbe_attr->name),
 			 "temp%u_input", offset + 1);
 		break;
-	case RNP_HWMON_TYPE_CAUTION:
+	case RNPGBE_HWMON_TYPE_CAUTION:
 		rnpgbe_attr->dev_attr.show = rnpgbe_hwmon_show_cautionthresh;
 		snprintf(rnpgbe_attr->name, sizeof(rnpgbe_attr->name),
 			 "temp%u_max", offset + 1);
 		break;
-	case RNP_HWMON_TYPE_MAX:
+	case RNPGBE_HWMON_TYPE_MAX:
 		rnpgbe_attr->dev_attr.show = rnpgbe_hwmon_show_maxopthresh;
 		snprintf(rnpgbe_attr->name, sizeof(rnpgbe_attr->name),
 			 "temp%u_crit", offset + 1);
@@ -183,7 +186,7 @@ static int rnpgbe_add_hwmon_attr(struct rnpgbe_adapter *adapter,
 
 	return 0;
 }
-#endif /* RNP_HWMON */
+#endif /* RNPGBE_HWMON */
 
 #define to_net_device(n) container_of(n, struct net_device, dev)
 static ssize_t maintain_read(struct file *filp, struct kobject *kobj,
@@ -367,6 +370,9 @@ static ssize_t rx_desc_info_show(struct device *dev,
 	int ret = 0;
 	union rnpgbe_rx_desc *desc;
 
+	if (test_bit(__RNP_DOWN, &adapter->state))
+		return ret;
+
 	desc = RNP_RX_DESC(ring, rx_desc_num);
 	ret += sprintf(buf + ret, "rx ring %d desc %d:\n", rx_ring_num,
 		       rx_desc_num);
@@ -388,6 +394,9 @@ static ssize_t rx_desc_info_store(struct device *dev,
 	u32 rx_ring_num = adapter->sysfs_rx_ring_num;
 
 	struct rnpgbe_ring *ring = adapter->rx_ring[rx_ring_num];
+
+	if (test_bit(__RNP_DOWN, &adapter->state))
+		return ret;
 
 	if (kstrtou32(buf, 0, &rx_desc_num) != 0)
 		return -EINVAL;
@@ -648,6 +657,9 @@ static ssize_t tx_desc_info_show(struct device *dev,
 	int ret = 0;
 	struct rnpgbe_tx_desc *desc;
 
+	if (test_bit(__RNP_DOWN, &adapter->state))
+		return ret;
+
 	desc = RNP_TX_DESC(ring, tx_desc_num);
 	ret += sprintf(buf + ret, "tx ring %d desc %d:\n", tx_ring_num,
 		       tx_desc_num);
@@ -664,11 +676,12 @@ static ssize_t tx_desc_info_store(struct device *dev,
 	struct net_device *netdev = to_net_device(dev);
 	struct rnpgbe_adapter *adapter = netdev_priv(netdev);
 	int ret = count;
-
 	u32 tx_desc_num = adapter->sysfs_tx_desc_num;
 	u32 tx_ring_num = adapter->sysfs_tx_ring_num;
-
 	struct rnpgbe_ring *ring = adapter->tx_ring[tx_ring_num];
+
+	if (test_bit(__RNP_DOWN, &adapter->state))
+		return ret;
 
 	if (kstrtou32(buf, 0, &tx_desc_num) != 0)
 		return -EINVAL;
@@ -689,6 +702,9 @@ static ssize_t rx_ring_info_show(struct device *dev,
 	struct rnpgbe_ring *ring = adapter->rx_ring[rx_ring_num];
 	int ret = 0;
 	union rnpgbe_rx_desc *rx_desc;
+
+	if (test_bit(__RNP_DOWN, &adapter->state))
+		return ret;
 
 	ret += sprintf(buf + ret, "queue %d info:\n", rx_ring_num);
 
@@ -712,6 +728,9 @@ static ssize_t rx_ring_info_store(struct device *dev,
 	int ret = count;
 
 	u32 rx_ring_num = adapter->sysfs_rx_ring_num;
+
+	if (test_bit(__RNP_DOWN, &adapter->state))
+		return ret;
 
 	if (kstrtou32(buf, 0, &rx_ring_num) != 0)
 		return -EINVAL;
@@ -831,6 +850,9 @@ static ssize_t tx_ring_info_show(struct device *dev,
 	struct rnpgbe_tx_buffer *tx_buffer;
 	struct rnpgbe_tx_desc *eop_desc;
 
+	if (test_bit(__RNP_DOWN, &adapter->state))
+		return ret;
+
 	ret += sprintf(buf + ret, "queue %d info:\n", tx_ring_num);
 	ret += sprintf(buf + ret, "next_to_use %d\n", ring->next_to_use);
 	ret += sprintf(buf + ret, "next_to_clean %d\n", ring->next_to_clean);
@@ -858,6 +880,9 @@ static ssize_t tx_ring_info_store(struct device *dev,
 	int ret = count;
 
 	u32 tx_ring_num = adapter->sysfs_tx_ring_num;
+
+	if (test_bit(__RNP_DOWN, &adapter->state))
+		return ret;
 
 	if (kstrtou32(buf, 0, &tx_ring_num) != 0)
 		return -EINVAL;
@@ -1092,27 +1117,31 @@ static DEVICE_ATTR_RO(rx_skip_info);
 static DEVICE_ATTR_RW(tx_stags_info);
 static DEVICE_ATTR_RW(gephy_test_info);
 
-static struct attribute *dev_attrs[] = {
-	&dev_attr_tx_stags_info.attr,
-	&dev_attr_gephy_test_info.attr,
-	&dev_attr_root_slot_info.attr,
-	&dev_attr_active_vid.attr,
-	&dev_attr_queue_mapping.attr,
+static struct attribute *vendor_dev_attrs[] = {
+	&dev_attr_pci.attr,
+	&dev_attr_temperature.attr,
+	&dev_attr_tx_ring_info.attr,
+	&dev_attr_rx_ring_info.attr,
+	&dev_attr_tx_desc_info.attr,
+	&dev_attr_rx_desc_info.attr,
+	&dev_attr_tcp_sync_info.attr,
 	&dev_attr_rx_drop_info.attr,
 	&dev_attr_outer_vlan_info.attr,
-	&dev_attr_tcp_sync_info.attr,
 	&dev_attr_rx_skip_info.attr,
-	&dev_attr_tx_ring_info.attr,
 	&dev_attr_mii_info.attr,
 	&dev_attr_mii_control_info.attr,
 	&dev_attr_mii_reg_info.attr,
 	&dev_attr_mii_value_info.attr,
-	&dev_attr_rx_ring_info.attr,
-	&dev_attr_tx_desc_info.attr,
-	&dev_attr_rx_desc_info.attr,
+	&dev_attr_gephy_test_info.attr,
+	&dev_attr_tx_stags_info.attr,
+	NULL,
+};
+
+static struct attribute *dev_attrs[] = {
+	&dev_attr_root_slot_info.attr,
+	&dev_attr_active_vid.attr,
+	&dev_attr_queue_mapping.attr,
 	&dev_attr_port_idx.attr,
-	&dev_attr_temperature.attr,
-	&dev_attr_pci.attr,
 	NULL,
 };
 
@@ -1126,6 +1155,17 @@ static struct attribute_group dev_attr_grp = {
 	.bin_attrs = dev_bin_attrs,
 };
 
+static const struct attribute_group vendor_attr_grp = {
+	.name = "vendor",
+	.attrs = vendor_dev_attrs,
+};
+
+static const struct attribute_group *attr_grps[] = {
+	&dev_attr_grp,
+	&vendor_attr_grp,
+	NULL,
+};
+
 static void
 rnpgbe_sysfs_del_adapter(struct rnpgbe_adapter __maybe_unused *adapter)
 {
@@ -1135,7 +1175,7 @@ rnpgbe_sysfs_del_adapter(struct rnpgbe_adapter __maybe_unused *adapter)
 void rnpgbe_sysfs_exit(struct rnpgbe_adapter *adapter)
 {
 	rnpgbe_sysfs_del_adapter(adapter);
-	sysfs_remove_group(&adapter->netdev->dev.kobj, &dev_attr_grp);
+	sysfs_remove_groups(&adapter->netdev->dev.kobj, &attr_grps[0]);
 
 	kfree(adapter->maintain_buf);
 	adapter->maintain_buf = NULL;
@@ -1147,19 +1187,19 @@ int rnpgbe_sysfs_init(struct rnpgbe_adapter *adapter)
 {
 	int rc = 0;
 	int flag;
-#ifdef RNP_HWMON
+#ifdef RNPGBE_HWMON
 	struct hwmon_buff *rnpgbe_hwmon;
 	struct device *hwmon_dev;
 	unsigned int i;
-#endif /* RNP_HWMON */
+#endif /* RNPGBE_HWMON */
 
-	flag = sysfs_create_group(&adapter->netdev->dev.kobj, &dev_attr_grp);
+	flag = sysfs_create_groups(&adapter->netdev->dev.kobj, &attr_grps[0]);
 	if (flag != 0) {
 		dev_err(&adapter->netdev->dev,
 			"sysfs_create_group failed:flag:%d\n", flag);
 		return flag;
 	}
-#ifdef RNP_HWMON
+#ifdef RNPGBE_HWMON
 	/* If this method isn't defined we don't support thermals */
 	if (!adapter->hw.ops.init_thermal_sensor_thresh)
 		goto no_thermal;
@@ -1186,16 +1226,16 @@ int rnpgbe_sysfs_init(struct rnpgbe_adapter *adapter)
 			continue;
 
 		/* Bail if any hwmon attr struct fails to initialize */
-		rc = rnpgbe_add_hwmon_attr(adapter, i, RNP_HWMON_TYPE_CAUTION);
+		rc = rnpgbe_add_hwmon_attr(adapter, i, RNPGBE_HWMON_TYPE_CAUTION);
 		if (rc)
 			goto err;
-		rc = rnpgbe_add_hwmon_attr(adapter, i, RNP_HWMON_TYPE_LOC);
+		rc = rnpgbe_add_hwmon_attr(adapter, i, RNPGBE_HWMON_TYPE_LOC);
 		if (rc)
 			goto err;
-		rc = rnpgbe_add_hwmon_attr(adapter, i, RNP_HWMON_TYPE_TEMP);
+		rc = rnpgbe_add_hwmon_attr(adapter, i, RNPGBE_HWMON_TYPE_TEMP);
 		if (rc)
 			goto err;
-		rc = rnpgbe_add_hwmon_attr(adapter, i, RNP_HWMON_TYPE_MAX);
+		rc = rnpgbe_add_hwmon_attr(adapter, i, RNPGBE_HWMON_TYPE_MAX);
 		if (rc)
 			goto err;
 	}
@@ -1212,7 +1252,7 @@ int rnpgbe_sysfs_init(struct rnpgbe_adapter *adapter)
 	}
 
 no_thermal:
-#endif /* RNP_HWMON */
+#endif /* RNPGBE_HWMON */
 	goto exit;
 
 err:

@@ -23,9 +23,9 @@
 #endif /* IS_ENABLED(CONFIG_SYSFS) */
 
 #if IS_ENABLED(CONFIG_HWMON)
-#ifndef RNP_HWMON
-#define RNP_HWMON
-#endif /* RNP_HWMON */
+#ifndef RNPGBE_HWMON
+#define RNPGBE_HWMON
+#endif /* RNPGBE_HWMON */
 #endif /* CONFIG_HWMON */
 
 #if (PAGE_SIZE < 8192)
