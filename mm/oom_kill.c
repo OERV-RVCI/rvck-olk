@@ -46,6 +46,7 @@
 #include <linux/mmu_notifier.h>
 #include <linux/nmi.h>
 #include <linux/cred.h>
+#include <linux/nmi.h>
 
 #include <asm/tlb.h>
 #include "internal.h"
