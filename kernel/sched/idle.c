@@ -7,6 +7,10 @@
  *        tasks which are handled in sched/fair.c )
  */
 
+#ifdef CONFIG_HISI_VIRTCCA_GUEST
+#include <linux/virtcca_cvm_sched.h>
+#endif
+
 /* Linker adds these: start and end of __cpuidle functions */
 extern char __cpuidle_text_start[], __cpuidle_text_end[];
 
@@ -229,6 +233,36 @@ exit_idle:
 		local_irq_enable();
 }
 
+#ifdef CONFIG_HISI_VIRTCCA_GUEST
+static noinline int virtcca_cvm_cpu_idle_poll(void)
+{
+	unsigned int cpu = smp_processor_id();
+
+	if (!virtcca_cvm_domain() || !virtcca_spin_cpumask_test_cpu(cpu))
+		return 0;
+
+	trace_cpu_idle(0, smp_processor_id());
+	stop_critical_timings();
+	ct_cpuidle_enter();
+
+	virtcca_set_park_idle_state(cpu, CVM_PARK_IDLE);
+	raw_local_irq_enable();
+	while (!tif_need_resched() && !is_virtcca_unpark_idle_notify_set(cpu))
+		cpu_relax();
+
+	raw_local_irq_disable();
+	virtcca_clear_unpark_idle_notify(cpu);
+	virtcca_set_park_idle_state(cpu, CVM_PARK_RUNNING);
+
+	ct_cpuidle_exit();
+	start_critical_timings();
+	trace_cpu_idle(PWR_EVENT_EXIT, smp_processor_id());
+	local_irq_enable();
+
+	return 1;
+}
+#endif
+
 /*
  * Generic idle loop implementation
  *
@@ -269,6 +303,12 @@ static void do_idle(void)
 		arch_cpu_idle_enter();
 		rcu_nocb_flush_deferred_wakeup();
 
+#ifdef CONFIG_HISI_VIRTCCA_GUEST
+		if (virtcca_cvm_cpu_idle_poll()) {
+			arch_cpu_idle_exit();
+			break;
+		}
+#endif
 		/*
 		 * In poll mode we reenable interrupts and spin. Also if we
 		 * detected in the wakeup from idle path that the tick

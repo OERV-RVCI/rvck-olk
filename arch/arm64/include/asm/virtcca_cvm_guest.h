@@ -8,6 +8,9 @@
 #ifdef CONFIG_HISI_VIRTCCA_GUEST
 struct device;
 
+DECLARE_PER_CPU(unsigned int, virtcca_unpark_idle_notify);
+DECLARE_PER_CPU(unsigned int, virtcca_park_idle_state);
+
 extern int set_cvm_memory_encrypted(unsigned long addr, int numpages);
 
 extern int set_cvm_memory_decrypted(unsigned long addr, int numpages);

@@ -34,6 +34,9 @@
 #include <linux/kexec.h>
 #include <linux/crash_dump.h>
 #include <linux/kvm_host.h>
+#ifdef CONFIG_HISI_VIRTCCA_GUEST
+#include <linux/virtcca_cvm_sched.h>
+#endif
 
 #include <asm/alternative.h>
 #include <asm/atomic.h>
@@ -830,8 +833,24 @@ void arch_send_call_function_ipi_mask(const struct cpumask *mask)
 	smp_cross_call(mask, IPI_CALL_FUNC);
 }
 
+#ifdef CONFIG_HISI_VIRTCCA_GUEST
+static void cvm_send_call_function_single_ipi(int cpu, int ipi_type)
+{
+	if (virtcca_spin_cpumask_test_cpu(cpu) && is_cvm_in_park_idle_state(cpu))
+		virtcca_set_unpark_idle_notify(cpu);
+	else
+		smp_cross_call(cpumask_of(cpu), ipi_type);
+}
+#endif
+
 void arch_send_call_function_single_ipi(int cpu)
 {
+#ifdef CONFIG_HISI_VIRTCCA_GUEST
+	if (virtcca_cvm_domain()) {
+		cvm_send_call_function_single_ipi(cpu, IPI_CALL_FUNC);
+		return;
+	}
+#endif
 	smp_cross_call(cpumask_of(cpu), IPI_CALL_FUNC);
 }
 
@@ -1027,6 +1046,12 @@ void __init set_smp_ipi_range(int ipi_base, int n)
 
 void arch_smp_send_reschedule(int cpu)
 {
+#ifdef CONFIG_HISI_VIRTCCA_GUEST
+	if (virtcca_cvm_domain()) {
+		cvm_send_call_function_single_ipi(cpu, IPI_RESCHEDULE);
+		return;
+	}
+#endif
 	smp_cross_call(cpumask_of(cpu), IPI_RESCHEDULE);
 }
 
