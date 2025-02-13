@@ -369,9 +369,8 @@ static int vf_qm_check_match(struct hisi_acc_vf_core_device *hisi_acc_vdev,
 	if (hisi_acc_vdev->match_done)
 		return 0;
 
-	/* Transmission not completed yet */
 	if (migf->total_length < QM_MATCH_SIZE)
-		return 0;
+		return -EINVAL;
 
 	if (vf_data->acc_magic != ACC_DEV_MAGIC) {
 		dev_err(dev, "failed to match ACC_DEV_MAGIC\n");
@@ -486,12 +485,6 @@ static int vf_qm_load_data(struct hisi_acc_vf_core_device *hisi_acc_vdev,
 
 	qm->qp_base = vf_data->qp_base;
 	qm->qp_num = vf_data->qp_num;
-
-	if (!vf_data->eqe_dma || !vf_data->aeqe_dma ||
-		!vf_data->sqc_dma || !vf_data->cqc_dma) {
-		dev_err(dev, "resume dma addr is NULL!\n");
-		return -EINVAL;
-	}
 
 	ret = qm_set_regs(qm, vf_data);
 	if (ret) {
@@ -1472,12 +1465,6 @@ static int acc_vf_debug_resume(struct hisi_acc_vf_core_device *hisi_acc_vdev)
 	struct device *dev = &hisi_acc_vdev->vf_dev->dev;
 	int ret;
 
-	ret = vf_qm_get_match_data(hisi_acc_vdev, &migf->vf_data);
-	if (ret) {
-		dev_err(dev, "failed to save match data!\n");
-		return -EINVAL;
-	}
-
 	ret = vf_qm_state_save(hisi_acc_vdev, migf);
 	if (ret) {
 		dev_err(dev, "failed to save device data!\n");
@@ -1595,14 +1582,6 @@ static ssize_t acc_vf_state_read(struct file *filp, char __user *buffer,
 	case VFIO_DEVICE_STATE_STOP_COPY:
 		len = scnprintf(buf, VFIO_DEV_DBG_LEN, "%s\n",
 			"STOP and COPYING\n");
-		break;
-	case VFIO_DEVICE_STATE_PRE_COPY:
-		len = scnprintf(buf, VFIO_DEV_DBG_LEN, "%s\n",
-			"Prepare COPYING\n");
-		break;
-	case VFIO_DEVICE_STATE_PRE_COPY_P2P:
-		len = scnprintf(buf, VFIO_DEV_DBG_LEN, "%s\n",
-			"Prepare P2P COPYING\n");
 		break;
 	case VFIO_DEVICE_STATE_STOP:
 		len = scnprintf(buf, VFIO_DEV_DBG_LEN, "%s\n",
