@@ -3151,7 +3151,7 @@ static void decode_umc_error(int node_id, struct mce *m)
 	pvt->ops->get_err_info(m, &err);
 
 	if (hygon_f18h_m4h() || boot_cpu_data.x86_model == 0x10) {
-		if (boot_cpu_data.x86_model == 0x6)
+		if (boot_cpu_data.x86_model >= 0x6)
 			umc = (err.channel << 1) + ((m->ipid & BIT(13)) >> 13);
 		else
 			umc = err.channel;
