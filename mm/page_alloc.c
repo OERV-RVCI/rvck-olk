@@ -2591,7 +2591,6 @@ void free_unref_folios(struct folio_batch *folios)
 			continue;
 		}
 
-		folio_undo_large_rmappable(folio);
 		if (!free_unref_page_prepare(&folio->page, pfn, order))
 			continue;
 
