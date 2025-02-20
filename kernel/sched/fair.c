@@ -9566,10 +9566,7 @@ unthrottle_throttle:
 static int __unthrottle_qos_cfs_rqs(int cpu)
 {
 	struct cfs_rq *cfs_rq, *tmp_rq;
-	int all_is_runnable = 1;
-
-	if (list_empty(&per_cpu(qos_throttled_cfs_rq, cpu)))
-		return 0;
+	int cfs_bandwidth_throttle = 0;
 
 	list_for_each_entry_safe(cfs_rq, tmp_rq, &per_cpu(qos_throttled_cfs_rq, cpu),
 				 qos_throttled_list) {
@@ -9578,22 +9575,21 @@ static int __unthrottle_qos_cfs_rqs(int cpu)
 		}
 
 		if (throttled_hierarchy(cfs_rq))
-			all_is_runnable = 0;
+			cfs_bandwidth_throttle = 1;
 	}
 
-	return all_is_runnable;
+	return cfs_bandwidth_throttle;
 }
 
 static int unthrottle_qos_cfs_rqs(int cpu)
 {
-	int res;
-	res = __unthrottle_qos_cfs_rqs(cpu);
+	int throttled = __unthrottle_qos_cfs_rqs(cpu);
 
 	/*
 	 * We should not cancel the timer if there is still a cfs_rq
 	 * throttling after __unthrottle_qos_cfs_rqs().
 	 */
-	if (res && qos_timer_is_activated(cpu) && !qos_smt_expelled(cpu))
+	if (qos_timer_is_activated(cpu) && !(qos_smt_expelled(cpu) || throttled))
 		cancel_qos_timer(cpu);
 
 	return cpu_rq(cpu)->cfs.h_nr_running;
