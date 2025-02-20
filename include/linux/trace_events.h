@@ -280,10 +280,10 @@ struct trace_event_fields {
 			const char *name;
 			const int  size;
 			const int  align;
-			const unsigned int is_signed:1;
-			unsigned int needs_test:1;
+			const int  is_signed;
 			const int  filter_type;
 			const int  len;
+			KABI_FILL_HOLE(unsigned int needs_test:1)
 		};
 		int (*define_fields)(struct trace_event_call *);
 	};
