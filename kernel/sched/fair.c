@@ -6692,6 +6692,10 @@ static void __maybe_unused unthrottle_offline_cfs_rqs(struct rq *rq)
 
 	lockdep_assert_rq_held(rq);
 
+	// Do not unthrottle for an active CPU
+	if (cpumask_test_cpu(cpu_of(rq), cpu_active_mask))
+		return;
+
 	/*
 	 * The rq clock has already been updated in the
 	 * set_rq_offline(), so we should skip updating
@@ -6710,18 +6714,20 @@ static void __maybe_unused unthrottle_offline_cfs_rqs(struct rq *rq)
 			continue;
 
 		/*
-		 * clock_task is not advancing so we just need to make sure
-		 * there's some valid quota amount
-		 */
-		cfs_rq->runtime_remaining = 1;
-		/*
 		 * Offline rq is schedulable till CPU is completely disabled
 		 * in take_cpu_down(), so we prevent new cfs throttling here.
 		 */
 		cfs_rq->runtime_enabled = 0;
 
-		if (cfs_rq_throttled(cfs_rq))
-			unthrottle_cfs_rq(cfs_rq);
+		if (!cfs_rq_throttled(cfs_rq))
+			continue;
+
+		/*
+		 * clock_task is not advancing so we just need to make sure
+		 * there's some valid quota amount
+		 */
+		cfs_rq->runtime_remaining = 1;
+		unthrottle_cfs_rq(cfs_rq);
 	}
 	rcu_read_unlock();
 
@@ -9566,27 +9572,33 @@ unthrottle_throttle:
 static int __unthrottle_qos_cfs_rqs(int cpu)
 {
 	struct cfs_rq *cfs_rq, *tmp_rq;
-	int res = 0;
+	int cfs_bandwidth_throttle = 0;
 
 	list_for_each_entry_safe(cfs_rq, tmp_rq, &per_cpu(qos_throttled_cfs_rq, cpu),
 				 qos_throttled_list) {
 		if (cfs_rq_throttled(cfs_rq)) {
 			unthrottle_qos_cfs_rq(cfs_rq);
-			res++;
 		}
+
+		if (throttled_hierarchy(cfs_rq))
+			cfs_bandwidth_throttle = 1;
 	}
 
-	return res;
+	return cfs_bandwidth_throttle;
 }
 
 static int unthrottle_qos_cfs_rqs(int cpu)
 {
-	int res;
-	res = __unthrottle_qos_cfs_rqs(cpu);
+	int throttled = __unthrottle_qos_cfs_rqs(cpu);
 
-	if (qos_timer_is_activated(cpu) && !qos_smt_expelled(cpu))
+	/*
+	 * We should not cancel the timer if there is still a cfs_rq
+	 * throttling after __unthrottle_qos_cfs_rqs().
+	 */
+	if (qos_timer_is_activated(cpu) && !(qos_smt_expelled(cpu) || throttled))
 		cancel_qos_timer(cpu);
-	return res;
+
+	return cpu_rq(cpu)->cfs.h_nr_running;
 }
 
 static bool check_qos_cfs_rq(struct cfs_rq *cfs_rq)
