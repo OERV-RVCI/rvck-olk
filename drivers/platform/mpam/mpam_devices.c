@@ -915,6 +915,12 @@ static u64 mpam_msmon_overflow_val(struct mpam_msc_ris *ris)
 		return GENMASK_ULL(30, 0);
 }
 
+static const struct midr_range mbwu_flowrate_list[] = {
+	MIDR_ALL_VERSIONS(MIDR_HISI_TSV110),
+	MIDR_ALL_VERSIONS(MIDR_HISI_LINXICORE9100),
+	{ /* sentinel */ }
+};
+
 static void __ris_msmon_read(void *arg)
 {
 	bool nrdy = false;
@@ -936,6 +942,9 @@ static void __ris_msmon_read(void *arg)
 		  FIELD_PREP(MSMON_CFG_MON_SEL_RIS, ris->ris_idx);
 	mpam_write_monsel_reg(msc, CFG_MON_SEL, mon_sel);
 
+	/* Selects a monitor instance to configure PARTID. */
+	wmb();
+
 	if (m->type == mpam_feat_msmon_mbwu) {
 		mbwu_state = &ris->mbwu_state[ctx->mon];
 		if (mbwu_state) {
@@ -955,6 +964,12 @@ static void __ris_msmon_read(void *arg)
 
 	if (config_mismatch || reset_on_next_read)
 		write_msmon_ctl_flt_vals(m, ctl_val, flt_val);
+
+	/*
+	 * Selects the monitor instance associated to the specified PARTID
+	 * to read counter value.
+	 */
+	wmb();
 
 	switch (m->type) {
 	case mpam_feat_msmon_csu:
@@ -985,6 +1000,18 @@ static void __ris_msmon_read(void *arg)
 
 		if (!mbwu_state)
 			break;
+
+		/*
+		 * Following the definition of the DDI0598 version,
+		 * the value field of MPAM Memory Bandwidth Usage Monitor Register
+		 * indicates the memory bandwidth usage in bytes per second,
+		 * instead the scaled count of bytes transferred since the monitor
+		 * was last reset in the latest version (DDI0598D_b).
+		 */
+		if (ris->comp->class->type == MPAM_CLASS_MEMORY) {
+			if (is_midr_in_range_list(read_cpuid_id(), mbwu_flowrate_list))
+				break;
+		}
 
 		/* Add any pre-overflow value to the mbwu_state->val */
 		if (mbwu_state->prev_val > now)
@@ -1229,7 +1256,7 @@ struct reprogram_ris {
 /* Call with MSC lock held */
 static int mpam_reprogram_ris(void *_arg)
 {
-	u16 partid, partid_max;
+	u16 partid, num_partid;
 	struct reprogram_ris *arg = _arg;
 	struct mpam_msc_ris *ris = arg->ris;
 	struct mpam_config *cfg = arg->cfg;
@@ -1238,9 +1265,9 @@ static int mpam_reprogram_ris(void *_arg)
 		return 0;
 
 	spin_lock(&partid_max_lock);
-	partid_max = mpam_partid_max;
+	num_partid = resctrl_arch_get_num_closid(NULL);
 	spin_unlock(&partid_max_lock);
-	for (partid = 0; partid < partid_max; partid++)
+	for (partid = 0; partid < num_partid; partid++)
 		mpam_reprogram_ris_partid(ris, partid, cfg);
 
 	return 0;
@@ -1396,7 +1423,7 @@ static void mpam_reprogram_msc(struct mpam_msc *msc)
 		}
 
 		reset = true;
-		for (partid = 0; partid < mpam_partid_max; partid++) {
+		for (partid = 0; partid < resctrl_arch_get_num_closid(NULL); partid++) {
 			cfg = &ris->comp->cfg[partid];
 			if (cfg->features)
 				reset = false;
@@ -2099,7 +2126,8 @@ static int __allocate_component_cfg(struct mpam_component *comp)
 	if (comp->cfg)
 		return 0;
 
-	comp->cfg = kcalloc(mpam_partid_max, sizeof(*comp->cfg), GFP_KERNEL);
+	comp->cfg = kcalloc(resctrl_arch_get_num_closid(NULL),
+			    sizeof(*comp->cfg), GFP_KERNEL);
 	if (!comp->cfg)
 		return -ENOMEM;
 
@@ -2211,7 +2239,7 @@ void mpam_reset_class(struct mpam_class *class)
 
 	idx = srcu_read_lock(&mpam_srcu);
 	list_for_each_entry_rcu(comp, &class->components, class_list) {
-		memset(comp->cfg, 0, (mpam_partid_max * sizeof(*comp->cfg)));
+		memset(comp->cfg, 0, resctrl_arch_get_num_closid(NULL) * sizeof(*comp->cfg));
 
 		list_for_each_entry_rcu(ris, &comp->ris, comp_list) {
 			mutex_lock(&ris->msc->lock);

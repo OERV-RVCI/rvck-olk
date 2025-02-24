@@ -336,8 +336,10 @@ int resctrl_arch_rmid_read(struct rdt_resource	*r, struct rdt_domain *d,
 {
 	int err;
 	u64 cdp_val;
+	u16 num_mbwu_mon;
 	struct mon_cfg cfg;
 	struct mpam_resctrl_dom *dom;
+	struct mpam_resctrl_res *res;
 	u32 mon = *(u32 *)arch_mon_ctx;
 	enum mpam_device_features type;
 
@@ -358,8 +360,16 @@ int resctrl_arch_rmid_read(struct rdt_resource	*r, struct rdt_domain *d,
 	}
 
 	cfg.mon = mon;
-	if (cfg.mon == USE_RMID_IDX)
-		cfg.mon = resctrl_arch_rmid_idx_encode(closid, rmid);
+	if (cfg.mon == USE_RMID_IDX) {
+		/*
+		 * The number of mbwu monitors can't support free run mode,
+		 * adapt the remainder of rmid to the num_mbwu_mon as a
+		 * compromise.
+		 */
+		res = container_of(r, struct mpam_resctrl_res, resctrl_res);
+		num_mbwu_mon = res->class->props.num_mbwu_mon;
+		cfg.mon = resctrl_arch_rmid_idx_encode(closid, rmid) % num_mbwu_mon;
+	}
 
 	cfg.match_pmg = true;
 	cfg.pmg = rmid;
@@ -386,13 +396,17 @@ int resctrl_arch_rmid_read(struct rdt_resource	*r, struct rdt_domain *d,
 void resctrl_arch_reset_rmid(struct rdt_resource *r, struct rdt_domain *d,
 			     u32 closid, u32 rmid, enum resctrl_event_id eventid)
 {
+	u16 num_mbwu_mon;
 	struct mon_cfg cfg;
 	struct mpam_resctrl_dom *dom;
+	struct mpam_resctrl_res *res;
 
 	if (eventid != QOS_L3_MBM_LOCAL_EVENT_ID)
 		return;
 
-	cfg.mon = resctrl_arch_rmid_idx_encode(closid, rmid);
+	res = container_of(r, struct mpam_resctrl_res, resctrl_res);
+	num_mbwu_mon = res->class->props.num_mbwu_mon;
+	cfg.mon = resctrl_arch_rmid_idx_encode(closid, rmid) % num_mbwu_mon;
 	cfg.match_pmg = true;
 	cfg.pmg = rmid;
 
@@ -473,14 +487,6 @@ static bool class_has_usable_mbwu(struct mpam_class *class)
 	if (!mpam_has_feature(mpam_feat_msmon_mbwu, cprops))
 		return false;
 
-	/*
-	 * resctrl expects the bandwidth counters to be free running,
-	 * which means we need as many monitors as resctrl has
-	 * control/monitor groups.
-	 */
-	if (cprops->num_mbwu_mon < resctrl_arch_system_num_rmid_idx())
-		return false;
-
 	return (mpam_partid_max > 1) || (mpam_pmg_max != 0);
 }
 
@@ -513,7 +519,7 @@ static u32 get_mba_granularity(struct mpam_props *cprops)
 		 * bwa_wd is the number of bits implemented in the 0.xxx
 		 * fixed point fraction. 1 bit is 50%, 2 is 25% etc.
 		 */
-		return MAX_MBA_BW / (cprops->bwa_wd + 1);
+		return MAX_MBA_BW / (1 << cprops->bwa_wd);
 	}
 
 	return 0;
@@ -530,21 +536,31 @@ static u32 mbw_pbm_to_percent(unsigned long mbw_pbm, struct mpam_props *cprops)
 	return result;
 }
 
-static u32 mbw_max_to_percent(u16 mbw_max, struct mpam_props *cprops)
+static int get_wd_precision(u8 wd)
+{
+	int ret = (1 << wd) / MAX_MBA_BW;
+
+	if (!ret)
+		return 1;
+
+	return ret;
+}
+
+static u32 mbw_max_to_percent(u16 mbw_max, u8 wd)
 {
 	u8 bit;
-	u32 divisor = 2, value = 0;
+	u32 divisor = 2, value = 0, precision = get_wd_precision(wd);
 
 	for (bit = 15; bit; bit--) {
 		if (mbw_max & BIT(bit))
-			value += MAX_MBA_BW / divisor;
+			value += MAX_MBA_BW * precision / divisor;
 		divisor <<= 1;
 	}
 
-	return value;
+	return DIV_ROUND_UP(value, precision);
 }
 
-static u32 percent_to_mbw_pbm(u8 pc, struct mpam_props *cprops)
+static u32 percent_to_mbw_pbm(u32 pc, struct mpam_props *cprops)
 {
 	u32 granularity = get_mba_granularity(cprops);
 	u8 num_bits = pc / granularity;
@@ -556,26 +572,28 @@ static u32 percent_to_mbw_pbm(u8 pc, struct mpam_props *cprops)
 	return (1 << num_bits) - 1;
 }
 
-static u16 percent_to_mbw_max(u8 pc, struct mpam_props *cprops)
+static u16 percent_to_mbw_max(u32 pc, u8 wd)
 {
 	u8 bit;
-	u32 divisor = 2, value = 0;
+	u32 divisor = 2, value = 0, precision = get_wd_precision(wd);
 
-	if (WARN_ON_ONCE(cprops->bwa_wd > 15))
+	if (WARN_ON_ONCE(wd > 15))
 		return MAX_MBA_BW;
 
+	pc *= precision;
+
 	for (bit = 15; bit; bit--) {
-		if (pc >= MAX_MBA_BW / divisor) {
-			pc -= MAX_MBA_BW / divisor;
+		if (pc >= MAX_MBA_BW * precision / divisor) {
+			pc -= MAX_MBA_BW * precision / divisor;
 			value |= BIT(bit);
 		}
 		divisor <<= 1;
 
-		if (!pc || !(MAX_MBA_BW / divisor))
+		if (!pc || !(MAX_MBA_BW * precision / divisor))
 			break;
 	}
 
-	value &= GENMASK(15, 15 - cprops->bwa_wd);
+	value &= GENMASK(15, 15 - wd + 1);
 
 	return value;
 }
@@ -941,7 +959,7 @@ u32 resctrl_arch_get_config(struct rdt_resource *r, struct rdt_domain *d,
 		/* TODO: Scaling is not yet supported */
 		return mbw_pbm_to_percent(cfg->mbw_pbm, cprops);
 	case mpam_feat_mbw_max:
-		return mbw_max_to_percent(cfg->mbw_max, cprops);
+		return mbw_max_to_percent(cfg->mbw_max, cprops->bwa_wd);
 	default:
 		return -EINVAL;
 	}
@@ -983,7 +1001,7 @@ int resctrl_arch_update_one(struct rdt_resource *r, struct rdt_domain *d,
 			mpam_set_feature(mpam_feat_mbw_part, &cfg);
 			break;
 		} else if (mpam_has_feature(mpam_feat_mbw_max, cprops)) {
-			cfg.mbw_max = percent_to_mbw_max(cfg_val, cprops);
+			cfg.mbw_max = percent_to_mbw_max(cfg_val, cprops->bwa_wd);
 			mpam_set_feature(mpam_feat_mbw_max, &cfg);
 			break;
 		}
@@ -1194,6 +1212,65 @@ int mpam_resctrl_offline_cpu(unsigned int cpu)
 		resctrl_offline_domain(&res->resctrl_res, &dom->resctrl_dom);
 		list_del(&d->list);
 		kfree(dom);
+	}
+
+	return 0;
+}
+
+static struct mon_evt llc_occupancy_event = {
+	.name		= "llc_occupancy",
+	.evtid		= QOS_L3_OCCUP_EVENT_ID,
+};
+
+static struct mon_evt mbm_total_event = {
+	.name		= "mbm_total_bytes",
+	.evtid		= QOS_L3_MBM_TOTAL_EVENT_ID,
+};
+
+static struct mon_evt mbm_local_event = {
+	.name		= "mbm_local_bytes",
+	.evtid		= QOS_L3_MBM_LOCAL_EVENT_ID,
+};
+
+/*
+ * Initialize the event list for the resource.
+ *
+ * Note that MBM events are also part of RDT_RESOURCE_L3 resource
+ * because as per the SDM the total and local memory bandwidth
+ * are enumerated as part of L3 monitoring.
+ */
+static void l3_mon_evt_init(struct rdt_resource *r)
+{
+	INIT_LIST_HEAD(&r->evt_list);
+
+	if (!r->mon_capable)
+		return;
+
+	if (r->rid == RDT_RESOURCE_L3) {
+		if (resctrl_arch_is_llc_occupancy_enabled())
+			list_add_tail(&llc_occupancy_event.list, &r->evt_list);
+
+		if (resctrl_arch_is_mbm_local_enabled())
+			list_add_tail(&mbm_local_event.list, &r->evt_list);
+	}
+
+	if ((r->rid == RDT_RESOURCE_MBA) &&
+	     resctrl_arch_is_mbm_total_enabled())
+		list_add_tail(&mbm_total_event.list, &r->evt_list);
+}
+
+int resctrl_arch_mon_resource_init(void)
+{
+	l3_mon_evt_init(resctrl_arch_get_resource(RDT_RESOURCE_L3));
+	l3_mon_evt_init(resctrl_arch_get_resource(RDT_RESOURCE_MBA));
+
+	if (resctrl_arch_is_evt_configurable(QOS_L3_MBM_TOTAL_EVENT_ID)) {
+		mbm_total_event.configurable = true;
+		mbm_config_rftype_init("mbm_total_bytes_config");
+	}
+	if (resctrl_arch_is_evt_configurable(QOS_L3_MBM_LOCAL_EVENT_ID)) {
+		mbm_local_event.configurable = true;
+		mbm_config_rftype_init("mbm_local_bytes_config");
 	}
 
 	return 0;
