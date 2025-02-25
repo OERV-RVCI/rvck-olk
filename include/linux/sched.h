@@ -1833,9 +1833,9 @@ extern struct pid *cad_pid;
 #define PF_USED_MATH		0x00002000	/* If unset the fpu must be initialized before use */
 #define PF_USER_WORKER		0x00004000	/* Kernel thread cloned from userspace thread */
 #define PF_NOFREEZE		0x00008000	/* This thread should not be frozen */
-#define PF__HOLE__00010000	0x00010000
+#define PF_KCOMPACTD		0x00010000	/* I am kcompactd */
 #ifdef CONFIG_MEMORY_RELIABLE
-#define PF_RELIABLE		PF__HOLE__00010000	/* Allocate from reliable memory */
+#define PF_RELIABLE		PF_KCOMPACTD	/* Allocate from reliable memory */
 #else
 #define PF_RELIABLE		0x00000000
 #endif
