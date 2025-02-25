@@ -3552,6 +3552,11 @@ int cifs_mount_get_tcon(struct cifs_mount_ctx *mnt_ctx)
 	if ((cifs_sb->ctx->rsize == 0) ||
 	    (cifs_sb->ctx->rsize > server->ops->negotiate_rsize(tcon, ctx)))
 		cifs_sb->ctx->rsize = server->ops->negotiate_rsize(tcon, ctx);
+	if (cifs_sb->ctx->rsize == 0) {
+		cifs_dbg(VFS, "Negotiated rsize is 0, get connect failed\n");
+		rc = -EINVAL;
+		goto out;
+	}
 
 	/*
 	 * The cookie is initialized from volume info returned above.
