@@ -77,11 +77,9 @@ struct uprobe_task {
 	struct uprobe			*active_uprobe;
 	unsigned long			xol_vaddr;
 
-	struct arch_uprobe              *auprobe;
-
 	struct return_instance		*return_instances;
 	unsigned int			depth;
-	KABI_RESERVE(1)
+	KABI_USE(1, struct arch_uprobe	*auprobe)
 	KABI_RESERVE(2)
 	KABI_RESERVE(3)
 	KABI_RESERVE(4)
