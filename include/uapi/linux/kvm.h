@@ -1202,6 +1202,13 @@ struct kvm_ppc_resize_hpt {
 #define KVM_CAP_ARM_SUPPORTED_BLOCK_SIZES 229
 
 #define KVM_CAP_SEV_ES_GHCB 500
+#define KVM_CAP_HYGON_COCO_EXT 501
+/* support userspace to request firmware to build CSV3 guest's memory space */
+#define KVM_CAP_HYGON_COCO_EXT_CSV3_SET_PRIV_MEM  (1 << 0)
+/* support request to update CSV3 guest's memory region multiple times */
+#define KVM_CAP_HYGON_COCO_EXT_CSV3_MULT_LUP_DATA (1 << 1)
+/* support request to inject secret to CSV3 guest */
+#define KVM_CAP_HYGON_COCO_EXT_CSV3_INJ_SECRET    (1 << 2)
 
 #define KVM_CAP_ARM_VIRT_MSI_BYPASS 799
 
@@ -2376,6 +2383,8 @@ enum csv3_cmd_id {
 	KVM_CSV3_RECEIVE_ENCRYPT_DATA,
 	KVM_CSV3_RECEIVE_ENCRYPT_CONTEXT,
 	KVM_CSV3_HANDLE_MEMORY,
+
+	KVM_CSV3_SET_GUEST_PRIVATE_MEMORY = 0xc8,
 
 	KVM_CSV3_NR_MAX,
 };
