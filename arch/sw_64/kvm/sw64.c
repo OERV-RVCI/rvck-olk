@@ -22,8 +22,8 @@
 #include "irq.h"
 
 bool set_msi_flag;
-
-
+bool feature_vint;
+extern struct smp_rcb_struct *smp_rcb;
 
 static unsigned long get_new_vpn_context(struct kvm_vcpu *vcpu, long cpu)
 {
@@ -190,6 +190,8 @@ int kvm_arch_init_vm(struct kvm *kvm, unsigned long type)
 	if (type)
 		return -EINVAL;
 
+	feature_vint = (cpuid(GET_FEATURES, 0) & CPU_FEAT_VINT);
+	smp_rcb->feat_vint = 1;
 	return kvm_sw64_init_vm(kvm);
 }
 
