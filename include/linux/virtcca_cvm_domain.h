@@ -29,6 +29,7 @@ static inline void enable_swiotlb_for_cvm_dev(struct device *dev, bool enable) {
 #ifdef CONFIG_HISI_VIRTCCA_HOST
 
 bool is_virtcca_cvm_enable(void);
+u64 virtcca_get_tmi_version(void);
 
 #else
 
@@ -37,6 +38,10 @@ static inline bool is_virtcca_cvm_enable(void)
 	return 0;
 }
 
+static inline u64 virtcca_get_tmi_version(void)
+{
+	return 0;
+}
 #endif
 
 #ifdef CONFIG_HISI_VIRTCCA_CODA

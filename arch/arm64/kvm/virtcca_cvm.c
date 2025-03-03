@@ -807,6 +807,15 @@ int kvm_init_tmm(void)
 	return 0;
 }
 
+u64 virtcca_get_tmi_version(void)
+{
+	u64 res = tmi_version();
+
+	if (res == SMCCC_RET_NOT_SUPPORTED)
+		return 0;
+	return res;
+}
+
 static bool is_numa_ipa_range_valid(struct kvm_numa_info *numa_info)
 {
 	unsigned long i;

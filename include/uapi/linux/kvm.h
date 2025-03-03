@@ -2436,4 +2436,7 @@ struct kvm_csv3_handle_memory {
 	__u32 opcode;
 };
 
+/* get tmi version */
+#define KVM_GET_TMI_VERSION	_IOR(KVMIO, 0xd2, u64)
+
 #endif /* __LINUX_KVM_H */
