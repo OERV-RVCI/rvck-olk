@@ -24,8 +24,16 @@
 
 #define SMMU_DOMAIN_IS_SAME     0x2
 
-int virtcca_attach_secure_dev(struct iommu_domain *domain, struct iommu_group *group,
+enum cc_dev_type {
+	CC_DEV_NONE_TYPE,	/* No assigned CC devices */
+	CC_DEV_HOST_TYPE,	/* CC devices assigned to the host */
+	CC_DEV_NVM_TYPE,	/* CC devices assigned to normal vm */
+	CC_DEV_CVM_TYPE,	/* CC devices assigned to confidential vm */
+};
+
+int virtcca_attach_dev(struct iommu_domain *domain, struct iommu_group *group,
 	bool iommu_secure);
+void virtcca_detach_dev(struct iommu_domain *domain, struct iommu_group *group);
 
 u64 virtcca_get_iommu_device_msi_addr(struct iommu_group *iommu_group);
 int virtcca_iommu_group_set_dev_msi_addr(struct iommu_group *iommu_group, unsigned long *iova);
@@ -80,6 +88,8 @@ bool is_cc_dev(u32 sid);
 u64 get_g_cc_dev_msi_addr(u32 sid);
 
 void set_g_cc_dev_msi_addr(u32 sid, u64 msi_addr);
+
+u32 get_g_coda_dev_vm_type(u32 sid);
 
 void g_cc_dev_table_init(void);
 

@@ -12,6 +12,9 @@
 #include <linux/miscdevice.h>
 #include <linux/vfio.h>
 #include <uapi/linux/vfio.h>
+#ifdef CONFIG_HISI_VIRTCCA_CODA
+#include <asm/virtcca_coda.h>
+#endif
 
 #include "vfio.h"
 
@@ -448,6 +451,11 @@ int vfio_container_attach_group(struct vfio_container *container,
 			if (group->type == VFIO_IOMMU)
 				iommu_group_release_dma_owner(
 					group->iommu_group);
+#ifdef CONFIG_HISI_VIRTCCA_CODA
+			if (group->type == VFIO_IOMMU)
+				virtcca_detach_dev(iommu_group_default_domain(group->iommu_group),
+					group->iommu_group);
+#endif
 			goto out_unlock_container;
 		}
 	}
@@ -482,6 +490,12 @@ void vfio_group_detach_container(struct vfio_group *group)
 
 	if (group->type == VFIO_IOMMU)
 		iommu_group_release_dma_owner(group->iommu_group);
+
+#ifdef CONFIG_HISI_VIRTCCA_CODA
+	if (group->type == VFIO_IOMMU)
+		virtcca_detach_dev(iommu_group_default_domain(group->iommu_group),
+			group->iommu_group);
+#endif
 
 	group->container = NULL;
 	group->container_users = 0;

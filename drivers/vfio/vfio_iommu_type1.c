@@ -2713,7 +2713,7 @@ static int vfio_iommu_type1_attach_group(void *iommu_data,
 			if (!iommu_attach_group(d->domain,
 						group->iommu_group)) {
 #ifdef CONFIG_HISI_VIRTCCA_CODA
-				ret = virtcca_attach_secure_dev(d->domain,
+				ret = virtcca_attach_dev(d->domain,
 					group->iommu_group, iommu->secure);
 				if (ret)
 					goto out_domain;
@@ -2733,7 +2733,7 @@ static int vfio_iommu_type1_attach_group(void *iommu_data,
 	}
 
 #ifdef CONFIG_HISI_VIRTCCA_CODA
-	ret = virtcca_attach_secure_dev(domain->domain, group->iommu_group, iommu->secure);
+	ret = virtcca_attach_dev(domain->domain, group->iommu_group, iommu->secure);
 	if (ret)
 		goto out_domain;
 #endif
@@ -2771,6 +2771,9 @@ done:
 
 out_detach:
 	iommu_detach_group(domain->domain, group->iommu_group);
+#ifdef CONFIG_HISI_VIRTCCA_CODA
+	virtcca_detach_dev(domain->domain, group->iommu_group);
+#endif
 out_domain:
 	iommu_domain_free(domain->domain);
 	vfio_iommu_iova_free(&iova_copy);
@@ -2932,6 +2935,9 @@ static void vfio_iommu_type1_detach_group(void *iommu_data,
 			continue;
 
 		iommu_detach_group(domain->domain, group->iommu_group);
+#ifdef CONFIG_HISI_VIRTCCA_CODA
+		virtcca_detach_dev(domain->domain, group->iommu_group);
+#endif
 		vfio_iommu_update_hwdbm(iommu, domain, false);
 		update_dirty_scope = !group->pinned_page_dirty_scope;
 		list_del(&group->next);
