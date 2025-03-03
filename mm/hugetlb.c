@@ -7776,7 +7776,7 @@ static int __hugetlb_insert_pfn(struct mm_struct *mm, unsigned long addr,
 	if (!(pgprot_val(prot) & PTE_RDONLY))
 		entry = huge_pte_mkwrite(entry);
 	entry = pte_mkyoung(entry);
-	entry = pte_mkhuge(entry);
+	entry = arch_make_huge_pte(entry, huge_page_shift(h), VM_ACCESS_FLAGS);
 	entry = pte_mkspecial(entry);
 
 	ptl = huge_pte_lockptr(h, mm, ptep);
