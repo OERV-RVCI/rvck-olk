@@ -5,6 +5,7 @@
 #include <linux/io-pgtable.h>
 #include <linux/kvm_host.h>
 #include <linux/iommu.h>
+#include <asm/virtcca_cvm_host.h>
 #include <asm/virtcca_coda.h>
 
 /**
@@ -53,9 +54,16 @@ int virtcca_map_pages(void *ops, unsigned long iova,
 	kvm = smmu_domain->kvm;
 	if (kvm) {
 		struct virtcca_cvm *virtcca_cvm = kvm->arch.virtcca_cvm;
+		u64 uefi_start = UEFI_LOADER_START;
+		u64 uefi_end = UEFI_SIZE;
 
 		loader_start = virtcca_cvm->loader_start;
 		ram_size = virtcca_cvm->ram_size;
+
+		/* Range [0x0, 0x8000000) was mapped in UEFI boot mode */
+		if ((iova >= uefi_start && iova < uefi_end))
+			goto skip;
+
 		/* Cvm ram space mapping*/
 		if (iova >= loader_start &&
 		iova < loader_start + ram_size &&
@@ -71,6 +79,7 @@ int virtcca_map_pages(void *ops, unsigned long iova,
 				ret = cvm_map_unmap_ipa_range(kvm, iova,
 					paddr, pgsize * pgcount, true);
 		}
+skip:
 		if (mapped)
 			*mapped += pgsize * pgcount;
 	}

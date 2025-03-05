@@ -88,5 +88,22 @@ u32 virtcca_tmi_dev_attach(struct arm_smmu_domain *arm_smmu_domain, struct kvm *
 void virtcca_iommu_dma_get_msi_page(void *cookie, dma_addr_t *iova, phys_addr_t *phys);
 
 int virtcca_msi_map(struct vfio_pci_core_device *vdev);
+
+static inline u8 virtcca_readb(void __iomem *addr, struct pci_dev *pdev)
+{
+	return tmi_mmio_read(mmio_va_to_pa(addr), CVM_RW_8_BIT, pci_dev_id(pdev));
+}
+
+static inline u16 virtcca_readw(void __iomem *addr, struct pci_dev *pdev)
+{
+	return tmi_mmio_read(mmio_va_to_pa(addr), CVM_RW_16_BIT, pci_dev_id(pdev));
+}
+
+static inline u32 virtcca_readl(void __iomem *addr, struct pci_dev *pdev)
+{
+	return tmi_mmio_read(mmio_va_to_pa(addr), CVM_RW_32_BIT, pci_dev_id(pdev));
+}
+size_t virtcca_pci_get_rom_size(void *pdev, void __iomem *rom,
+			       size_t size);
 #endif
 #endif

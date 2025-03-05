@@ -26,4 +26,29 @@ static inline void enable_swiotlb_for_cvm_dev(struct device *dev, bool enable) {
 
 #endif
 
+#ifdef CONFIG_HISI_VIRTCCA_HOST
+
+bool is_virtcca_cvm_enable(void);
+
+#else
+
+static inline bool is_virtcca_cvm_enable(void)
+{
+	return 0;
+}
+
+#endif
+
+#ifdef CONFIG_HISI_VIRTCCA_CODA
+size_t virtcca_pci_get_rom_size(void  *pdev, void __iomem *rom,
+			       size_t size);
+#else
+static inline size_t virtcca_pci_get_rom_size(void  *pdev, void __iomem *rom,
+			       size_t size)
+{
+	return 0;
+}
+
+#endif
+
 #endif /* __VIRTCCA_CVM_DOMAIN_H */

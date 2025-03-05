@@ -23,7 +23,9 @@ static DEFINE_SPINLOCK(cvm_vmid_lock);
 static unsigned long *cvm_vmid_bitmap;
 DEFINE_STATIC_KEY_FALSE(virtcca_cvm_is_available);
 #define SIMD_PAGE_SIZE 0x3000
-
+#define UEFI_MAX_SIZE 0x8000000
+#define UEFI_DTB_START 0x40000000
+#define DTB_MAX_SIZE 0x200000
 int kvm_enable_virtcca_cvm(struct kvm *kvm)
 {
 	if (!static_key_enabled(&virtcca_cvm_is_available))
@@ -641,8 +643,7 @@ static int kvm_populate_ipa_cvm_range(struct kvm *kvm,
 		!IS_ALIGNED(args->populate_ipa_size2, PAGE_SIZE))
 		return -EINVAL;
 
-	if (args->populate_ipa_base1 < cvm->loader_start ||
-		args->populate_ipa_base2 < args->populate_ipa_base1 + args->populate_ipa_size1 ||
+	if (args->populate_ipa_base2 < args->populate_ipa_base1 + args->populate_ipa_size1 ||
 		cvm->dtb_end < args->populate_ipa_base2 + args->populate_ipa_size2)
 		return -EINVAL;
 
@@ -651,6 +652,20 @@ static int kvm_populate_ipa_cvm_range(struct kvm *kvm,
 	ipa_base1 = round_down(args->populate_ipa_base1, l2_granule);
 	ipa_end2 = round_up(args->populate_ipa_base2 + args->populate_ipa_size2, l2_granule);
 
+	/* uefi boot, uefi image and uefi ram from 0 to 128M */
+	if (ipa_base1 == UEFI_LOADER_START) {
+		phys_addr_t ipa_base2 = round_down(args->populate_ipa_base2, l2_granule);
+		phys_addr_t ipa_end1 = round_up(args->populate_ipa_base1
+			+ args->populate_ipa_size1, l2_granule);
+		int uefi_ret = kvm_populate_ram_region(kvm, l2_granule, ipa_base1, ipa_end1, args);
+
+		if (!uefi_ret) {
+			uefi_ret = kvm_populate_ram_region(kvm, l2_granule, ipa_base2, ipa_end2,
+				args);
+		}
+		return uefi_ret;
+	}
+	/* direct boot */
 	return kvm_populate_ram_region(kvm, l2_granule, ipa_base1, ipa_end2, args);
 }
 
@@ -812,6 +827,11 @@ static bool is_numa_ipa_range_valid(struct kvm_numa_info *numa_info)
 	return true;
 }
 
+static inline bool is_dtb_info_has_extend_data(u64 dtb_info)
+{
+	return dtb_info & 0x1;
+}
+
 int kvm_load_user_data(struct kvm *kvm, unsigned long arg)
 {
 	struct kvm_user_data user_data;
@@ -836,25 +856,39 @@ int kvm_load_user_data(struct kvm *kvm, unsigned long arg)
 
 		if (!is_numa_ipa_range_valid(numa_info))
 			return -EINVAL;
-		if (user_data.loader_start < numa_node->ipa_start ||
-			user_data.dtb_end > ipa_end)
+
+		if ((user_data.loader_start != numa_node->ipa_start) ||
+			(user_data.data_start + user_data.data_size < user_data.data_start))
 			return -EINVAL;
+
+		if (is_dtb_info_has_extend_data(user_data.dtb_info)) {
+			/* Direct boot, check DTB address is in IPA range */
+			if (user_data.data_start + user_data.data_size > ipa_end)
+				return -EINVAL;
+		} else {
+			/*
+			 * UEFI boot, check MMIO address range is within the valid limit (less than
+			 * loader_start)
+			 */
+			if (user_data.data_start + user_data.data_size > user_data.loader_start)
+				return -EINVAL;
+		}
+
 		for (i = 0; i < numa_info->numa_cnt; i++)
 			total_size += numa_info->numa_nodes[i].ipa_size;
 		if (total_size != user_data.ram_size)
 			return -EINVAL;
 	}
 
-	if (user_data.image_end <= user_data.loader_start ||
-		user_data.initrd_start < user_data.image_end ||
-		user_data.dtb_end < user_data.initrd_start ||
-		user_data.ram_size < user_data.dtb_end - user_data.loader_start)
-		return -EINVAL;
+	if (is_dtb_info_has_extend_data(user_data.dtb_info))
+		cvm->dtb_end = user_data.data_start + user_data.data_size;
+	else {
+		cvm->dtb_end = user_data.loader_start + user_data.dtb_info;
+		cvm->mmio_start = user_data.data_start;
+		cvm->mmio_end = user_data.data_start + user_data.data_size;
+	}
 
 	cvm->loader_start = user_data.loader_start;
-	cvm->image_end = user_data.image_end;
-	cvm->initrd_start = user_data.initrd_start;
-	cvm->dtb_end = user_data.dtb_end;
 	cvm->ram_size = user_data.ram_size;
 	memcpy(&cvm->numa_info, numa_info, sizeof(struct kvm_numa_info));
 

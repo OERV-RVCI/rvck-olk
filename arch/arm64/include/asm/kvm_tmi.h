@@ -413,6 +413,7 @@ u64 tmi_kae_init(void);
 u64 tmi_kae_enable(u64 rd, u64 numa_set, u64 is_enable);
 
 u64 mmio_va_to_pa(void *addr);
+int virtcca_io_mem_abort(struct kvm_vcpu *vcpu, unsigned long hva, phys_addr_t fault_ipa);
 void kvm_cvm_vcpu_put(struct kvm_vcpu *vcpu);
 int kvm_load_user_data(struct kvm *kvm, unsigned long arg);
 unsigned long cvm_psci_vcpu_affinity_info(struct kvm_vcpu *vcpu,
