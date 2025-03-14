@@ -244,10 +244,10 @@ struct hrtimer_cpu_base {
 	ktime_t				softirq_expires_next;
 	struct hrtimer			*softirq_next_timer;
 	struct hrtimer_clock_base	clock_base[HRTIMER_MAX_CLOCK_BASES];
-	call_single_data_t		csd;
 
 	KABI_RESERVE(1)
 	KABI_RESERVE(2)
+	KABI_EXTEND(call_single_data_t csd)
 } ____cacheline_aligned;
 
 static inline void hrtimer_set_expires(struct hrtimer *timer, ktime_t time)
