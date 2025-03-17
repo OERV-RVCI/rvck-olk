@@ -163,6 +163,14 @@ u64 tmi_ttt_map_range(u64 rd, u64 map_addr, u64 size, u64 cur_node, u64 target_n
 	return res.a1;
 }
 
+u64 tmi_ttt_destroy(u64 rd)
+{
+	struct arm_smccc_res res;
+
+	arm_smccc_1_1_smc(TMI_TMM_TTT_DESTROY, rd, &res);
+	return res.a1;
+}
+
 /* Used to create smmu command queue and event queue */
 u64 tmi_smmu_queue_create(u64 params_ptr)
 {

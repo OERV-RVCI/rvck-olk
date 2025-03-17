@@ -6,6 +6,7 @@
 #include <linux/kvm.h>
 #include <linux/vfio.h>
 #include <linux/vfio_pci_core.h>
+#include <linux/nmi.h>
 #include <asm/kvm_tmi.h>
 #include <asm/kvm_pgtable.h>
 #include <asm/kvm_emulate.h>
@@ -181,6 +182,7 @@ out:
 void kvm_destroy_cvm(struct kvm *kvm)
 {
 	struct virtcca_cvm *cvm = kvm->arch.virtcca_cvm;
+	int ret;
 	uint32_t cvm_vmid;
 #ifdef CONFIG_HISI_VIRTCCA_CODA
 	struct arm_smmu_domain *arm_smmu_domain;
@@ -214,6 +216,18 @@ void kvm_destroy_cvm(struct kvm *kvm)
 
 	if (tmi_kae_enable(cvm->rd, numa_set, 0))
 		kvm_err("vf destroy failed!\n");
+
+	do {
+		touch_nmi_watchdog();
+		ret = tmi_ttt_destroy(cvm->rd);
+	} while (ret == TMI_ERROR_TTT_DESTROY_AGAIN);
+
+	/*
+	 * Considering that lower versions of TMM do not support
+	 * the tmi_ttt_destroy interface.
+	 */
+	if (ret)
+		pr_warn("KVM destroy cVM ttt failed\n");
 
 	if (!tmi_cvm_destroy(cvm->rd))
 		kvm_info("KVM has destroyed cVM: %d\n", cvm->cvm_vmid);
