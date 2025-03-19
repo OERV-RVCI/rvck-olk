@@ -68,7 +68,7 @@
 #include <trace/events/kvm.h>
 
 #include <linux/kvm_dirty_ring.h>
-
+#include <linux/virtcca_cvm_domain.h>
 
 /* Worst case buffer size needed for holding an integer. */
 #define ITOA_MAX_LEN 12
@@ -5158,6 +5158,17 @@ static long kvm_dev_ioctl(struct file *filp,
 			goto out;
 		r = KVM_API_VERSION;
 		break;
+#ifdef CONFIG_HISI_VIRTCCA_HOST
+	case KVM_GET_TMI_VERSION:{
+		void __user *argp = (void __user *)arg;
+		u64 res = virtcca_get_tmi_version();
+
+		if (copy_to_user(argp, &res, sizeof(res)))
+			goto out;
+		r = 0;
+		break;
+	}
+#endif
 	case KVM_CREATE_VM:
 		r = kvm_dev_ioctl_create_vm(arg);
 		break;

@@ -1182,12 +1182,8 @@ static long virtcca_vfio_unmap_unpin(struct vfio_iommu *iommu, struct vfio_dma *
 	bool do_accounting)
 {
 	struct kvm *kvm;
-	struct vfio_domain *domain, *d;
+	struct vfio_domain *d;
 	LIST_HEAD(unmapped_region_list);
-	struct iommu_iotlb_gather iotlb_gather;
-	int unmapped_region_cnt = 0;
-	long unlocked = 0;
-	dma_addr_t iova = dma->iova, end = dma->iova + dma->size;
 
 	if (!virtcca_check_is_cvm_or_not((void *)iommu, &kvm))
 		return 0;
@@ -1198,72 +1194,14 @@ static long virtcca_vfio_unmap_unpin(struct vfio_iommu *iommu, struct vfio_dma *
 	if (list_empty(&iommu->domain_list))
 		return 0;
 
-	/*
-	 * We use the IOMMU to track the physical addresses, otherwise we'd
-	 * need a much more complicated tracking system.  Unfortunately that
-	 * means we need to use one of the iommu domains to figure out the
-	 * pfns to unpin.  The rest need to be unmapped in advance so we have
-	 * no iommu translations remaining when the pages are unpinned.
-	 */
-	domain = d = list_first_entry(&iommu->domain_list,
-			struct vfio_domain, next);
-
-	list_for_each_entry_continue(d, &iommu->domain_list, next) {
+	list_for_each_entry(d, &iommu->domain_list, next) {
 		virtcca_iommu_unmap(d->domain, dma->iova, dma->size);
 		cond_resched();
 	}
 
-	iommu_iotlb_gather_init(&iotlb_gather);
-	while (iova < end) {
-		size_t unmapped, len;
-		phys_addr_t phys, next;
-
-		phys = iommu_iova_to_phys(domain->domain, iova);
-		if (WARN_ON(!phys)) {
-			iova += PAGE_SIZE;
-			continue;
-		}
-
-		/*
-		 * To optimize for fewer iommu_unmap() calls, each of which
-		 * may require hardware cache flushing, try to find the
-		 * largest contiguous physical memory chunk to unmap.
-		 */
-		for (len = PAGE_SIZE;
-			!domain->fgsp && iova + len < end; len += PAGE_SIZE) {
-			next = iommu_iova_to_phys(domain->domain, iova + len);
-			if (next != phys + len)
-				break;
-		}
-
-		/*
-		 * First, try to use fast unmap/unpin. In case of failure,
-		 * switch to slow unmap/unpin path.
-		 */
-		unmapped = unmap_unpin_fast(domain, dma, &iova, len, phys,
-				&unlocked, &unmapped_region_list,
-				&unmapped_region_cnt,
-				&iotlb_gather);
-		if (!unmapped) {
-			unmapped = unmap_unpin_slow(domain, dma, &iova, len,
-					phys, &unlocked);
-			if (WARN_ON(!unmapped))
-				break;
-		}
-	}
-
 	dma->iommu_mapped = false;
 
-	if (unmapped_region_cnt) {
-		unlocked += vfio_sync_unpin(dma, domain, &unmapped_region_list,
-			&iotlb_gather);
-	}
-
-	if (do_accounting) {
-		vfio_lock_acct(dma, -unlocked, true);
-		return 0;
-	}
-	return unlocked;
+	return 0;
 }
 #endif
 
@@ -2775,7 +2713,7 @@ static int vfio_iommu_type1_attach_group(void *iommu_data,
 			if (!iommu_attach_group(d->domain,
 						group->iommu_group)) {
 #ifdef CONFIG_HISI_VIRTCCA_CODA
-				ret = virtcca_attach_secure_dev(d->domain,
+				ret = virtcca_attach_dev(d->domain,
 					group->iommu_group, iommu->secure);
 				if (ret)
 					goto out_domain;
@@ -2795,7 +2733,7 @@ static int vfio_iommu_type1_attach_group(void *iommu_data,
 	}
 
 #ifdef CONFIG_HISI_VIRTCCA_CODA
-	ret = virtcca_attach_secure_dev(domain->domain, group->iommu_group, iommu->secure);
+	ret = virtcca_attach_dev(domain->domain, group->iommu_group, iommu->secure);
 	if (ret)
 		goto out_domain;
 #endif
@@ -2833,6 +2771,9 @@ done:
 
 out_detach:
 	iommu_detach_group(domain->domain, group->iommu_group);
+#ifdef CONFIG_HISI_VIRTCCA_CODA
+	virtcca_detach_dev(domain->domain, group->iommu_group);
+#endif
 out_domain:
 	iommu_domain_free(domain->domain);
 	vfio_iommu_iova_free(&iova_copy);
@@ -2994,6 +2935,9 @@ static void vfio_iommu_type1_detach_group(void *iommu_data,
 			continue;
 
 		iommu_detach_group(domain->domain, group->iommu_group);
+#ifdef CONFIG_HISI_VIRTCCA_CODA
+		virtcca_detach_dev(domain->domain, group->iommu_group);
+#endif
 		vfio_iommu_update_hwdbm(iommu, domain, false);
 		update_dirty_scope = !group->pinned_page_dirty_scope;
 		list_del(&group->next);

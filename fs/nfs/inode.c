@@ -41,6 +41,7 @@
 #include <linux/freezer.h>
 #include <linux/uaccess.h>
 #include <linux/iversion.h>
+#include <linux/virtcca_cvm_domain.h>
 
 #include "nfs4_fs.h"
 #include "callback.h"
@@ -2411,7 +2412,12 @@ static int nfsiod_start(void)
 {
 	struct workqueue_struct *wq;
 	dprintk("RPC:       creating workqueue nfsiod\n");
-	wq = alloc_workqueue("nfsiod", WQ_MEM_RECLAIM | WQ_UNBOUND, 0);
+#ifdef CONFIG_HISI_VIRTCCA_GUEST
+	if (unlikely(virtcca_cvm_domain()))
+		wq = alloc_workqueue("nfsiod", WQ_MEM_RECLAIM, 0);
+	else
+#endif
+		wq = alloc_workqueue("nfsiod", WQ_MEM_RECLAIM | WQ_UNBOUND, 0);
 	if (wq == NULL)
 		return -ENOMEM;
 	nfsiod_workqueue = wq;

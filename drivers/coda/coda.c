@@ -6,6 +6,12 @@
 #include <linux/iommu.h>
 #include <asm/virtcca_coda.h>
 
+/* The lock during the operation of the CoDA mananged devices linked list */
+static DEFINE_SPINLOCK(coda_dev_lock);
+
+/* Protect root port status from racing */
+static DEFINE_SPINLOCK(pcipc_enable_lock);
+
 struct cc_dev_config {
 	u32               sid; /* BDF number of the device */
 	u32               vmid; /* virtual machine id */
@@ -14,6 +20,7 @@ struct cc_dev_config {
 	/* MSI addr for confidential device with iommu group granularity */
 	u64               msi_addr;
 	struct hlist_node node; /* device hash table */
+	u32               vm_type;		/* 0:none; 1:host; 2:nvm; 3:cvm */
 };
 
 static DEFINE_HASHTABLE(g_cc_dev_htable, MAX_CC_DEV_NUM_ORDER);
@@ -113,36 +120,65 @@ static int get_sibling_devices(struct device *dev, uint16_t *devs, int max_devs)
  * @vmid: Virtual machine id
  * @root_bd: Root port bus device num
  * @secure: Whether the device is secure or not
+ * @vm_type: Device ownership
  *
  * Returns:
  * %0 if add obj success
  * %-ENOMEM if alloc obj failed
  */
-static int add_cc_dev_obj(u32 sid, u32 vmid, u32 root_bd, bool secure)
+static int add_cc_dev_obj(u32 sid, u32 vmid, u32 root_bd, bool secure, u32 vm_type)
 {
 	struct cc_dev_config *obj;
 
+	spin_lock(&coda_dev_lock);
 	hash_for_each_possible(g_cc_dev_htable, obj, node, sid) {
 		if (obj->sid == sid) {
 			obj->vmid = vmid;
 			obj->root_bd = root_bd;
 			obj->secure = secure;
 			obj->msi_addr = 0;
+			obj->vm_type = vm_type;
+			spin_unlock(&coda_dev_lock);
 			return 0;
 		}
 	}
 
 	obj = kzalloc(sizeof(*obj), GFP_KERNEL);
-	if (!obj)
+	if (!obj) {
+		spin_unlock(&coda_dev_lock);
 		return -ENOMEM;
+	}
 
 	obj->sid = sid;
 	obj->vmid = vmid;
 	obj->root_bd = root_bd;
 	obj->secure = secure;
+	obj->vm_type = vm_type;
 
 	hash_add(g_cc_dev_htable, &obj->node, sid);
+	spin_unlock(&coda_dev_lock);
 	return 0;
+}
+
+/**
+ * delete_coda_dev_obj - Delete device obj to CoDA hash table
+ * @sid: Stream id of dev
+ *
+ */
+static void delete_coda_dev_obj(u32 sid)
+{
+	struct cc_dev_config *obj;
+
+	spin_lock(&coda_dev_lock);
+	hash_for_each_possible(g_cc_dev_htable, obj, node, sid) {
+		if (obj != NULL && obj->sid == sid) {
+			hash_del(&obj->node);
+			kfree(obj);
+			spin_unlock(&coda_dev_lock);
+			return;
+		}
+	}
+	spin_unlock(&coda_dev_lock);
 }
 
 /**
@@ -394,7 +430,7 @@ static inline int virtcca_delegate_secure_dev(uint16_t root_bd, struct arm_smmu_
 	}
 
 	for (i = 0; i < params->num_dev; i++) {
-		ret = add_cc_dev_obj(params->devs[i], 0, root_bd, true);
+		ret = add_cc_dev_obj(params->devs[i], 0, root_bd, true, CC_DEV_CVM_TYPE);
 		if (ret)
 			break;
 	}
@@ -434,9 +470,54 @@ static inline int add_secure_dev_to_cc_table(struct arm_smmu_device *smmu,
 			dev_err(smmu->dev, "CoDA: sid is not cc dev\n");
 			return -EINVAL;
 		}
-		ret = add_cc_dev_obj(sid, smmu_domain->s2_cfg.vmid, root_bd, true);
+		ret = add_cc_dev_obj(sid, smmu_domain->s2_cfg.vmid, root_bd, true, CC_DEV_CVM_TYPE);
 		if (ret)
 			break;
+	}
+	return ret;
+}
+
+u32 get_g_coda_dev_vm_type(u32 sid)
+{
+	struct cc_dev_config *obj;
+	u32 vm_type = CC_DEV_NONE_TYPE;
+
+	spin_lock(&coda_dev_lock);
+	hash_for_each_possible(g_cc_dev_htable, obj, node, sid) {
+		if (obj != NULL && obj->sid == sid) {
+			vm_type = obj->vm_type;
+			spin_unlock(&coda_dev_lock);
+			return vm_type;
+		}
+	}
+
+	spin_unlock(&coda_dev_lock);
+	return vm_type;
+}
+
+static bool virtcca_check_dev_is_assigned_to_nvm(struct tmi_dev_delegate_params *params)
+{
+	for (int i = 0; i < params->num_dev; i++) {
+		if (get_g_coda_dev_vm_type(params->devs[i]) == CC_DEV_NVM_TYPE) {
+			pr_err("CoDA: device sid 0x%x has already been assigned to nvm\n",
+				params->devs[i]);
+			return true;
+		}
+	}
+	return false;
+}
+
+static int virtcca_get_all_cc_dev_info(struct device *dev, struct tmi_dev_delegate_params *params)
+{
+	int ret = 0;
+	uint16_t root_bd = get_root_bd(dev);
+
+	params->root_bd = root_bd;
+	params->num_dev = get_sibling_devices(dev, params->devs, MAX_DEV_PER_PORT);
+	if (params->num_dev >= MAX_DEV_PER_PORT) {
+		ret = -EINVAL;
+		pr_err("%s nums overflow\n", __func__);
+		return ret;
 	}
 	return ret;
 }
@@ -459,15 +540,29 @@ static int virtcca_enable_secure_dev(struct arm_smmu_domain *smmu_domain,
 	u64 ret = 0;
 	uint16_t root_bd = get_root_bd(dev);
 	struct arm_smmu_device *smmu = smmu_domain->smmu;
+	struct tmi_dev_delegate_params *params = kzalloc(sizeof(*params), GFP_KERNEL);
+
+	if (!params)
+		return -ENOMEM;
 
 	if (!is_cc_root_bd(root_bd)) {
+		ret = virtcca_get_all_cc_dev_info(dev, params);
+		if (ret)
+			goto out;
+
+		ret = virtcca_check_dev_is_assigned_to_nvm(params);
+		if (ret)
+			goto out;
+
 		ret = virtcca_delegate_secure_dev(root_bd, smmu, dev);
 		if (ret)
-			return ret;
+			goto out;
 	}
 
 	ret = add_secure_dev_to_cc_table(smmu, smmu_domain, root_bd, master);
 
+out:
+	kfree(params);
 	return ret;
 }
 
@@ -510,7 +605,9 @@ int virtcca_secure_dev_operator(struct device *dev, void *domain)
 		return -EINVAL;
 	}
 
+	spin_lock(&pcipc_enable_lock);
 	ret = virtcca_enable_secure_dev(smmu_domain, master, dev);
+	spin_unlock(&pcipc_enable_lock);
 	if (ret)
 		return ret;
 
@@ -533,19 +630,119 @@ int virtcca_secure_dev_operator(struct device *dev, void *domain)
 EXPORT_SYMBOL_GPL(virtcca_secure_dev_operator);
 
 /**
- * virtcca_attach_secure_dev - Attach the device of iommu
- * group to confidential virtual machine
- * @domain: The handle of iommu domain
- * @group: Iommu group
- * @iommu_secure : Whether the iommu is secure or not
+ * virtcca_attach_each_dev_to_nvm - Attach each device under the same group to nvm
+ * @dev: the struct of device
+ * @domain: The handle of iommu_domain
  *
  * Returns:
- * %0 if attach the all devices success
- * %-EINVAL if the smmu does not initialize secure state
- * %-ENOMEM if the device create secure ste failed
- * %-ENOENT if the device does not have fwspec
+ * %0 if the device is not a CC device
+ * %-EINVAL if the device is a CC device, CC device is not allowed to assign to the normal VM
  */
-int virtcca_attach_secure_dev(struct iommu_domain *domain, struct iommu_group *group,
+static int virtcca_attach_each_dev_to_nvm(struct device *dev, void *domain)
+{
+	int i, j;
+	u32 sid = 0;
+	int ret = 0;
+	uint16_t root_bd;
+	struct arm_smmu_device *smmu = NULL;
+	struct arm_smmu_master *master = NULL;
+
+	if (!is_virtcca_cvm_enable())
+		return 0;
+
+	master = dev_iommu_priv_get(dev);
+	smmu = master->smmu;
+
+	if (!virtcca_smmu_enable(smmu))
+		return 0;
+
+	root_bd = get_root_bd(dev);
+	spin_lock(&pcipc_enable_lock);
+	if (is_cc_root_bd(root_bd)) {
+		dev_err(smmu->dev,
+		"CoDA: the security device under the root port 0x%x is not allowed to assign to \
+		the normal VM\n", root_bd);
+		spin_unlock(&pcipc_enable_lock);
+		return -EINVAL;
+	}
+	spin_unlock(&pcipc_enable_lock);
+
+	for (i = 0; i < master->num_streams; i++) {
+		sid = master->streams[i].id;
+		/* Bridged PCI devices may end up with duplicated IDs */
+		for (j = 0; j < i; j++)
+			if (master->streams[j].id == sid)
+				break;
+		if (j < i)
+			continue;
+
+		ret = add_cc_dev_obj(sid, 0, root_bd, false, CC_DEV_NVM_TYPE);
+		if (ret)
+			pr_err("CoDA: attach device to nvm, add device 0x%x to CoDA linked list \
+					failed\n", sid);
+	}
+
+	return 0;
+}
+
+/**
+ * virtcca_detach_each_dev_from_vm -  Detach each device under the same group from nvm or cvm
+ * 1NVM scenarioDelete the device information corresponding to the NVM from the CoDA management
+ * linked list
+ *
+ * 2CVM scenarioSet the device that has already been assigned to the CVM in the CoDA management
+ * linked list
+ *
+ * back to the host driver state and restore the device's STE stage 2 to the host driver
+ * @dev: The struct of device
+ * @domain: The handle of iommu_domain
+ *
+ */
+static int virtcca_detach_each_dev_from_vm(struct device *dev, void *domain)
+{
+	int i, j;
+	int ret = 0;
+	struct arm_smmu_device *smmu = NULL;
+	struct arm_smmu_master *master = NULL;
+
+	if (!is_virtcca_cvm_enable())
+		return 0;
+
+	master = dev_iommu_priv_get(dev);
+	smmu = master->smmu;
+
+	if (!virtcca_smmu_enable(smmu))
+		return 0;
+
+	for (i = 0; i < master->num_streams; i++) {
+		u32 sid = master->streams[i].id;
+		/* Bridged PCI devices may end up with duplicated IDs */
+		for (j = 0; j < i; j++)
+			if (master->streams[j].id == sid)
+				break;
+		if (j < i)
+			continue;
+
+		/*
+		 * If the device is CC dev and is assigned to the cvm,
+		 * we need call the tmi_dev_destroy to restore STE stage 2 to host driver
+		 */
+		if (is_cc_dev(sid)) {
+			if (get_g_coda_dev_vm_type(sid) == CC_DEV_CVM_TYPE) {
+				ret = add_cc_dev_obj(sid, 0, get_root_bd(dev), true,
+					CC_DEV_HOST_TYPE);
+				if (ret)
+					pr_err("CoDA: detach device from vm, add cc device 0x%x \
+						failed\n", sid);
+			}
+		} else {
+			delete_coda_dev_obj(sid);
+		}
+	}
+	return 0;
+}
+
+int virtcca_attach_dev(struct iommu_domain *domain, struct iommu_group *group,
 	bool iommu_secure)
 {
 	int ret = 0;
@@ -553,11 +750,28 @@ int virtcca_attach_secure_dev(struct iommu_domain *domain, struct iommu_group *g
 	if (!is_virtcca_cvm_enable())
 		return ret;
 
-	if (!iommu_secure)
-		return ret;
-
-	ret = iommu_group_for_each_dev(group, (void *)domain, virtcca_secure_dev_operator);
+	if (iommu_secure)
+		ret = iommu_group_for_each_dev(group, (void *)domain, virtcca_secure_dev_operator);
+	else
+		ret = iommu_group_for_each_dev(group, (void *)domain,
+			virtcca_attach_each_dev_to_nvm);
 
 	return ret;
 }
-EXPORT_SYMBOL_GPL(virtcca_attach_secure_dev);
+EXPORT_SYMBOL_GPL(virtcca_attach_dev);
+
+/**
+ * virtcca_detach_dev - The VFIO driver calls this interface to
+ * detach the device from the VM
+ * @domain: The handle of iommu domain
+ * @group: Iommu group
+ *
+ */
+void virtcca_detach_dev(struct iommu_domain *domain, struct iommu_group *group)
+{
+	if (!is_virtcca_cvm_enable())
+		return;
+
+	iommu_group_for_each_dev(group, (void *)domain, virtcca_detach_each_dev_from_vm);
+}
+EXPORT_SYMBOL_GPL(virtcca_detach_dev);

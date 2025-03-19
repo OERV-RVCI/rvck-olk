@@ -1763,6 +1763,12 @@ int kvm_handle_guest_abort(struct kvm_vcpu *vcpu)
 		goto out_unlock;
 	}
 
+#ifdef CONFIG_HISI_VIRTCCA_CODA
+	ret = virtcca_io_mem_abort(vcpu, hva, fault_ipa);
+	if (ret != -EPERM)
+		goto out_unlock;
+#endif
+
 	/* Userspace should not be able to register out-of-bounds IPAs */
 	VM_BUG_ON(fault_ipa >= kvm_phys_size(vcpu->kvm));
 

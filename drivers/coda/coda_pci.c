@@ -212,3 +212,65 @@ u64 virtcca_pci_io_read(struct vfio_pci_core_device *vdev,
 	return tmi_mmio_read(mmio_va_to_pa(io), size, pci_dev_id(pdev));
 }
 EXPORT_SYMBOL_GPL(virtcca_pci_io_read);
+
+/**
+ * virtcca_pci_get_rom_size - obtain the actual size of the ROM image
+ * @pdev: target PCI device
+ * @rom: kernel virtual pointer to image of ROM
+ * @size: size of PCI window
+ *  return: size of actual ROM image
+ *
+ * Determine the actual length of the ROM image.
+ * The PCI window size could be much larger than the
+ * actual image size.
+ */
+size_t virtcca_pci_get_rom_size(void *p, void __iomem *rom, size_t size)
+{
+	void __iomem *image;
+	int last_image;
+	unsigned int length;
+	struct pci_dev *pdev = (struct pci_dev *)p;
+
+	if (!is_cc_dev(pci_dev_id(pdev)))
+		return 0;
+	image = rom;
+	do {
+		void __iomem *pds;
+		/* Standard PCI ROMs start out with these bytes 55 AA */
+		if (virtcca_readw(image, pdev) != 0xAA55) {
+			pci_info(pdev, "Invalid PCI ROM header signature: expecting 0xaa55, got %#06x\n",
+				 virtcca_readw(image, pdev));
+			break;
+		}
+		/* get the PCI data structure and check its "PCIR" signature */
+		pds = image + virtcca_readw(image + 24, pdev);
+		/* The PCIR data structure must begin on a 4-byte boundary */
+		if (!IS_ALIGNED((unsigned long)pds, 4)) {
+			pci_info(pdev, "Invalid PCI ROM header signature: PCIR %#06x\n",
+				 virtcca_readw(image + 24, pdev));
+			break;
+		}
+		if (virtcca_readl(pds, pdev) != 0x52494350) {
+			pci_info(pdev, "Invalid PCI ROM data signature: expecting 0x52494350, got %#010x\n",
+				 virtcca_readl(pds, pdev));
+			break;
+		}
+		last_image = virtcca_readb(pds + 21, pdev) & 0x80;
+		length = virtcca_readw(pds + 16, pdev);
+		image += length * 512;
+		/* Avoid iterating through memory outside the resource window */
+		if (image >= rom + size)
+			break;
+		if (!last_image) {
+			if (virtcca_readw(image, pdev) != 0xAA55) {
+				pci_info(pdev, "No more image in the PCI ROM\n");
+				break;
+			}
+		}
+	} while (length && !last_image);
+
+	/* never return a size larger than the PCI resource window */
+	/* there are known ROMs that get the size wrong */
+	return min((size_t)(image - rom), size);
+}
+EXPORT_SYMBOL_GPL(virtcca_pci_get_rom_size);

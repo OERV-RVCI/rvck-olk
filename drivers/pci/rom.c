@@ -9,6 +9,7 @@
 #include <linux/export.h>
 #include <linux/pci.h>
 #include <linux/slab.h>
+#include <linux/virtcca_cvm_domain.h>
 
 #include "pci.h"
 
@@ -86,6 +87,13 @@ static size_t pci_get_rom_size(struct pci_dev *pdev, void __iomem *rom,
 	void __iomem *image;
 	int last_image;
 	unsigned int length;
+
+	if (is_virtcca_cvm_enable()) {
+		int ret = virtcca_pci_get_rom_size(pdev, rom, size);
+
+		if (ret != 0)
+			return ret;
+	}
 
 	image = rom;
 	do {

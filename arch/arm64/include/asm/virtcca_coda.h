@@ -24,8 +24,16 @@
 
 #define SMMU_DOMAIN_IS_SAME     0x2
 
-int virtcca_attach_secure_dev(struct iommu_domain *domain, struct iommu_group *group,
+enum cc_dev_type {
+	CC_DEV_NONE_TYPE,	/* No assigned CC devices */
+	CC_DEV_HOST_TYPE,	/* CC devices assigned to the host */
+	CC_DEV_NVM_TYPE,	/* CC devices assigned to normal vm */
+	CC_DEV_CVM_TYPE,	/* CC devices assigned to confidential vm */
+};
+
+int virtcca_attach_dev(struct iommu_domain *domain, struct iommu_group *group,
 	bool iommu_secure);
+void virtcca_detach_dev(struct iommu_domain *domain, struct iommu_group *group);
 
 u64 virtcca_get_iommu_device_msi_addr(struct iommu_group *iommu_group);
 int virtcca_iommu_group_set_dev_msi_addr(struct iommu_group *iommu_group, unsigned long *iova);
@@ -81,6 +89,8 @@ u64 get_g_cc_dev_msi_addr(u32 sid);
 
 void set_g_cc_dev_msi_addr(u32 sid, u64 msi_addr);
 
+u32 get_g_coda_dev_vm_type(u32 sid);
+
 void g_cc_dev_table_init(void);
 
 u32 virtcca_tmi_dev_attach(struct arm_smmu_domain *arm_smmu_domain, struct kvm *kvm);
@@ -88,5 +98,22 @@ u32 virtcca_tmi_dev_attach(struct arm_smmu_domain *arm_smmu_domain, struct kvm *
 void virtcca_iommu_dma_get_msi_page(void *cookie, dma_addr_t *iova, phys_addr_t *phys);
 
 int virtcca_msi_map(struct vfio_pci_core_device *vdev);
+
+static inline u8 virtcca_readb(void __iomem *addr, struct pci_dev *pdev)
+{
+	return tmi_mmio_read(mmio_va_to_pa(addr), CVM_RW_8_BIT, pci_dev_id(pdev));
+}
+
+static inline u16 virtcca_readw(void __iomem *addr, struct pci_dev *pdev)
+{
+	return tmi_mmio_read(mmio_va_to_pa(addr), CVM_RW_16_BIT, pci_dev_id(pdev));
+}
+
+static inline u32 virtcca_readl(void __iomem *addr, struct pci_dev *pdev)
+{
+	return tmi_mmio_read(mmio_va_to_pa(addr), CVM_RW_32_BIT, pci_dev_id(pdev));
+}
+size_t virtcca_pci_get_rom_size(void *pdev, void __iomem *rom,
+			       size_t size);
 #endif
 #endif

@@ -21,6 +21,7 @@
 #include <linux/mutex.h>
 #include <linux/freezer.h>
 #include <linux/sched/mm.h>
+#include <linux/virtcca_cvm_domain.h>
 
 #include <linux/sunrpc/clnt.h>
 #include <linux/sunrpc/metrics.h>
@@ -1282,11 +1283,21 @@ static int rpciod_start(void)
 	/*
 	 * Create the rpciod thread and wait for it to start.
 	 */
-	wq = alloc_workqueue("rpciod", WQ_MEM_RECLAIM | WQ_UNBOUND, 0);
+#ifdef CONFIG_HISI_VIRTCCA_GUEST
+	if (unlikely(virtcca_cvm_domain()))
+		wq = alloc_workqueue("rpciod", WQ_MEM_RECLAIM, 0);
+	else
+#endif
+		wq = alloc_workqueue("rpciod", WQ_MEM_RECLAIM | WQ_UNBOUND, 0);
 	if (!wq)
 		goto out_failed;
 	rpciod_workqueue = wq;
-	wq = alloc_workqueue("xprtiod", WQ_UNBOUND | WQ_MEM_RECLAIM, 0);
+#ifdef CONFIG_HISI_VIRTCCA_GUEST
+	if (unlikely(virtcca_cvm_domain()))
+		wq = alloc_workqueue("xprtiod", WQ_MEM_RECLAIM | WQ_HIGHPRI, 0);
+	else
+#endif
+		wq = alloc_workqueue("xprtiod", WQ_UNBOUND | WQ_MEM_RECLAIM, 0);
 	if (!wq)
 		goto free_rpciod;
 	xprtiod_workqueue = wq;

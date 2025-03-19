@@ -31,6 +31,7 @@
 #define TMI_ERROR_INTERNAL		11
 #define TMI_ERROR_CVM_POWEROFF		12
 #define TMI_ERROR_TTT_CREATED		13
+#define TMI_ERROR_TTT_DESTROY_AGAIN	14
 
 #define TMI_RETURN_STATUS(ret)		((ret) & 0xFF)
 #define TMI_RETURN_INDEX(ret)		(((ret) >> 8) & 0xFF)
@@ -230,6 +231,7 @@ struct tmi_tec_run {
 #define TMI_FNUM_FEATURES               U(0x26C)
 #define TMI_FNUM_TTT_MAP_RANGE          U(0x26D)
 #define TMI_FNUM_TTT_UNMAP_RANGE        U(0x26E)
+#define TMI_FNUM_TTT_DESTROY            U(0x26F)
 #define TMI_FNUM_INF_TEST               U(0x270)
 #define TMI_FNUM_KAE_INIT               U(0x273)
 #define TMI_FNUM_KAE_ENABLE             U(0x274)
@@ -266,6 +268,7 @@ struct tmi_tec_run {
 #define TMI_TMM_MEM_INFO_SHOW           TMI_FID(SMC_64, TMI_FNUM_MEM_INFO_SHOW)
 #define TMI_TMM_TTT_MAP_RANGE           TMI_FID(SMC_64, TMI_FNUM_TTT_MAP_RANGE)
 #define TMI_TMM_TTT_UNMAP_RANGE         TMI_FID(SMC_64, TMI_FNUM_TTT_UNMAP_RANGE)
+#define TMI_TMM_TTT_DESTROY             TMI_FID(SMC_64, TMI_FNUM_TTT_DESTROY)
 #define TMI_TMM_INF_TEST                TMI_FID(SMC_64, TMI_FNUM_INF_TEST)
 #define TMI_TMM_KAE_INIT                TMI_FID(SMC_64, TMI_FNUM_KAE_INIT)
 #define TMI_TMM_KAE_ENABLE              TMI_FID(SMC_64, TMI_FNUM_KAE_ENABLE)
@@ -392,6 +395,7 @@ u64 tmi_ttt_create(u64 numa_set, u64 rd, u64 map_addr, u64 level);
 u64 tmi_psci_complete(u64 calling_tec, u64 target_tec);
 u64 tmi_features(u64 index);
 u64 tmi_ttt_map_range(u64 rd, u64 map_addr, u64 size, u64 cur_node, u64 target_node);
+u64 tmi_ttt_destroy(u64 rd);
 u64 tmi_mem_info_show(u64 mem_info_addr);
 
 u64 tmi_dev_ttt_create(u64 numa_set, u64 rd, u64 map_addr, u64 level);
@@ -413,6 +417,7 @@ u64 tmi_kae_init(void);
 u64 tmi_kae_enable(u64 rd, u64 numa_set, u64 is_enable);
 
 u64 mmio_va_to_pa(void *addr);
+int virtcca_io_mem_abort(struct kvm_vcpu *vcpu, unsigned long hva, phys_addr_t fault_ipa);
 void kvm_cvm_vcpu_put(struct kvm_vcpu *vcpu);
 int kvm_load_user_data(struct kvm *kvm, unsigned long arg);
 unsigned long cvm_psci_vcpu_affinity_info(struct kvm_vcpu *vcpu,

@@ -5,6 +5,9 @@
 #include <linux/arm-smccc.h>
 #include <asm/kvm_tmi.h>
 #include <asm/memory.h>
+#include <asm/virtcca_cvm_host.h>
+#include <asm/virtcca_cvm_guest.h>
+#include <asm/kvm_emulate.h>
 
 /**
  * mmio_va_to_pa - To convert the virtual address of the mmio space
@@ -36,6 +39,22 @@ u64 mmio_va_to_pa(void *addr)
 		return pa;
 }
 EXPORT_SYMBOL(mmio_va_to_pa);
+
+int virtcca_io_mem_abort(struct kvm_vcpu *vcpu, unsigned long hva, phys_addr_t fault_ipa)
+{
+	struct virtcca_cvm *cvm = vcpu->kvm->arch.virtcca_cvm;
+
+	if (!vcpu_is_tec(vcpu) || !(fault_ipa >= cvm->mmio_start && fault_ipa < cvm->mmio_end))
+		return -EPERM;
+
+	if (kvm_is_error_hva(hva) && kvm_vcpu_dabt_is_cm(vcpu)) {
+		kvm_incr_pc(vcpu);
+		return 1;
+	}
+
+	fault_ipa |= kvm_vcpu_get_hfar(vcpu) & ((1 << 12) - 1);
+	return io_mem_abort(vcpu, fault_ipa);
+}
 
 u64 tmi_version(void)
 {
@@ -141,6 +160,14 @@ u64 tmi_ttt_map_range(u64 rd, u64 map_addr, u64 size, u64 cur_node, u64 target_n
 	struct arm_smccc_res res;
 
 	arm_smccc_1_1_smc(TMI_TMM_TTT_MAP_RANGE, rd, map_addr, size, cur_node, target_node, &res);
+	return res.a1;
+}
+
+u64 tmi_ttt_destroy(u64 rd)
+{
+	struct arm_smccc_res res;
+
+	arm_smccc_1_1_smc(TMI_TMM_TTT_DESTROY, rd, &res);
 	return res.a1;
 }
 
