@@ -71,10 +71,10 @@ int set_processor_mask(u32 id, u32 flags)
 		return -ENODEV;
 
 	}
-
-	cpu = topo_add_cpu(cpuid);
-	if (cpu < 0)
-		return -EEXIST;
+	if (cpuid == loongson_sysconf.boot_cpu_id)
+		cpu = 0;
+	else
+		cpu = cpumask_next_zero(-1, cpu_present_mask);
 
 	if (flags & ACPI_MADT_ENABLED) {
 		num_processors++;
@@ -197,6 +197,8 @@ void __init acpi_boot_table_init(void)
 		goto fdt_earlycon;
 	}
 
+	loongson_sysconf.boot_cpu_id = read_csr_cpuid();
+
 	/*
 	 * Process the Multiple APIC Description Table (MADT), if present
 	 */
@@ -246,7 +248,7 @@ void __init numa_set_distance(int from, int to, int distance)
 void __init
 acpi_numa_processor_affinity_init(struct acpi_srat_cpu_affinity *pa)
 {
-	int pxm, node, cpu;
+	int pxm, node;
 
 	if (srat_disabled())
 		return;
@@ -274,11 +276,6 @@ acpi_numa_processor_affinity_init(struct acpi_srat_cpu_affinity *pa)
 				pxm, pa->apic_id, node);
 		return;
 	}
-
-	cpu = topo_get_cpu(pa->apic_id);
-	/* Check whether apic_id exists in MADT table */
-	if (cpu < 0)
-		return;
 
 	early_numa_add_cpu(pa->apic_id, node);
 
@@ -318,17 +315,12 @@ int acpi_map_cpu(acpi_handle handle, phys_cpuid_t physid, u32 acpi_id, int *pcpu
 {
 	int cpu;
 
-	cpu = topo_get_cpu(physid);
-	/* Check whether apic_id exists in MADT table */
+	cpu = set_processor_mask(physid, ACPI_MADT_ENABLED);
 	if (cpu < 0) {
 		pr_info(PREFIX "Unable to map lapic to logical cpu number\n");
 		return cpu;
 	}
 
-	num_processors++;
-	set_cpu_present(cpu, true);
-	__cpu_number_map[physid] = cpu;
-	__cpu_logical_map[cpu] = physid;
 	acpi_map_cpu2node(handle, cpu, physid);
 
 	*pcpu = cpu;
