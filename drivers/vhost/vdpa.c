@@ -22,8 +22,11 @@
 #include <linux/vdpa.h>
 #include <linux/nospec.h>
 #include <linux/vhost.h>
+#include <linux/iommufd.h>
 
 #include "vhost.h"
+
+MODULE_IMPORT_NS(IOMMUFD);
 
 enum {
 	VHOST_VDPA_BACKEND_FEATURES =
@@ -60,6 +63,8 @@ struct vhost_vdpa {
 	int in_batch;
 	struct vdpa_iova_range range;
 	u32 batch_asid;
+	struct iommufd_device *iommufd_dev;
+	bool iommufd_attached;
 };
 
 static DEFINE_IDA(vhost_vdpa_ida);
@@ -569,6 +574,111 @@ static long vhost_vdpa_resume(struct vhost_vdpa *v)
 	return ops->resume(vdpa);
 }
 
+static long vhost_vdpa_bind_iommufd(struct vhost_vdpa *v, int __user *argp)
+{
+	struct vhost_vdpa_bind_iommufd bind;
+	struct iommufd_ctx *iommufd_ctx;
+	struct iommufd_device *idev;
+	struct device *dma_dev = vdpa_get_dma_dev(v->vdpa);
+	struct iommu_group *iommu_group = iommu_group_get(dma_dev);
+	int ret = 0;
+
+	if (copy_from_user(&bind, argp, sizeof(bind)))
+		return -EFAULT;
+
+	iommufd_ctx = iommufd_ctx_from_fd(bind.iommufd);
+	if (IS_ERR(iommufd_ctx))
+		return PTR_ERR(iommufd_ctx);
+
+	if (v->domain) {
+		iommu_detach_device(v->domain, dma_dev);
+		iommu_domain_free(v->domain);
+		v->domain = NULL;
+	}
+
+	/**
+	 * Default iommu domain is created when vdpa device driver probes.
+	 * Unuse default domain first to avoid failure when claiming dma owner.
+	 */
+	if (dma_dev->bus && dma_dev->bus->dma_cleanup)
+		dma_dev->bus->dma_cleanup(dma_dev);
+	ret = iommu_group_claim_dma_owner(iommu_group, iommufd_ctx);
+	if (ret)
+		goto dma_configure;
+
+	idev = iommufd_device_bind(iommufd_ctx, dma_dev, &bind.out_devid);
+	if (IS_ERR(idev)) {
+		ret = PTR_ERR(idev);
+		goto release_owner;
+	}
+	v->iommufd_dev = idev;
+
+	if (copy_to_user(argp, &bind, sizeof(bind))) {
+		ret = -EFAULT;
+		goto unbind;
+	}
+
+	goto out;
+
+unbind:
+	iommufd_device_unbind(v->iommufd_dev);
+	v->iommufd_dev = NULL;
+release_owner:
+	iommu_group_release_dma_owner(iommu_group);
+dma_configure:
+	if (dma_dev->bus && dma_dev->bus->dma_configure)
+		dma_dev->bus->dma_configure(dma_dev);
+out:
+	iommufd_ctx_put(iommufd_ctx);
+	return ret;
+}
+
+static void vhost_vdpa_detach_iommufd_pt(struct vhost_vdpa *v)
+{
+	if (WARN_ON(!v->iommufd_dev) || !v->iommufd_attached)
+		return;
+
+	iommufd_device_detach(v->iommufd_dev);
+	v->iommufd_attached = false;
+}
+
+static long vhost_vdpa_attach_iommufd_pt(struct vhost_vdpa *v, u32 __user *argp)
+{
+	u32 pt_id = 0;
+	int ret = 0;
+
+	if (copy_from_user(&pt_id, argp, sizeof(pt_id)))
+		return -EFAULT;
+
+	ret = iommufd_device_attach(v->iommufd_dev, &pt_id);
+	if (ret)
+		return ret;
+	v->iommufd_attached = true;
+
+	if (copy_to_user(argp, &pt_id, sizeof(pt_id))) {
+		vhost_vdpa_detach_iommufd_pt(v);
+		ret = -EFAULT;
+	}
+
+	return ret;
+}
+
+static void vhost_vdpa_unbind_iommufd(struct vhost_vdpa *v)
+{
+	struct device *dma_dev = vdpa_get_dma_dev(v->vdpa);
+	struct iommu_group *iommu_group = iommu_group_get(dma_dev);
+
+	if (!v->iommufd_dev)
+		return;
+
+	vhost_vdpa_detach_iommufd_pt(v);
+	iommufd_device_unbind(v->iommufd_dev);
+	v->iommufd_dev = NULL;
+	iommu_group_release_dma_owner(iommu_group);
+	if (dma_dev->bus && dma_dev->bus->dma_configure)
+		dma_dev->bus->dma_configure(dma_dev);
+}
+
 #ifdef CONFIG_VHOST_VDPA_MIGRATION
 static int vhost_vdpa_get_dev_buffer_size(struct vhost_vdpa *v,
 					  uint32_t __user *argp)
@@ -915,6 +1025,18 @@ static long vhost_vdpa_unlocked_ioctl(struct file *filep,
 		break;
 	case VHOST_VDPA_RESUME:
 		r = vhost_vdpa_resume(v);
+		break;
+	case VHOST_VDPA_BIND_IOMMUFD:
+		r = vhost_vdpa_bind_iommufd(v, argp);
+		break;
+	case VHOST_VDPA_UNBIND_IOMMUFD:
+		vhost_vdpa_unbind_iommufd(v);
+		break;
+	case VHOST_VDPA_ATTACH_IOMMUFD_PT:
+		r = vhost_vdpa_attach_iommufd_pt(v, argp);
+		break;
+	case VHOST_VDPA_DETACH_IOMMUFD_PT:
+		vhost_vdpa_detach_iommufd_pt(v);
 		break;
 #ifdef CONFIG_VHOST_VDPA_MIGRATION
 	case VHOST_GET_DEV_BUFFER_SIZE:
@@ -1557,6 +1679,7 @@ static int vhost_vdpa_release(struct inode *inode, struct file *filep)
 	struct vhost_dev *d = &v->vdev;
 
 	mutex_lock(&d->mutex);
+	vhost_vdpa_unbind_iommufd(v);
 	filep->private_data = NULL;
 	vhost_vdpa_clean_irq(v);
 	vhost_vdpa_reset(v, VDPA_DEV_RESET_CLOSE);
@@ -1708,6 +1831,9 @@ static int vhost_vdpa_probe(struct vdpa_device *vdpa)
 
 	for (i = 0; i < VHOST_VDPA_IOTLB_BUCKETS; i++)
 		INIT_HLIST_HEAD(&v->as[i]);
+
+	v->iommufd_dev = NULL;
+	v->iommufd_attached = false;
 
 	return 0;
 

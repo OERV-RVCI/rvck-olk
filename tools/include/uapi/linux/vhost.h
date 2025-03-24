@@ -219,4 +219,32 @@
  */
 #define VHOST_VDPA_RESUME		_IO(VHOST_VIRTIO, 0x7E)
 
+/* Bind a vDPA device to the specified iommufd
+ *
+ * After the return of this ioctl the vDPA device is binded to the specified
+ * iommufd, and the device id is also returned.
+ */
+#define VHOST_VDPA_BIND_IOMMUFD			_IO(VHOST_VIRTIO, 0x90)
+
+/* Unbind a vDPA device from the specified iommufd
+ *
+ * After the return of this ioctl the vDPA device is unbinded from the
+ * specified iommufd.
+ */
+#define VHOST_VDPA_UNBIND_IOMMUFD		_IO(VHOST_VIRTIO, 0x91)
+
+/* Associate the vDPA device with an address space within the bound iommufd.
+ *
+ * After the return of this ioctl the vDPA device is attached to the bound
+ * iommufd.
+ */
+#define VHOST_VDPA_ATTACH_IOMMUFD_PT	_IO(VHOST_VIRTIO, 0x92)
+
+/* Detach the vDPA device from an address space within the bound iommufd.
+ *
+ * After the return of this ioctl the vDPA device is detached from the address
+ * space within the bound iommufd.
+ */
+#define VHOST_VDPA_DETACH_IOMMUFD_PT	_IO(VHOST_VIRTIO, 0x93)
+
 #endif
