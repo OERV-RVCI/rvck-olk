@@ -184,9 +184,9 @@
 #define QM_IFC_INT_DISABLE		BIT(0)
 #define QM_IFC_INT_STATUS_MASK		BIT(0)
 #define QM_IFC_INT_SET_MASK		BIT(0)
-#define QM_WAIT_DST_ACK			100
-#define QM_MAX_PF_WAIT_COUNT		50
-#define QM_MAX_VF_WAIT_COUNT		100
+#define QM_WAIT_DST_ACK			10
+#define QM_MAX_PF_WAIT_COUNT		10
+#define QM_MAX_VF_WAIT_COUNT		40
 #define QM_VF_RESET_WAIT_US            20000
 #define QM_VF_RESET_WAIT_CNT           3000
 #define QM_VF_RESET_WAIT_TIMEOUT_US    \
@@ -1712,8 +1712,8 @@ static int qm_ping_all_vfs(struct hisi_qm *qm, u64 cmd)
 	mutex_lock(&qm->mailbox_lock);
 	/* PF sends command to all VFs by mailbox */
 	ret = qm_mb_nolock(qm, &mailbox);
-	if (ret && cmd != QM_PF_FLR_PREPARE && cmd != QM_PF_SRST_PREPARE) {
-		dev_err(dev, "failed to send command to all vfs, cmd = %llu!\n", cmd);
+	if (ret) {
+		dev_err(dev, "failed to send command to VFs!\n");
 		mutex_unlock(&qm->mailbox_lock);
 		return ret;
 	}
@@ -1753,8 +1753,8 @@ static int qm_ping_pf(struct hisi_qm *qm, u64 cmd)
 	qm_mb_pre_init(&mailbox, QM_MB_CMD_SRC, cmd, 0, 0);
 	mutex_lock(&qm->mailbox_lock);
 	ret = qm_mb_nolock(qm, &mailbox);
-	if (ret && (cmd > QM_VF_START_FAIL || cmd < QM_VF_PREPARE_DONE)) {
-		dev_err(&qm->pdev->dev, "failed to send command to PF, cmd = %llu!\n", cmd);
+	if (ret) {
+		dev_err(&qm->pdev->dev, "failed to send command to PF!\n");
 		goto unlock;
 	}
 
@@ -1763,10 +1763,8 @@ static int qm_ping_pf(struct hisi_qm *qm, u64 cmd)
 	while (true) {
 		msleep(QM_WAIT_DST_ACK);
 		val = readl(qm->io_base + QM_IFC_INT_SET_V);
-		if (!(val & QM_IFC_INT_STATUS_MASK)) {
-			ret = 0;
+		if (!(val & QM_IFC_INT_STATUS_MASK))
 			break;
-		}
 
 		if (++cnt > QM_MAX_VF_WAIT_COUNT) {
 			ret = -ETIMEDOUT;
@@ -4903,13 +4901,8 @@ static void qm_handle_cmd_msg(struct hisi_qm *qm, u32 fun_num)
 	ret = qm_get_mb_cmd(qm, &msg, fun_num);
 	qm_clear_cmd_interrupt(qm, BIT(fun_num));
 	if (ret) {
-		if (!fun_num) {
-			msg = QM_PF_SRST_PREPARE;
-			dev_err(dev, "failed to get response from PF, suppos it is soft reset!\n");
-		} else {
-			dev_err(dev, "failed to get msg from source!\n");
-			return;
-		}
+		dev_err(dev, "failed to get msg from source!\n");
+		return;
 	}
 
 	cmd = msg & QM_MB_CMD_DATA_MASK;
