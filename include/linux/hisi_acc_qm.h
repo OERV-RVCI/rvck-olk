@@ -148,7 +148,6 @@ enum qm_misc_ctl_bits {
 	QM_RST_SCHED,
 	QM_RESETTING,
 	QM_MODULE_PARAM,
-	QM_DEVICE_DOWN,
 };
 
 enum qm_cap_bits {
