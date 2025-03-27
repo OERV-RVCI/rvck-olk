@@ -380,7 +380,7 @@ static void uacce_vma_close(struct vm_area_struct *vma)
 		mutex_lock(&q->mutex);
 		qfr = q->qfrs[vma->vm_pgoff];
 		if (!qfr) {
-			mutex_lock(&q->mutex);
+			mutex_unlock(&q->mutex);
 			mutex_unlock(&uacce->mutex);
 			return;
 		}
