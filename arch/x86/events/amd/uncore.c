@@ -723,6 +723,7 @@ int amd_uncore_df_ctx_init(struct amd_uncore *uncore, unsigned int cpu)
 			*df_attr++ = &format_attr_umask10f18h.attr;
 		else if (boot_cpu_data.x86_model == 0x6 ||
 			 boot_cpu_data.x86_model == 0x7 ||
+			 boot_cpu_data.x86_model == 0x8 ||
 			 boot_cpu_data.x86_model == 0x10)
 			*df_attr++ = &format_attr_umask12f18h.attr;
 	}
