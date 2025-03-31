@@ -486,9 +486,14 @@ void hns_roce_register_uctx_debugfs(struct hns_roce_dev *hr_dev,
 				     hr_dev, uctx);
 }
 
-void hns_roce_unregister_uctx_debugfs(struct hns_roce_ucontext *uctx)
+void hns_roce_unregister_uctx_debugfs(struct hns_roce_dev *hr_dev,
+					struct hns_roce_ucontext *uctx)
 {
-	debugfs_remove_recursive(uctx->dca_dbgfs.root);
+	struct hns_dca_debugfs *dca_dbgfs = &hr_dev->dbgfs.dca_root;
+	char name[DCA_CTX_PID_LEN];
+
+	snprintf(name, sizeof(name), "%d", uctx->pid);
+	debugfs_lookup_and_remove(name, dca_dbgfs->root);
 }
 
 /* debugfs for device */
@@ -508,6 +513,7 @@ void hns_roce_register_debugfs(struct hns_roce_dev *hr_dev)
 void hns_roce_unregister_debugfs(struct hns_roce_dev *hr_dev)
 {
 	debugfs_remove_recursive(hr_dev->dbgfs.root);
+	memset(&hr_dev->dbgfs, 0, sizeof(hr_dev->dbgfs));
 }
 
 /* debugfs for hns module */
