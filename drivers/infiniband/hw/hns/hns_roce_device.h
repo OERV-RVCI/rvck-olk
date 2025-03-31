@@ -465,27 +465,29 @@ struct hns_roce_buf {
 	unsigned int			page_shift;
 };
 
+struct hns_roce_db_pg_node {
+	struct list_head list;
+	struct ib_umem *umem;
+	struct {
+		u32 *page;
+		dma_addr_t db_dma;
+	} kdb;
+	bool delayed_unmap_flag;
+};
+
 struct hns_roce_db_pgdir {
 	struct list_head	list;
 	DECLARE_BITMAP(order0, HNS_ROCE_DB_PER_PAGE);
 	DECLARE_BITMAP(order1, HNS_ROCE_DB_PER_PAGE / HNS_ROCE_DB_TYPE_COUNT);
 	unsigned long		*bits[HNS_ROCE_DB_TYPE_COUNT];
-	u32			*page;
-	dma_addr_t		db_dma;
-};
-
-struct hns_roce_umem_node {
-	struct ib_umem *umem;
-	struct list_head list;
-	bool delayed_unmap_flag;
+	struct hns_roce_db_pg_node *db_node;
 };
 
 struct hns_roce_user_db_page {
 	struct list_head	list;
-	struct ib_umem		*umem;
 	unsigned long		user_virt;
 	refcount_t		refcount;
-	struct hns_roce_umem_node *umem_node;
+	struct hns_roce_db_pg_node *db_node;
 };
 
 struct hns_roce_db {
@@ -1154,8 +1156,8 @@ struct hns_roce_dev {
 
 	struct list_head mtr_unfree_list; /* list of unfree mtr on this dev */
 	struct mutex mtr_unfree_list_mutex; /* protect mtr_unfree_list */
-	struct list_head umem_unfree_list; /* list of unfree umem on this dev */
-	struct mutex umem_unfree_list_mutex; /* protect umem_unfree_list */
+	struct list_head db_unfree_list; /* list of unfree db on this dev */
+	struct mutex db_unfree_list_mutex; /* protect db_unfree_list */
 
 	void *dca_safe_buf;
 	dma_addr_t dca_safe_page;
@@ -1438,7 +1440,8 @@ void hns_roce_db_unmap_user(struct hns_roce_ucontext *context,
 			    bool delayed_unmap_flag);
 int hns_roce_alloc_db(struct hns_roce_dev *hr_dev, struct hns_roce_db *db,
 		      int order);
-void hns_roce_free_db(struct hns_roce_dev *hr_dev, struct hns_roce_db *db);
+void hns_roce_free_db(struct hns_roce_dev *hr_dev, struct hns_roce_db *db,
+		      bool delayed_unmap_flag);
 
 void hns_roce_cq_completion(struct hns_roce_dev *hr_dev, u32 cqn);
 void hns_roce_cq_event(struct hns_roce_dev *hr_dev, u32 cqn, int event_type);
@@ -1461,9 +1464,9 @@ struct hns_user_mmap_entry *
 hns_roce_user_mmap_entry_insert(struct ib_ucontext *ucontext, u64 address,
 				size_t length,
 				enum hns_roce_mmap_type mmap_type);
-void hns_roce_add_unfree_umem(struct hns_roce_user_db_page *user_page,
-			      struct hns_roce_dev *hr_dev);
-void hns_roce_free_unfree_umem(struct hns_roce_dev *hr_dev);
+void hns_roce_add_unfree_db(struct hns_roce_db_pg_node *db_node,
+			    struct hns_roce_dev *hr_dev);
+void hns_roce_free_unfree_db(struct hns_roce_dev *hr_dev);
 void hns_roce_add_unfree_mtr(struct hns_roce_dev *hr_dev,
 			     struct hns_roce_mtr *mtr);
 void hns_roce_free_unfree_mtr(struct hns_roce_dev *hr_dev);
