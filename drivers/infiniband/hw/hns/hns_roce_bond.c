@@ -606,7 +606,7 @@ static struct hns_roce_die_info *alloc_die_info(int bus_num)
 static void dealloc_die_info(struct hns_roce_die_info *die_info, u8 bus_num)
 {
 	xa_erase(&roce_bond_xa, bus_num);
-	kvfree(die_info);
+	kfree(die_info);
 }
 
 static int alloc_bond_id(struct hns_roce_bond_group *bond_grp)
