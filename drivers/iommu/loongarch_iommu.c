@@ -109,7 +109,7 @@ u16	la_iommu_last_bdf;			/* largest PCI device id
 						 *  we have to handle
 						 */
 
-int loongarch_iommu_disable;
+int loongarch_iommu_disable = 1;
 
 #define iommu_write_regl(iommu, off, val) \
 	writel(val, iommu->confbase + off)
