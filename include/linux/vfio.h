@@ -74,7 +74,9 @@ struct vfio_device {
 	 * debug_root is a static property of the vfio_device
 	 * which must be set prior to registering the vfio_device.
 	 */
+#ifndef __GENKSYMS__
 	struct dentry *debug_root;
+#endif
 #endif
 };
 

@@ -1229,7 +1229,9 @@ enum vfio_device_mig_state {
 	VFIO_DEVICE_STATE_RUNNING_P2P = 5,
 	VFIO_DEVICE_STATE_PRE_COPY = 6,
 	VFIO_DEVICE_STATE_PRE_COPY_P2P = 7,
+#ifndef __GENKSYMS__
 	VFIO_DEVICE_STATE_NR,
+#endif
 };
 
 /**
