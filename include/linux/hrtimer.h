@@ -247,6 +247,7 @@ struct hrtimer_cpu_base {
 
 	KABI_RESERVE(1)
 	KABI_RESERVE(2)
+	KABI_EXTEND(call_single_data_t csd)
 } ____cacheline_aligned;
 
 static inline void hrtimer_set_expires(struct hrtimer *timer, ktime_t time)
