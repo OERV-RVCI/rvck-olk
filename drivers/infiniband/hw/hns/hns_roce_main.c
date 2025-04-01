@@ -632,21 +632,20 @@ static void hns_roce_dealloc_ucontext(struct ib_ucontext *ibcontext)
 	struct hns_roce_ucontext *context = to_hr_ucontext(ibcontext);
 	struct hns_roce_dev *hr_dev = to_hr_dev(ibcontext->device);
 
+	hns_roce_put_cq_bankid_for_uctx(context);
+	hns_roce_unregister_uctx_debugfs(hr_dev, context);
+
 	mutex_lock(&hr_dev->uctx_list_mutex);
 	list_del(&context->list);
 	mutex_unlock(&hr_dev->uctx_list_mutex);
 
+	hns_roce_unregister_udca(hr_dev, context);
+	hns_roce_dealloc_reset_entry(context);
 	if (hr_dev->caps.flags & HNS_ROCE_CAP_FLAG_CQ_RECORD_DB ||
 	    hr_dev->caps.flags & HNS_ROCE_CAP_FLAG_QP_RECORD_DB)
 		mutex_destroy(&context->page_mutex);
 
-	hns_roce_put_cq_bankid_for_uctx(context);
-	hns_roce_unregister_uctx_debugfs(context);
-
-	hns_roce_unregister_udca(hr_dev, context);
-
 	hns_roce_dealloc_uar_entry(context);
-	hns_roce_dealloc_reset_entry(context);
 
 	ida_free(&hr_dev->uar_ida.ida, (int)context->uar.logic_idx);
 }
@@ -1235,7 +1234,7 @@ static void hns_roce_teardown_hca(struct hns_roce_dev *hr_dev)
 		hns_roce_cleanup_dca(hr_dev);
 
 	hns_roce_cleanup_bitmap(hr_dev);
-	mutex_destroy(&hr_dev->umem_unfree_list_mutex);
+	mutex_destroy(&hr_dev->db_unfree_list_mutex);
 	mutex_destroy(&hr_dev->mtr_unfree_list_mutex);
 	mutex_destroy(&hr_dev->uctx_list_mutex);
 	if (hr_dev->caps.flags & HNS_ROCE_CAP_FLAG_CQ_RECORD_DB ||
@@ -1264,8 +1263,8 @@ static int hns_roce_setup_hca(struct hns_roce_dev *hr_dev)
 	INIT_LIST_HEAD(&hr_dev->mtr_unfree_list);
 	mutex_init(&hr_dev->mtr_unfree_list_mutex);
 
-	INIT_LIST_HEAD(&hr_dev->umem_unfree_list);
-	mutex_init(&hr_dev->umem_unfree_list_mutex);
+	INIT_LIST_HEAD(&hr_dev->db_unfree_list);
+	mutex_init(&hr_dev->db_unfree_list_mutex);
 
 	if (hr_dev->caps.flags & HNS_ROCE_CAP_FLAG_CQ_RECORD_DB ||
 	    hr_dev->caps.flags & HNS_ROCE_CAP_FLAG_QP_RECORD_DB) {
@@ -1309,7 +1308,7 @@ err_uar_table_free:
 	if (hr_dev->caps.flags & HNS_ROCE_CAP_FLAG_CQ_RECORD_DB ||
 	    hr_dev->caps.flags & HNS_ROCE_CAP_FLAG_QP_RECORD_DB)
 		mutex_destroy(&hr_dev->pgdir_mutex);
-	mutex_destroy(&hr_dev->umem_unfree_list_mutex);
+	mutex_destroy(&hr_dev->db_unfree_list_mutex);
 	mutex_destroy(&hr_dev->mtr_unfree_list_mutex);
 	mutex_destroy(&hr_dev->uctx_list_mutex);
 
@@ -1495,15 +1494,15 @@ error_failed_alloc_dfx_cnt:
 
 void hns_roce_exit(struct hns_roce_dev *hr_dev, bool bond_cleanup)
 {
+	hns_roce_unregister_debugfs(hr_dev);
 	hns_roce_unregister_device(hr_dev, bond_cleanup);
 	hns_roce_dealloc_scc_param(hr_dev);
-	hns_roce_unregister_debugfs(hr_dev);
 
 	hns_roce_free_dca_safe_buf(hr_dev);
 
 	if (hr_dev->hw->hw_exit)
 		hr_dev->hw->hw_exit(hr_dev);
-	hns_roce_free_unfree_umem(hr_dev);
+	hns_roce_free_unfree_db(hr_dev);
 	hns_roce_free_unfree_mtr(hr_dev);
 	hns_roce_teardown_hca(hr_dev);
 	hns_roce_cleanup_hem(hr_dev);

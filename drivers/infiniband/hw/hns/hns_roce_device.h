@@ -368,6 +368,7 @@ struct hns_roce_mtr {
 	struct ib_umem		*umem; /* user space buffer */
 	struct hns_roce_buf	*kmem; /* kernel space buffer */
 	struct hns_roce_hem_cfg  hem_cfg; /* config for hardware addressing */
+	struct list_head	 node; /* list node for delay-destruction */
 };
 
 /* DCA config */
@@ -393,11 +394,6 @@ struct hns_roce_mw {
 	u32			pbl_buf_pg_sz;
 };
 
-struct hns_roce_mtr_node {
-	struct hns_roce_mtr mtr;
-	struct list_head list;
-};
-
 struct hns_roce_mr {
 	struct ib_mr		ibmr;
 	u64			iova; /* MR's virtual original addr */
@@ -408,11 +404,10 @@ struct hns_roce_mr {
 	int			enabled; /* MR's active status */
 	int			type; /* MR's register type */
 	u32			pbl_hop_num; /* multi-hop number */
-	struct hns_roce_mtr	pbl_mtr;
+	struct hns_roce_mtr	*pbl_mtr;
 	u32			npages;
 	dma_addr_t		*page_list;
 	bool			delayed_destroy_flag;
-	struct hns_roce_mtr_node *mtr_node;
 };
 
 struct hns_roce_mr_table {
@@ -470,26 +465,29 @@ struct hns_roce_buf {
 	unsigned int			page_shift;
 };
 
+struct hns_roce_db_pg_node {
+	struct list_head list;
+	struct ib_umem *umem;
+	struct {
+		u32 *page;
+		dma_addr_t db_dma;
+	} kdb;
+	bool delayed_unmap_flag;
+};
+
 struct hns_roce_db_pgdir {
 	struct list_head	list;
 	DECLARE_BITMAP(order0, HNS_ROCE_DB_PER_PAGE);
 	DECLARE_BITMAP(order1, HNS_ROCE_DB_PER_PAGE / HNS_ROCE_DB_TYPE_COUNT);
 	unsigned long		*bits[HNS_ROCE_DB_TYPE_COUNT];
-	u32			*page;
-	dma_addr_t		db_dma;
-};
-
-struct hns_roce_umem_node {
-	struct ib_umem *umem;
-	struct list_head list;
+	struct hns_roce_db_pg_node *db_node;
 };
 
 struct hns_roce_user_db_page {
 	struct list_head	list;
-	struct ib_umem		*umem;
 	unsigned long		user_virt;
 	refcount_t		refcount;
-	struct hns_roce_umem_node *umem_node;
+	struct hns_roce_db_pg_node *db_node;
 };
 
 struct hns_roce_db {
@@ -506,7 +504,7 @@ struct hns_roce_db {
 
 struct hns_roce_cq {
 	struct ib_cq			ib_cq;
-	struct hns_roce_mtr		mtr;
+	struct hns_roce_mtr		*mtr;
 	struct hns_roce_db		db;
 	u32				flags;
 	spinlock_t			lock;
@@ -525,16 +523,14 @@ struct hns_roce_cq {
 	int				is_armed; /* cq is armed */
 	struct list_head		node; /* all armed cqs are on a list */
 	bool				delayed_destroy_flag;
-	struct hns_roce_mtr_node *mtr_node;
 };
 
 struct hns_roce_idx_que {
-	struct hns_roce_mtr		mtr;
+	struct hns_roce_mtr		*mtr;
 	u32				entry_shift;
 	unsigned long			*bitmap;
 	u32				head;
 	u32				tail;
-	struct hns_roce_mtr_node *mtr_node;
 };
 
 struct hns_roce_srq {
@@ -551,7 +547,7 @@ struct hns_roce_srq {
 	refcount_t		refcount;
 	struct completion	free;
 
-	struct hns_roce_mtr	buf_mtr;
+	struct hns_roce_mtr	*buf_mtr;
 
 	u64		       *wrid;
 	struct hns_roce_idx_que idx_que;
@@ -561,7 +557,6 @@ struct hns_roce_srq {
 	struct hns_roce_db	rdb;
 	u32			cap_flags;
 	bool			delayed_destroy_flag;
-	struct hns_roce_mtr_node *mtr_node;
 };
 
 struct hns_roce_uar_table {
@@ -703,7 +698,7 @@ struct hns_roce_qp {
 	enum ib_sig_type	sq_signal_bits;
 	struct hns_roce_wq	sq;
 
-	struct hns_roce_mtr	mtr;
+	struct hns_roce_mtr	*mtr;
 	struct hns_roce_dca_cfg	dca_cfg;
 
 	u32			buff_size;
@@ -742,7 +737,6 @@ struct hns_roce_qp {
 	u8			priority;
 	enum hns_roce_cong_type cong_type;
 	bool			delayed_destroy_flag;
-	struct hns_roce_mtr_node *mtr_node;
 	spinlock_t flush_lock;
 	struct hns_roce_dip *dip;
 };
@@ -805,7 +799,7 @@ struct hns_roce_eq {
 	int				coalesce;
 	int				arm_st;
 	int				hop_num;
-	struct hns_roce_mtr		mtr;
+	struct hns_roce_mtr		*mtr;
 	u16				eq_max_cnt;
 	u32				eq_period;
 	int				shift;
@@ -1162,8 +1156,8 @@ struct hns_roce_dev {
 
 	struct list_head mtr_unfree_list; /* list of unfree mtr on this dev */
 	struct mutex mtr_unfree_list_mutex; /* protect mtr_unfree_list */
-	struct list_head umem_unfree_list; /* list of unfree umem on this dev */
-	struct mutex umem_unfree_list_mutex; /* protect umem_unfree_list */
+	struct list_head db_unfree_list; /* list of unfree db on this dev */
+	struct mutex db_unfree_list_mutex; /* protect db_unfree_list */
 
 	void *dca_safe_buf;
 	dma_addr_t dca_safe_page;
@@ -1345,10 +1339,11 @@ static inline dma_addr_t hns_roce_get_mtr_ba(struct hns_roce_mtr *mtr)
 
 int hns_roce_mtr_find(struct hns_roce_dev *hr_dev, struct hns_roce_mtr *mtr,
 		      u32 offset, u64 *mtt_buf, int mtt_max);
-int hns_roce_mtr_create(struct hns_roce_dev *hr_dev, struct hns_roce_mtr *mtr,
-			struct hns_roce_buf_attr *buf_attr,
-			unsigned int page_shift, struct ib_udata *udata,
-			unsigned long user_addr);
+struct hns_roce_mtr *hns_roce_mtr_create(struct hns_roce_dev *hr_dev,
+					 struct hns_roce_buf_attr *buf_attr,
+					 unsigned int ba_page_shift,
+					 struct ib_udata *udata,
+					 unsigned long user_addr);
 void hns_roce_mtr_destroy(struct hns_roce_dev *hr_dev,
 			  struct hns_roce_mtr *mtr);
 int hns_roce_mtr_map(struct hns_roce_dev *hr_dev, struct hns_roce_mtr *mtr,
@@ -1445,7 +1440,8 @@ void hns_roce_db_unmap_user(struct hns_roce_ucontext *context,
 			    bool delayed_unmap_flag);
 int hns_roce_alloc_db(struct hns_roce_dev *hr_dev, struct hns_roce_db *db,
 		      int order);
-void hns_roce_free_db(struct hns_roce_dev *hr_dev, struct hns_roce_db *db);
+void hns_roce_free_db(struct hns_roce_dev *hr_dev, struct hns_roce_db *db,
+		      bool delayed_unmap_flag);
 
 void hns_roce_cq_completion(struct hns_roce_dev *hr_dev, u32 cqn);
 void hns_roce_cq_event(struct hns_roce_dev *hr_dev, u32 cqn, int event_type);
@@ -1468,11 +1464,10 @@ struct hns_user_mmap_entry *
 hns_roce_user_mmap_entry_insert(struct ib_ucontext *ucontext, u64 address,
 				size_t length,
 				enum hns_roce_mmap_type mmap_type);
-void hns_roce_add_unfree_umem(struct hns_roce_user_db_page *user_page,
-			      struct hns_roce_dev *hr_dev);
-void hns_roce_free_unfree_umem(struct hns_roce_dev *hr_dev);
-void hns_roce_add_unfree_mtr(struct hns_roce_mtr_node *pos,
-			     struct hns_roce_dev *hr_dev,
+void hns_roce_add_unfree_db(struct hns_roce_db_pg_node *db_node,
+			    struct hns_roce_dev *hr_dev);
+void hns_roce_free_unfree_db(struct hns_roce_dev *hr_dev);
+void hns_roce_add_unfree_mtr(struct hns_roce_dev *hr_dev,
 			     struct hns_roce_mtr *mtr);
 void hns_roce_free_unfree_mtr(struct hns_roce_dev *hr_dev);
 int hns_roce_alloc_scc_param(struct hns_roce_dev *hr_dev);
