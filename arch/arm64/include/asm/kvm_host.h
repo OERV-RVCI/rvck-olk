@@ -641,11 +641,14 @@ struct kvm_vcpu_arch {
 #ifdef CONFIG_HISI_VIRTCCA_HOST
 	struct virtcca_cvm_tec tec;
 #endif
+
+#ifdef CONFIG_ARM64_HDBSS
 	/* HDBSS registers info */
 	struct {
 		u64 br_el2;
 		u64 prod_el2;
 	} hdbss;
+#endif
 };
 
 /*

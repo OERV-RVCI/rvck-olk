@@ -129,6 +129,7 @@ int kvm_arch_vcpu_should_kick(struct kvm_vcpu *vcpu)
 	return kvm_vcpu_exiting_guest_mode(vcpu) == IN_GUEST_MODE;
 }
 
+#ifdef CONFIG_ARM64_HDBSS
 static int kvm_cap_arm_enable_hdbss(struct kvm *kvm,
 				    struct kvm_enable_cap *cap)
 {
@@ -192,6 +193,7 @@ static int kvm_cap_arm_enable_hdbss(struct kvm *kvm,
 
 	return 0;
 }
+#endif
 
 int kvm_vm_ioctl_enable_cap(struct kvm *kvm,
 			    struct kvm_enable_cap *cap)
@@ -247,9 +249,11 @@ int kvm_vm_ioctl_enable_cap(struct kvm *kvm,
 			r = kvm_cvm_enable_cap(kvm, cap);
 		break;
 #endif
+#ifdef CONFIG_ARM64_HDBSS
 	case KVM_CAP_ARM_HW_DIRTY_STATE_TRACK:
 		r = kvm_cap_arm_enable_hdbss(kvm, cap);
 		break;
+#endif
 	default:
 		r = -EINVAL;
 		break;
@@ -503,9 +507,11 @@ int kvm_vm_ioctl_check_extension(struct kvm *kvm, long ext)
 		r = static_key_enabled(&virtcca_cvm_is_available);
 		break;
 #endif
+#ifdef CONFIG_ARM64_HDBSS
 	case KVM_CAP_ARM_HW_DIRTY_STATE_TRACK:
 		r = system_supports_hdbss();
 		break;
+#endif
 	default:
 		r = 0;
 	}
@@ -1837,6 +1843,7 @@ long kvm_arch_vcpu_ioctl(struct file *filp,
 
 void kvm_arch_sync_dirty_log(struct kvm *kvm, struct kvm_memory_slot *memslot)
 {
+#ifdef CONFIG_ARM64_HDBSS
 	/*
 	 * Flush all CPUs' dirty log buffers to the dirty_bitmap.  Called
 	 * before reporting dirty_bitmap to userspace.  KVM flushes the buffers
@@ -1848,6 +1855,7 @@ void kvm_arch_sync_dirty_log(struct kvm *kvm, struct kvm_memory_slot *memslot)
 
 	kvm_for_each_vcpu(i, vcpu, kvm)
 		kvm_vcpu_kick(vcpu);
+#endif
 }
 
 static int kvm_vm_ioctl_set_device_addr(struct kvm *kvm,
