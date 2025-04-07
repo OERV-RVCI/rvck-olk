@@ -8161,6 +8161,19 @@ static void status_unused(struct seq_file *seq)
 	seq_printf(seq, "\n");
 }
 
+static void status_personalities(struct seq_file *seq)
+{
+	struct md_personality *pers;
+
+	seq_puts(seq, "Personalities : ");
+	spin_lock(&pers_lock);
+	list_for_each_entry(pers, &pers_list, list)
+		seq_printf(seq, "[%s] ", pers->name);
+
+	spin_unlock(&pers_lock);
+	seq_puts(seq, "\n");
+}
+
 static int status_resync(struct seq_file *seq, struct mddev *mddev)
 {
 	sector_t max_sectors, resync, res;
@@ -8302,20 +8315,10 @@ static int status_resync(struct seq_file *seq, struct mddev *mddev)
 static void *md_seq_start(struct seq_file *seq, loff_t *pos)
 	__acquires(&all_mddevs_lock)
 {
-	struct md_personality *pers;
-
-	seq_puts(seq, "Personalities : ");
-	spin_lock(&pers_lock);
-	list_for_each_entry(pers, &pers_list, list)
-		seq_printf(seq, "[%s] ", pers->name);
-
-	spin_unlock(&pers_lock);
-	seq_puts(seq, "\n");
 	seq->poll_event = atomic_read(&md_event_count);
-
 	spin_lock(&all_mddevs_lock);
 
-	return seq_list_start(&all_mddevs, *pos);
+	return seq_list_start_head(&all_mddevs, *pos);
 }
 
 static void *md_seq_next(struct seq_file *seq, void *v, loff_t *pos)
@@ -8326,20 +8329,58 @@ static void *md_seq_next(struct seq_file *seq, void *v, loff_t *pos)
 static void md_seq_stop(struct seq_file *seq, void *v)
 	__releases(&all_mddevs_lock)
 {
-	status_unused(seq);
 	spin_unlock(&all_mddevs_lock);
+}
+
+static void md_bitmap_status(struct seq_file *seq, struct mddev *mddev)
+{
+	struct md_bitmap_stats stats;
+	unsigned long used_pages;
+	unsigned long chunk_kb;
+	int err;
+
+	err = md_bitmap_get_stats(mddev->bitmap, &stats);
+	if (err)
+		return;
+
+	chunk_kb = mddev->bitmap_info.chunksize >> 10;
+	used_pages = stats.pages - stats.missing_pages;
+
+	seq_printf(seq, "bitmap: %lu/%lu pages [%luKB], %lu%s chunk",
+		   used_pages, stats.pages, used_pages << (PAGE_SHIFT - 10),
+		   chunk_kb ? chunk_kb : mddev->bitmap_info.chunksize,
+		   chunk_kb ? "KB" : "B");
+
+	if (stats.file) {
+		seq_puts(seq, ", file: ");
+		seq_file_path(seq, stats.file, " \t\n");
+	}
+
+	seq_putc(seq, '\n');
 }
 
 static int md_seq_show(struct seq_file *seq, void *v)
 {
-	struct mddev *mddev = list_entry(v, struct mddev, all_mddevs);
+	struct mddev *mddev;
 	sector_t sectors;
 	struct md_rdev *rdev;
 
+	if (v == &all_mddevs) {
+		status_personalities(seq);
+		if (list_empty(&all_mddevs))
+			status_unused(seq);
+		return 0;
+	}
+
+	mddev = list_entry(v, struct mddev, all_mddevs);
 	if (!mddev_get(mddev))
 		return 0;
 
 	spin_unlock(&all_mddevs_lock);
+
+	/* prevent bitmap to be freed after checking */
+	mutex_lock(&mddev->bitmap_info.mutex);
+
 	spin_lock(&mddev->lock);
 	if (mddev->pers || mddev->raid_disks || !list_empty(&mddev->disks)) {
 		seq_printf(seq, "%s : %sactive", mdname(mddev),
@@ -8405,12 +8446,17 @@ static int md_seq_show(struct seq_file *seq, void *v)
 		} else
 			seq_printf(seq, "\n       ");
 
-		md_bitmap_status(seq, mddev->bitmap);
+		md_bitmap_status(seq, mddev);
 
 		seq_printf(seq, "\n");
 	}
 	spin_unlock(&mddev->lock);
+	mutex_unlock(&mddev->bitmap_info.mutex);
 	spin_lock(&all_mddevs_lock);
+
+	if (mddev == list_last_entry(&all_mddevs, struct mddev, all_mddevs))
+		status_unused(seq);
+
 	if (atomic_dec_and_test(&mddev->active))
 		__mddev_put(mddev);
 
