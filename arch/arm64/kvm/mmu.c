@@ -873,7 +873,7 @@ static int kvm_init_ipa_range(struct kvm *kvm,
 	u64 mmfr0, mmfr1;
 	u32 phys_shift;
 
-	if (kvm_is_realm(kvm))
+	if (_kvm_is_realm(kvm))
 		kvm_ipa_limit = kvm_realm_ipa_limit();
 
 	phys_shift = KVM_VM_TYPE_ARM_IPA_SIZE(type);
@@ -1531,7 +1531,7 @@ static int user_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa,
 	if (logging_active) {
 		force_pte = true;
 		vma_shift = PAGE_SHIFT;
-	} else if (vcpu_is_rec(vcpu)) {
+	} else if (_vcpu_is_rec(vcpu)) {
 		// Force PTE level mappings for realms
 		force_pte = true;
 		vma_shift = PAGE_SHIFT;
@@ -1683,7 +1683,7 @@ static int user_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa,
 	 */
 	if (fault_status == ESR_ELx_FSC_PERM && vma_pagesize == fault_granule)
 		ret = kvm_pgtable_stage2_relax_perms(pgt, fault_ipa, prot);
-	else if (kvm_is_realm(kvm))
+	else if (_kvm_is_realm(kvm))
 		ret = realm_map_ipa(kvm, fault_ipa, pfn, vma_pagesize,
 				    prot, memcache);
 	else

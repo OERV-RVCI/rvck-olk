@@ -135,7 +135,7 @@ static void update_arch_timer_irq_lines(struct kvm_vcpu *vcpu)
  * Return > 0 to return to guest, < 0 on error, 0 (and set exit_reason) on
  * proper exit to userspace.
  */
-int handle_rec_exit(struct kvm_vcpu *vcpu, int rec_run_ret)
+int _handle_rec_exit(struct kvm_vcpu *vcpu, int rec_run_ret)
 {
 	struct realm_rec *rec = &vcpu->arch.rec;
 	u8 esr_ec = ESR_ELx_EC(rec->run->exit.esr);

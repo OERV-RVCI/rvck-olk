@@ -57,6 +57,4 @@ int realm_psci_complete(struct kvm_vcpu *calling, struct kvm_vcpu *target, unsig
 
 u32 kvm_realm_vgic_nr_lr(void);
 
-bool _kvm_is_realm(struct kvm *kvm);
-
 #endif /* __CCA_BASE_H */

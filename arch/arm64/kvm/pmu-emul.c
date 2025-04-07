@@ -15,6 +15,7 @@
 #include <kvm/arm_pmu.h>
 #include <kvm/arm_vgic.h>
 #include <asm/arm_pmuv3.h>
+#include <asm/cca_base.h>
 
 #define PERF_ATTR_CFG1_COUNTER_64BIT	BIT(0)
 

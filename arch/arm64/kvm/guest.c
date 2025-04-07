@@ -877,7 +877,7 @@ int kvm_arm_set_reg(struct kvm_vcpu *vcpu, const struct kvm_one_reg *reg)
 	if ((reg->id & ~KVM_REG_SIZE_MASK) >> 32 != KVM_REG_ARM64 >> 32)
 		return -EINVAL;
 
-	if (kvm_is_realm(vcpu->kvm) && !validate_realm_set_reg(vcpu, reg))
+	if (_kvm_is_realm(vcpu->kvm) && !validate_realm_set_reg(vcpu, reg))
 		return -EINVAL;
 
 	switch (reg->id & KVM_REG_ARM_COPROC_MASK) {

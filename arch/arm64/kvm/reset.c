@@ -162,7 +162,7 @@ bool kvm_arm_vcpu_is_finalized(struct kvm_vcpu *vcpu)
 	if (vcpu_has_sve(vcpu) && !kvm_arm_vcpu_sve_finalized(vcpu))
 		return false;
 
-	if (kvm_is_realm(vcpu->kvm) &&
+	if (_kvm_is_realm(vcpu->kvm) &&
 	    !(vcpu_is_rec(vcpu) && kvm_arm_rec_finalized(vcpu) &&
 	      READ_ONCE(vcpu->kvm->arch.realm.state) == REALM_STATE_ACTIVE))
 		return false;

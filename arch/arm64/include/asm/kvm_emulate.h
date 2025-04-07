@@ -20,6 +20,7 @@
 #include <asm/ptrace.h>
 #include <asm/cputype.h>
 #include <asm/virt.h>
+#include <asm/cca_base.h>
 
 #define CURRENT_EL_SP_EL0_VECTOR	0x0
 #define CURRENT_EL_SP_ELx_VECTOR	0x200
@@ -650,6 +651,11 @@ static inline bool kvm_is_realm(struct kvm *kvm)
 	return false;
 }
 
+static inline bool _kvm_is_realm(struct kvm *kvm)
+{
+	return kvm_is_realm(kvm) && (kvm_get_cvm_type() == ARMCCA_CVM);
+}
+
 static inline enum realm_state kvm_realm_state(struct kvm *kvm)
 {
 	return READ_ONCE(kvm->arch.realm.state);
@@ -675,6 +681,11 @@ static inline bool vcpu_is_rec(struct kvm_vcpu *vcpu)
 	if (static_branch_unlikely(&kvm_rme_is_available))
 		return vcpu_has_feature(vcpu, KVM_ARM_VCPU_REC);
 	return false;
+}
+
+static inline bool _vcpu_is_rec(struct kvm_vcpu *vcpu)
+{
+	return vcpu_is_rec(vcpu) && (kvm_get_cvm_type() == ARMCCA_CVM);
 }
 
 static inline bool kvm_arm_rec_finalized(struct kvm_vcpu *vcpu)
