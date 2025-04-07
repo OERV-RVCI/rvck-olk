@@ -328,7 +328,7 @@ static void __unmap_stage2_range(struct kvm_s2_mmu *mmu, phys_addr_t start, u64 
 	lockdep_assert_held_write(&kvm->mmu_lock);
 	WARN_ON(size & ~PAGE_MASK);
 
-	if (kvm_is_realm(kvm))
+	if (_kvm_is_realm(kvm))
 		kvm_realm_unmap_range(kvm, start, size, !only_shared);
 	else
 		WARN_ON(stage2_apply_range(mmu, start, end,
@@ -1042,7 +1042,7 @@ void kvm_free_stage2_pgd(struct kvm_s2_mmu *mmu)
 
 	write_lock(&kvm->mmu_lock);
 	pgt = mmu->pgt;
-	if (kvm_is_realm(kvm) &&
+	if (_kvm_is_realm(kvm) &&
 	    (kvm_realm_state(kvm) != REALM_STATE_DEAD &&
 	     kvm_realm_state(kvm) != REALM_STATE_NONE)) {
 		unmap_stage2_range(mmu, 0, (~0ULL) & PAGE_MASK, false);
@@ -1488,6 +1488,8 @@ static int user_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa,
 	 */
 	if (vcpu_is_rec(vcpu))
 		write_fault = true;
+	if (vcpu_is_tec(vcpu))
+		prot = KVM_PGTABLE_PROT_R | KVM_PGTABLE_PROT_W;
 
 	exec_fault = kvm_vcpu_trap_is_exec_fault(vcpu);
 	VM_BUG_ON(write_fault && exec_fault);
@@ -1622,7 +1624,7 @@ static int user_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa,
 	 * that depends on the higher version feature guest memfd.
 	 * Here we should handle protected addresses fault expect protected devices.
 	 */
-	if (device && vcpu_is_rec(vcpu) &&
+	if (device && _vcpu_is_rec(vcpu) &&
 	    kvm_gpa_from_fault(kvm, fault_ipa) == fault_ipa)
 		return -EINVAL;
 

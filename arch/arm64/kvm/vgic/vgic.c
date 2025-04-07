@@ -13,6 +13,7 @@
 #include <asm/kvm_emulate.h>
 #include <asm/kvm_hyp.h>
 #include <asm/kvm_rme.h>
+#include <asm/kvm_tmi.h>
 
 #include "vgic.h"
 
@@ -906,10 +907,39 @@ static inline bool can_access_vgic_from_kernel(void)
 	return !static_branch_unlikely(&kvm_vgic_global_state.gicv3_cpuif) || has_vhe();
 }
 
+#ifdef CONFIG_HISI_VIRTCCA_HOST
+static inline void vgic_tmm_save_state(struct kvm_vcpu *vcpu)
+{
+	int i;
+	struct vgic_v3_cpu_if *cpu_if = &vcpu->arch.vgic_cpu.vgic_v3;
+	struct tmi_tec_run *tec_run = vcpu->arch.tec.run;
+
+	for (i = 0; i < kvm_vgic_global_state.nr_lr; ++i) {
+		cpu_if->vgic_lr[i] = tec_run->exit.gicv3_lrs[i];
+		tec_run->enter.gicv3_lrs[i] = 0;
+	}
+}
+
+static inline void vgic_tmm_restore_state(struct kvm_vcpu *vcpu)
+{
+	int i;
+	struct vgic_v3_cpu_if *cpu_if = &vcpu->arch.vgic_cpu.vgic_v3;
+	struct tmi_tec_run *tec_run = vcpu->arch.tec.run;
+
+	for (i = 0; i < kvm_vgic_global_state.nr_lr; ++i) {
+		tec_run->enter.gicv3_lrs[i] = cpu_if->vgic_lr[i];
+		tec_run->exit.gicv3_lrs[i] = cpu_if->vgic_lr[i];
+	}
+}
+#endif
+
 static inline void vgic_rmm_save_state(struct kvm_vcpu *vcpu)
 {
 	struct vgic_v3_cpu_if *cpu_if = &vcpu->arch.vgic_cpu.vgic_v3;
 	int i;
+
+	if (!_vcpu_is_rec(vcpu))
+		return;
 
 	for (i = 0; i < kvm_vcpu_vgic_nr_lr(vcpu); i++) {
 		cpu_if->vgic_lr[i] = vcpu->arch.rec.run->exit.gicv3_lrs[i];
@@ -921,6 +951,10 @@ static inline void vgic_save_state(struct kvm_vcpu *vcpu)
 {
 	if (!static_branch_unlikely(&kvm_vgic_global_state.gicv3_cpuif))
 		vgic_v2_save_state(vcpu);
+#ifdef CONFIG_HISI_VIRTCCA_HOST
+	else if (vcpu_is_tec(vcpu))
+		vgic_tmm_save_state(vcpu);
+#endif
 	else if (vcpu_is_rec(vcpu))
 		vgic_rmm_save_state(vcpu);
 	else
@@ -954,6 +988,9 @@ static inline void vgic_rmm_restore_state(struct kvm_vcpu *vcpu)
 	struct vgic_v3_cpu_if *cpu_if = &vcpu->arch.vgic_cpu.vgic_v3;
 	int i;
 
+	if (!_vcpu_is_rec(vcpu))
+		return;
+
 	for (i = 0; i < kvm_vcpu_vgic_nr_lr(vcpu); i++) {
 		vcpu->arch.rec.run->enter.gicv3_lrs[i] = cpu_if->vgic_lr[i];
 		/*
@@ -969,6 +1006,10 @@ static inline void vgic_restore_state(struct kvm_vcpu *vcpu)
 {
 	if (!static_branch_unlikely(&kvm_vgic_global_state.gicv3_cpuif))
 		vgic_v2_restore_state(vcpu);
+#ifdef CONFIG_HISI_VIRTCCA_HOST
+	else if (vcpu_is_tec(vcpu))
+		vgic_tmm_restore_state(vcpu);
+#endif
 	else if (vcpu_is_rec(vcpu))
 		vgic_rmm_restore_state(vcpu);
 	else

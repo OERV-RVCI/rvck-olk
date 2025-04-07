@@ -42,7 +42,7 @@
 #include <asm/kvm_emulate.h>
 #include <asm/kvm_rme.h>
 #include <asm/sections.h>
-
+#include <asm/kvm_tmi.h>
 #include <kvm/arm_hypercalls.h>
 #include <kvm/arm_pmu.h>
 #include <kvm/arm_psci.h>
@@ -1947,6 +1947,11 @@ int kvm_arch_vm_ioctl(struct file *filp, unsigned int ioctl, unsigned long arg)
 	struct kvm_device_attr attr;
 
 	switch (ioctl) {
+#ifdef CONFIG_HISI_VIRTCCA_HOST
+	case KVM_LOAD_USER_DATA: {
+		return kvm_load_user_data(kvm, arg);
+	}
+#endif
 	case KVM_CREATE_IRQCHIP: {
 		int ret;
 		if (!vgic_present)

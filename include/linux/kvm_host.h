@@ -550,6 +550,20 @@ static __always_inline void guest_state_exit_irqoff(void)
 	instrumentation_end();
 }
 
+#ifdef CONFIG_HISI_VIRTCCA_HOST
+#define CVM_MAX_HALT_POLL_NS 100000
+
+static __always_inline bool vcpu_is_tec(struct kvm_vcpu *vcpu)
+{
+	return (vcpu->arch.tec.run != NULL);
+}
+#else
+static __always_inline bool vcpu_is_tec(struct kvm_vcpu *vcpu)
+{
+	return false;
+}
+#endif /* CONFIG_HISI_VIRTCCA_HOST */
+
 static inline int kvm_vcpu_exiting_guest_mode(struct kvm_vcpu *vcpu)
 {
 	/*

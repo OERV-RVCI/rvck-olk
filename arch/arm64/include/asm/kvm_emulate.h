@@ -693,4 +693,16 @@ static inline bool kvm_arm_rec_finalized(struct kvm_vcpu *vcpu)
 	return vcpu->arch.rec.mpidr != INVALID_HWID;
 }
 
+#ifdef CONFIG_HISI_VIRTCCA_HOST
+
+static inline enum virtcca_cvm_state virtcca_cvm_state(struct kvm *kvm)
+{
+	struct virtcca_cvm *virtcca_cvm = kvm->arch.virtcca_cvm;
+
+	if (!virtcca_cvm)
+		return 0;
+	return READ_ONCE(virtcca_cvm->state);
+}
+#endif
+
 #endif /* __ARM64_KVM_EMULATE_H__ */

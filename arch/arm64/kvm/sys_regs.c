@@ -1598,8 +1598,9 @@ static int set_id_aa64dfr0_el1(struct kvm_vcpu *vcpu,
 	 * ID_AA64DFR0_EL1.DebugVer, BRPs and WRPs all have to be greater than
 	 * zero. CTX_CMPs is never greater than BRPs.
 	 */
-	if (debugver < ID_AA64DFR0_EL1_DebugVer_IMP || !bps || !wps ||
-	    ctx_cmps > bps)
+	if ((kvm_get_cvm_type() != VIRTCCA_CVM) &&
+	    (debugver < ID_AA64DFR0_EL1_DebugVer_IMP || !bps || !wps ||
+	    ctx_cmps > bps))
 		return -EINVAL;
 
 	return set_id_reg(vcpu, rd, val);

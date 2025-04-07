@@ -146,8 +146,8 @@ struct tmi_tec_exit {
 };
 
 struct tmi_tec_run {
-	struct tmi_tec_entry tec_entry;
-	struct tmi_tec_exit tec_exit;
+	struct tmi_tec_entry enter;
+	struct tmi_tec_exit exit;
 };
 
 #define TMI_FNUM_MIN_VALUE	U(0x150)

@@ -250,10 +250,6 @@ static void timer_set_offset(struct arch_timer_context *ctxt, u64 offset)
 		return;
 	}
 
-#ifdef CONFIG_HISI_VIRTCCA_HOST
-	if (kvm_is_virtcca_cvm(ctxt->vcpu->kvm))
-		return;
-#endif
 	if (!ctxt->offset.vm_offset) {
 		WARN(offset, "timer %ld\n", arch_timer_ctx_index(ctxt));
 		return;

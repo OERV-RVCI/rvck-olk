@@ -7,6 +7,7 @@
 #include <linux/kvm_host.h>
 #include <asm/kvm_emulate.h>
 #include <asm/rmi_smc.h>
+#include <asm/kvm_tmi.h>
 #include <trace/events/kvm.h>
 
 #include "trace.h"
@@ -138,8 +139,12 @@ int kvm_handle_mmio_return(struct kvm_vcpu *vcpu)
 			       &data);
 		data = vcpu_data_host_to_guest(vcpu, data, len);
 
-		if (vcpu_is_rec(vcpu))
+		if (_vcpu_is_rec(vcpu))
 			vcpu->arch.rec.run->enter.gprs[0] = data;
+#ifdef CONFIG_HISI_VIRTCCA_HOST
+		else if (vcpu_is_tec(vcpu))
+			vcpu->arch.tec.run->enter.gprs[0] = data;
+#endif
 		else
 			vcpu_set_reg(vcpu, kvm_vcpu_dabt_get_rd(vcpu), data);
 	}
@@ -148,8 +153,12 @@ int kvm_handle_mmio_return(struct kvm_vcpu *vcpu)
 	 * The MMIO instruction is emulated and should not be re-executed
 	 * in the guest.
 	 */
-	if (vcpu_is_rec(vcpu))
+	if (_vcpu_is_rec(vcpu))
 		vcpu->arch.rec.run->enter.flags |= REC_ENTER_FLAG_EMULATED_MMIO;
+#ifdef CONFIG_HISI_VIRTCCA_HOST
+	else if (vcpu_is_tec(vcpu))
+		vcpu->arch.tec.run->enter.flags |= REC_ENTER_FLAG_EMULATED_MMIO;
+#endif
 	else
 		kvm_incr_pc(vcpu);
 

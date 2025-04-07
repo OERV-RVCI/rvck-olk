@@ -6,6 +6,7 @@
 #define __ASM_KVM_TMM_H
 
 #include <uapi/linux/kvm.h>
+#include <asm/rmi_smc.h>
 
 /*
  * There is a conflict with the internal iova of CVM,
@@ -14,10 +15,10 @@
  * iova is not being used, so it is used as the iova range for msi
  * mapping.
  */
-#define CVM_MSI_ORIG_IOVA	0x8000000
-#define CVM_MSI_MIN_IOVA	0x0a001000
-#define CVM_MSI_MAX_IOVA	0x0b000000
-#define CVM_MSI_IOVA_OFFSET	0x1000
+#define CVM_MSI_ORIG_IOVA      0x8000000
+#define CVM_MSI_MIN_IOVA       0x0a001000
+#define CVM_MSI_MAX_IOVA       0x0b000000
+#define CVM_MSI_IOVA_OFFSET    0x1000
 
 #define CVM_RW_8_BIT	0x8
 #define CVM_RW_16_BIT	0x10
@@ -101,7 +102,7 @@ struct virtcca_cvm {
 struct virtcca_cvm_tec {
 	u64 tec;
 	bool tec_created;
-	void *tec_run;
+	struct tmi_tec_run *run;
 };
 
 struct cvm_ttt_addr {
@@ -109,7 +110,7 @@ struct cvm_ttt_addr {
 	u64 addr;
 };
 
-int kvm_init_tmm(void);
+void kvm_init_tmm(void);
 int kvm_cvm_enable_cap(struct kvm *kvm, struct kvm_enable_cap *cap);
 void kvm_destroy_cvm(struct kvm *kvm);
 int kvm_finalize_vcpu_tec(struct kvm_vcpu *vcpu);
@@ -118,7 +119,7 @@ int kvm_tec_enter(struct kvm_vcpu *vcpu);
 int handle_cvm_exit(struct kvm_vcpu *vcpu, int rec_run_status);
 int kvm_arm_create_cvm(struct kvm *kvm);
 void kvm_free_rd(struct kvm *kvm);
-int cvm_psci_complete(struct kvm_vcpu *calling, struct kvm_vcpu *target);
+int cvm_psci_complete(struct kvm_vcpu *calling, struct kvm_vcpu *target, unsigned long status);
 
 void kvm_cvm_unmap_destroy_range(struct kvm *kvm);
 int kvm_cvm_map_range(struct kvm *kvm);
