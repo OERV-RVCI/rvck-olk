@@ -4,6 +4,7 @@
  */
 #ifndef __VIRTCCA_CVM_HOST_H
 #define __VIRTCCA_CVM_HOST_H
+#include <asm/cca_type.h>
 
 #ifdef CONFIG_HISI_VIRTCCA_HOST
 
@@ -11,6 +12,7 @@
 #define UEFI_SIZE 0x8000000
 
 bool is_virtcca_cvm_enable(void);
+void set_cca_cvm_type(int type);
 
 #else
 
@@ -19,5 +21,7 @@ static inline bool is_virtcca_cvm_enable(void)
 	return false;
 }
 
-#endif /* CONFIG_HISI_VIRTCCA_GUEST */
-#endif /* __VIRTCCA_CVM_GUEST_H */
+static inline void set_cca_cvm_type(int type) {}
+
+#endif /* CONFIG_HISI_VIRTCCA_HOST */
+#endif /* __VIRTCCA_CVM_HOST_H */
