@@ -9,6 +9,7 @@
 
 #include <linux/efi.h>
 #include <linux/init.h>
+#include <linux/kmemleak.h>
 #include <linux/screen_info.h>
 
 #include <asm/efi.h>
@@ -217,6 +218,7 @@ l:	if (!p) {
 		return -ENOMEM;
 	}
 
+	kmemleak_not_leak(p);
 	efi_rt_stack_top = p + THREAD_SIZE;
 	return 0;
 }
