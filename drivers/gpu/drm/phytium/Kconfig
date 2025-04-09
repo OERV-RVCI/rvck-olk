@@ -1,5 +1,3 @@
-# SPDX-License-Identifier: GPL-2.0-only
-
 config DRM_PHYTIUM
 	tristate "DRM Support for Phytium Graphics Card"
 	depends on DRM && ARCH_PHYTIUM
