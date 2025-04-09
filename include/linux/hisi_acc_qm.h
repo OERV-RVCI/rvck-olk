@@ -52,6 +52,9 @@
 #define QM_MB_EVENT_SHIFT               8
 #define QM_MB_BUSY_SHIFT		13
 #define QM_MB_OP_SHIFT			14
+#define QM_MB_CMD_DATA_ADDR_L		0x304
+#define QM_MB_CMD_DATA_ADDR_H		0x308
+#define QM_MB_MAX_WAIT_CNT		6000
 
 /* doorbell */
 #define QM_DOORBELL_CMD_SQ              0
@@ -95,6 +98,8 @@
 /* page number for queue file region */
 #define QM_DOORBELL_PAGE_NR		1
 
+#define QM_DEV_ALG_MAX_LEN		256
+
 /* uacce mode of the driver */
 #define UACCE_MODE_NOUACCE		0 /* don't use uacce */
 #define UACCE_MODE_SVA			1 /* use uacce sva mode */
@@ -120,6 +125,7 @@ enum qm_hw_ver {
 	QM_HW_V1 = 0x20,
 	QM_HW_V2 = 0x21,
 	QM_HW_V3 = 0x30,
+	QM_HW_V4 = 0x50,
 };
 
 enum qm_fun_type {
@@ -144,7 +150,6 @@ enum qm_misc_ctl_bits {
 	QM_RST_SCHED,
 	QM_RESETTING,
 	QM_MODULE_PARAM,
-	QM_DEVICE_DOWN,
 };
 
 enum qm_cap_bits {
@@ -155,6 +160,7 @@ enum qm_cap_bits {
 	QM_SUPPORT_MB_COMMAND,
 	QM_SUPPORT_SVA_PREFETCH,
 	QM_SUPPORT_RPM,
+	QM_SUPPORT_DAE,
 };
 
 struct qm_dev_alg {
@@ -265,6 +271,8 @@ struct hisi_qm_err_ini {
 	void (*show_last_dfx_regs)(struct hisi_qm *qm);
 	void (*err_info_init)(struct hisi_qm *qm);
 	enum acc_err_result (*get_err_result)(struct hisi_qm *qm);
+	bool (*dev_is_abnormal)(struct hisi_qm *qm);
+	int (*set_priv_status)(struct hisi_qm *qm);
 };
 
 struct hisi_qm_cap_info {
@@ -390,6 +398,8 @@ struct hisi_qm {
 	struct hisi_qm_poll_data *poll_data;
 
 	struct mutex mailbox_lock;
+
+	struct mutex ifc_lock;
 
 	const struct hisi_qm_hw_ops *ops;
 
@@ -544,9 +554,9 @@ void hisi_qm_reset_prepare(struct pci_dev *pdev);
 void hisi_qm_reset_done(struct pci_dev *pdev);
 
 int hisi_qm_wait_mb_ready(struct hisi_qm *qm);
-int hisi_qm_mb_write(struct hisi_qm *qm, u8 cmd, dma_addr_t dma_addr,
-			       u16 queue, bool op);
-int hisi_qm_mb_read(struct hisi_qm *qm, u64 *msg, u8 cmd, u16 queue);
+int hisi_qm_mb(struct hisi_qm *qm, u8 cmd, dma_addr_t dma_addr, u16 queue,
+	       bool op);
+
 struct hisi_acc_sgl_pool;
 struct hisi_acc_hw_sgl *hisi_acc_sg_buf_map_to_hw_sgl(struct device *dev,
 	struct scatterlist *sgl, struct hisi_acc_sgl_pool *pool,
