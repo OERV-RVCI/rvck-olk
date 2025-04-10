@@ -29,6 +29,7 @@ targets: generated/map-shift.h generated/bit-length.h $(TARGETS)
 
 main:	$(OFILES)
 
+xarray.o: ../../../lib/test_xarray.c
 idr-test.o: ../../../lib/test_ida.c
 idr-test: idr-test.o $(CORE_OFILES)
 
