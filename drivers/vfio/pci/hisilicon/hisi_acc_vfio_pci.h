@@ -4,17 +4,7 @@
 #ifndef HISI_ACC_VFIO_PCI_H
 #define HISI_ACC_VFIO_PCI_H
 
-#include <linux/debugfs.h>
-#include <linux/file.h>
 #include <linux/hisi_acc_qm.h>
-#include <linux/pci.h>
-#include <linux/vfio.h>
-#include <linux/vfio_pci_core.h>
-
-#define VFIO_DEV_DBG_LEN		256
-#define VFIO_DBG_LOG_LEN		16
-#define S_GRDO		0444
-#define S_GWRO		0644
 
 #define MB_POLL_PERIOD_US		10
 #define MB_POLL_TIMEOUT_US		1000
@@ -42,15 +32,13 @@
 #define QM_SQC_VFT_BASE_MASK_V2		GENMASK(15, 0)
 #define QM_SQC_VFT_NUM_SHIFT_V2		45
 #define QM_SQC_VFT_NUM_MASK_V2		GENMASK(9, 0)
+#define QM_MB_CMD_NOT_READY	0xffffffff
 
 /* RW regs */
 #define QM_REGS_MAX_LEN		7
 #define QM_REG_ADDR_OFFSET	0x0004
 
 #define QM_XQC_ADDR_OFFSET	32U
-#define QM_XQC_ADDR_LOW	0x1
-#define QM_XQC_ADDR_HIGH	0x2
-
 #define QM_VF_AEQ_INT_MASK	0x0004
 #define QM_VF_EQ_INT_MASK	0x000c
 #define QM_IFC_INT_SOURCE_V	0x0020
@@ -61,25 +49,6 @@
 
 #define QM_EQC_DW0		0X8000
 #define QM_AEQC_DW0		0X8020
-
-enum mig_debug_cmd {
-	STATE_SAVE,
-	STATE_RESUME,
-	MB_TEST,
-	MIG_DATA_DUMP,
-	MIG_DEV_SHOW,
-};
-
-static const char * const vf_dev_state[] = {
-	"Error",
-	"Stop",
-	"Running",
-	"Stop & Copying",
-	"Resuming",
-	"Running_P2P",
-	"Pre_Copy",
-	"Pre_Copy_P2P",
-};
 
 struct acc_vf_data {
 #define QM_MATCH_SIZE offsetofend(struct acc_vf_data, qm_rsv_state)
@@ -130,8 +99,15 @@ struct hisi_acc_vf_migration_file {
 
 struct hisi_acc_vf_core_device {
 	struct vfio_pci_core_device core_device;
-	u8 match_done:1;
-	u8 deferred_reset:1;
+	u8 match_done;
+	/*
+	 * io_base is only valid when dev_opened is true,
+	 * which is protected by open_mutex.
+	 */
+	bool dev_opened;
+	/* Ensure the accuracy of dev_opened operation */
+	struct mutex open_mutex;
+
 	/* For migration state */
 	struct mutex state_mutex;
 	enum vfio_device_mig_state mig_state;
@@ -139,14 +115,20 @@ struct hisi_acc_vf_core_device {
 	struct pci_dev *vf_dev;
 	struct hisi_qm *pf_qm;
 	struct hisi_qm vf_qm;
+	/*
+	 * vf_qm_state represents the QM_VF_STATE register value.
+	 * It is set by Guest driver for the ACC VF dev indicating
+	 * the driver has loaded and configured the dev correctly.
+	 */
 	u32 vf_qm_state;
 	int vf_id;
-	/* For reset handler */
-	spinlock_t reset_lock;
 	struct hisi_acc_vf_migration_file *resuming_migf;
 	struct hisi_acc_vf_migration_file *saving_migf;
-	/* for debugfs */
-	struct dentry *debug_root;
+
+	/*
+	 * It holds migration data corresponding to the last migration
+	 * and is used by the debugfs interface to report it.
+	 */
 	struct hisi_acc_vf_migration_file *debug_migf;
 };
 #endif /* HISI_ACC_VFIO_PCI_H */
