@@ -4242,12 +4242,22 @@ static int __ext4_block_zero_page_range(handle_t *handle,
 	struct buffer_head *bh;
 	struct folio *folio;
 	int err = 0;
+	bool orig_handle_valid = true;
+
+	if (ext4_should_journal_data(inode) && handle == NULL) {
+		handle = ext4_journal_start(inode, EXT4_HT_MISC, 1);
+		if (IS_ERR(handle))
+			return PTR_ERR(handle);
+		orig_handle_valid = false;
+	}
 
 	folio = __filemap_get_folio(mapping, from >> PAGE_SHIFT,
 				    FGP_LOCK | FGP_ACCESSED | FGP_CREAT,
 				    mapping_gfp_constraint(mapping, ~__GFP_FS));
-	if (IS_ERR(folio))
-		return PTR_ERR(folio);
+	if (IS_ERR(folio)) {
+		err = PTR_ERR(folio);
+		goto out;
+	}
 
 	blocksize = inode->i_sb->s_blocksize;
 
@@ -4300,22 +4310,24 @@ static int __ext4_block_zero_page_range(handle_t *handle,
 			}
 		}
 	}
+
 	if (ext4_should_journal_data(inode)) {
 		BUFFER_TRACE(bh, "get write access");
 		err = ext4_journal_get_write_access(handle, inode->i_sb, bh,
 						    EXT4_JTR_NONE);
 		if (err)
 			goto unlock;
-	}
-	folio_zero_range(folio, offset, length);
-	BUFFER_TRACE(bh, "zeroed end of block");
+		folio_zero_range(folio, offset, length);
+		BUFFER_TRACE(bh, "zeroed end of block");
 
-	if (ext4_should_journal_data(inode)) {
 		err = ext4_dirty_journalled_data(handle, bh);
 		if (err)
 			goto unlock;
 	} else {
 		err = 0;
+		folio_zero_range(folio, offset, length);
+		BUFFER_TRACE(bh, "zeroed end of block");
+
 		mark_buffer_dirty(bh);
 	}
 
@@ -4325,13 +4337,16 @@ static int __ext4_block_zero_page_range(handle_t *handle,
 unlock:
 	folio_unlock(folio);
 	folio_put(folio);
+out:
+	if (ext4_should_journal_data(inode) && orig_handle_valid == false)
+		ext4_journal_stop(handle);
 	return err;
 }
 
-static int ext4_iomap_zero_range(struct inode *inode,
-				 loff_t from, loff_t length)
+static int ext4_iomap_zero_range(struct inode *inode, loff_t from,
+				 loff_t length, bool *did_zero)
 {
-	return iomap_zero_range(inode, from, length, NULL,
+	return iomap_zero_range(inode, from, length, did_zero,
 				&ext4_iomap_buffered_read_ops);
 }
 
@@ -4363,7 +4378,7 @@ static int ext4_block_zero_page_range(handle_t *handle,
 		return dax_zero_range(inode, from, length, NULL,
 				      &ext4_iomap_ops);
 	} else if (ext4_test_inode_state(inode, EXT4_STATE_BUFFERED_IOMAP)) {
-		return ext4_iomap_zero_range(inode, from, length);
+		return ext4_iomap_zero_range(inode, from, length, did_zero);
 	}
 	return __ext4_block_zero_page_range(handle, mapping, from, length,
 					    did_zero);
@@ -4375,16 +4390,15 @@ static int ext4_block_zero_page_range(handle_t *handle,
  * This required during truncate. We need to physically zero the tail end
  * of that block so it doesn't yield old data if the file is later grown.
  */
-static int ext4_block_truncate_page(handle_t *handle,
-				    struct address_space *mapping, loff_t from,
-				    loff_t *zero_len)
+static loff_t ext4_block_truncate_page(struct address_space *mapping,
+				       loff_t from)
 {
 	unsigned offset = from & (PAGE_SIZE-1);
 	unsigned length;
 	unsigned blocksize;
 	struct inode *inode = mapping->host;
 	bool did_zero = false;
-	int ret;
+	int err;
 
 	/* If we are processing an encrypted inode during orphan list handling */
 	if (IS_ENCRYPTED(inode) && !fscrypt_has_encryption_key(inode))
@@ -4393,13 +4407,28 @@ static int ext4_block_truncate_page(handle_t *handle,
 	blocksize = inode->i_sb->s_blocksize;
 	length = blocksize - (offset & (blocksize - 1));
 
-	ret = ext4_block_zero_page_range(handle, mapping, from, length,
+	err = ext4_block_zero_page_range(NULL, mapping, from, length,
 					 &did_zero);
-	if (ret)
-		return ret;
+	if (err)
+		return err;
 
-	*zero_len = length;
-	return 0;
+	/*
+	 * inode with an iomap buffered I/O path does not order data,
+	 * so it is necessary to write out zeroed data before the
+	 * updating i_disksize transaction is committed. Otherwise,
+	 * stale data may remain in the last block, which could be
+	 * exposed during the next expand truncate operation.
+	 */
+	if (length && ext4_test_inode_state(inode, EXT4_STATE_BUFFERED_IOMAP)) {
+		loff_t zero_end = inode->i_size + length;
+
+		err = filemap_write_and_wait_range(mapping,
+						inode->i_size, zero_end - 1);
+		if (err)
+			return err;
+	}
+
+	return length;
 }
 
 int ext4_zero_partial_blocks(handle_t *handle, struct inode *inode,
@@ -4762,6 +4791,12 @@ int ext4_truncate(struct inode *inode)
 		err = ext4_inode_attach_jinode(inode);
 		if (err)
 			goto out_trace;
+
+		zero_len = ext4_block_truncate_page(mapping, inode->i_size);
+		if (zero_len < 0) {
+			err = zero_len;
+			goto out_trace;
+		}
 	}
 
 	if (ext4_test_inode_flag(inode, EXT4_INODE_EXTENTS))
@@ -4774,10 +4809,6 @@ int ext4_truncate(struct inode *inode)
 		err = PTR_ERR(handle);
 		goto out_trace;
 	}
-
-	if (inode->i_size & (inode->i_sb->s_blocksize - 1))
-		ext4_block_truncate_page(handle, mapping, inode->i_size,
-					 &zero_len);
 
 	if (zero_len && ext4_should_order_data(inode)) {
 		err = ext4_jbd2_inode_add_write(handle, inode, inode->i_size,
@@ -6088,6 +6119,18 @@ int ext4_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
 					goto out_mmap_sem;
 			}
 
+			/* Tail zero the EOF folio on truncate up. */
+			if (!shrink && oldsize & (inode->i_sb->s_blocksize - 1)) {
+				loff_t zero_len;
+
+				zero_len = ext4_block_truncate_page(
+						inode->i_mapping, oldsize);
+				if (zero_len < 0) {
+					error = zero_len;
+					goto out_mmap_sem;
+				}
+			}
+
 			handle = ext4_journal_start(inode, EXT4_HT_INODE, 3);
 			if (IS_ERR(handle)) {
 				error = PTR_ERR(handle);
@@ -6098,18 +6141,12 @@ int ext4_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
 				orphan = 1;
 			}
 			/*
-			 * Update c/mtime and tail zero the EOF folio on
-			 * truncate up. ext4_truncate() handles the shrink case
-			 * below.
+			 * Update c/mtime on truncate up, ext4_truncate() will
+			 * update c/mtime in shrink case below
 			 */
-			if (!shrink) {
+			if (!shrink)
 				inode_set_mtime_to_ts(inode,
 						      inode_set_ctime_current(inode));
-				if (oldsize & (inode->i_sb->s_blocksize - 1))
-					ext4_block_truncate_page(handle,
-							inode->i_mapping,
-							oldsize, NULL);
-			}
 
 			if (shrink)
 				ext4_fc_track_range(handle, inode,
