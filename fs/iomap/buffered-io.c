@@ -844,7 +844,12 @@ static int iomap_write_begin(struct iomap_iter *iter, loff_t pos,
 	if (srcmap != &iter->iomap)
 		BUG_ON(pos + len > srcmap->offset + srcmap->length);
 
-	if (fatal_signal_pending(current))
+	/*
+	 * Zero range operations typically involve small amounts of data
+	 * and are frequently used to prevent the exposure of stale data.
+	 * Therefore, do not interrupt it here.
+	 */
+	if (iter->flags != IOMAP_ZERO && fatal_signal_pending(current))
 		return -EINTR;
 
 	if (!mapping_large_folio_support(iter->inode->i_mapping))
