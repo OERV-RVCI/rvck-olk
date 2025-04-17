@@ -317,6 +317,11 @@ static ssize_t buffer_size_store(struct device *dev,
 	if (drvdata->config_type != TMC_CONFIG_TYPE_ETR)
 		return -EPERM;
 
+	/* Don't change the buffer size if it's in use */
+	guard(spinlock)(&drvdata->spinlock);
+	if (drvdata->mode != CS_MODE_DISABLED)
+		return -EBUSY;
+
 	ret = kstrtoul(buf, 0, &val);
 	if (ret)
 		return ret;
