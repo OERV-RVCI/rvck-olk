@@ -703,12 +703,6 @@ struct iommu_ops {
 	int (*dev_enable_feat)(struct device *dev, enum iommu_dev_features f);
 	int (*dev_disable_feat)(struct device *dev, enum iommu_dev_features f);
 
-	/* Per group IOMMU features */
-	int (*get_group_qos_params)(struct iommu_group *group, u16 *partition,
-				    u8 *perf_mon_grp);
-	int (*set_group_qos_params)(struct iommu_group *group, u16 partition,
-				    u8 perf_mon_grp);
-
 	void (*page_response)(struct device *dev, struct iopf_fault *evt,
 			      struct iommu_page_response *msg);
 
@@ -730,8 +724,13 @@ struct iommu_ops {
 	KABI_USE(3, struct iommufd_viommu *(*viommu_alloc)(
 			struct device *dev, struct iommu_domain *parent_domain,
 			struct iommufd_ctx *ictx, unsigned int viommu_type))
-	KABI_RESERVE(4)
-	KABI_RESERVE(5)
+
+	/* Per group IOMMU features */
+	KABI_USE(4, int (*get_group_qos_params)(struct iommu_group *group, u16 *partition,
+						u8 *perf_mon_grp))
+	KABI_USE(5, int (*set_group_qos_params)(struct iommu_group *group, u16 partition,
+						u8 perf_mon_grp))
+
 	KABI_RESERVE(6)
 	KABI_RESERVE(7)
 	KABI_RESERVE(8)
