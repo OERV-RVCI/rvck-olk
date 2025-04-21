@@ -380,7 +380,7 @@ static void uacce_vma_close(struct vm_area_struct *vma)
 		mutex_lock(&q->mutex);
 		qfr = q->qfrs[vma->vm_pgoff];
 		if (!qfr) {
-			mutex_lock(&q->mutex);
+			mutex_unlock(&q->mutex);
 			mutex_unlock(&uacce->mutex);
 			return;
 		}
@@ -836,13 +836,14 @@ static ssize_t node_id_show(struct device *dev,
 static ssize_t numa_distance_show(struct device *dev,
 				  struct device_attribute *attr, char *buf)
 {
-	int distance = 0;
+	int distance = LOCAL_DISTANCE;
 
 #ifdef CONFIG_NUMA
 	struct uacce_device *uacce = to_uacce_device(dev);
 
-	distance = node_distance(uacce->parent->numa_node,
-		cpu_to_node(smp_processor_id()));
+	if (uacce->parent->numa_node != NUMA_NO_NODE)
+		distance = node_distance(uacce->parent->numa_node,
+				cpu_to_node(smp_processor_id()));
 #endif
 	return sysfs_emit(buf, "%d\n", distance);
 }
