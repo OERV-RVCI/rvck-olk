@@ -102,6 +102,7 @@
 #define IV_LAST_BYTE_MASK	0xFF
 #define IV_CTR_INIT		0x1
 #define IV_BYTE_OFFSET		0x8
+#define SEC_GCM_MIN_AUTH_SZ	0x8
 
 static DEFINE_MUTEX(sec_algs_lock);
 static unsigned int sec_available_devs;
@@ -2235,6 +2236,9 @@ static int sec_aead_spec_check(struct sec_ctx *ctx, struct sec_req *sreq)
 		if (unlikely(sz & WORD_MASK))
 			return -EINVAL;
 		if (unlikely(ctx->a_ctx.a_key_len & WORD_MASK))
+			return -EINVAL;
+	} else if (c_mode == SEC_CMODE_GCM) {
+		if (unlikely(sz < SEC_GCM_MIN_AUTH_SZ))
 			return -EINVAL;
 	}
 
