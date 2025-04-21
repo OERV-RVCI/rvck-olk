@@ -1734,7 +1734,7 @@ int hclge_tm_init_hw(struct hclge_dev *hdev, bool init)
 	if (ret)
 		return ret;
 
-	if (hnae3_dev_roh_supported(hdev))
+	if (hdev->ae_dev->dev_version > HNAE3_DEVICE_VERSION_V2)
 		return hclge_tm_set_tc_rate_limit(hdev, tc_info);
 
 	return 0;
