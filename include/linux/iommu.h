@@ -724,8 +724,13 @@ struct iommu_ops {
 	KABI_USE(3, struct iommufd_viommu *(*viommu_alloc)(
 			struct device *dev, struct iommu_domain *parent_domain,
 			struct iommufd_ctx *ictx, unsigned int viommu_type))
-	KABI_RESERVE(4)
-	KABI_RESERVE(5)
+
+	/* Per group IOMMU features */
+	KABI_USE(4, int (*get_group_qos_params)(struct iommu_group *group, u16 *partition,
+						u8 *perf_mon_grp))
+	KABI_USE(5, int (*set_group_qos_params)(struct iommu_group *group, u16 partition,
+						u8 perf_mon_grp))
+
 	KABI_RESERVE(6)
 	KABI_RESERVE(7)
 	KABI_RESERVE(8)
@@ -963,6 +968,8 @@ extern bool iommu_present(const struct bus_type *bus);
 extern bool device_iommu_capable(struct device *dev, enum iommu_cap cap);
 extern bool iommu_group_has_isolated_msi(struct iommu_group *group);
 extern struct iommu_domain *iommu_domain_alloc(const struct bus_type *bus);
+struct iommu_group *iommu_group_get_from_kobj(struct kobject *group_kobj);
+extern struct iommu_group *iommu_group_get_by_id(int id);
 extern void iommu_domain_free(struct iommu_domain *domain);
 extern int iommu_attach_device(struct iommu_domain *domain,
 			       struct device *dev);
@@ -971,6 +978,7 @@ extern void iommu_detach_device(struct iommu_domain *domain,
 extern int iommu_sva_unbind_gpasid(struct iommu_domain *domain,
 				   struct device *dev, ioasid_t pasid);
 extern struct iommu_domain *iommu_get_domain_for_dev(struct device *dev);
+extern struct iommu_domain *iommu_get_domain_for_group(struct iommu_group *group);
 extern struct iommu_domain *iommu_get_dma_domain(struct device *dev);
 extern size_t iommu_pgsize(struct iommu_domain *domain, unsigned long iova,
 			   phys_addr_t paddr, size_t size, size_t *count);
@@ -1019,6 +1027,7 @@ extern struct iommu_group *iommu_group_ref_get(struct iommu_group *group);
 extern void iommu_group_put(struct iommu_group *group);
 
 extern int iommu_group_id(struct iommu_group *group);
+struct kset *iommu_get_group_kset(void);
 extern struct iommu_domain *iommu_group_default_domain(struct iommu_group *);
 
 int iommu_set_pgtable_quirks(struct iommu_domain *domain,
@@ -1283,6 +1292,10 @@ void iommu_detach_device_pasid(struct iommu_domain *domain,
 			       struct device *dev, ioasid_t pasid);
 ioasid_t iommu_alloc_global_pasid(struct device *dev);
 void iommu_free_global_pasid(ioasid_t pasid);
+int iommu_group_set_qos_params(struct iommu_group *group,
+			       u16 partition, u8 perf_mon_grp);
+int iommu_group_get_qos_params(struct iommu_group *group,
+			       u16 *partition, u8 *perf_mon_grp);
 #else /* CONFIG_IOMMU_API */
 
 struct iommu_ops {};
@@ -1305,6 +1318,16 @@ static inline bool device_iommu_capable(struct device *dev, enum iommu_cap cap)
 }
 
 static inline struct iommu_domain *iommu_domain_alloc(const struct bus_type *bus)
+{
+	return NULL;
+}
+
+static inline struct iommu_group *iommu_group_get_from_kobj(struct kobject *group_kobj)
+{
+	return NULL;
+}
+
+static inline struct iommu_group *iommu_group_get_by_id(int id)
 {
 	return NULL;
 }
@@ -1465,6 +1488,11 @@ static inline void iommu_group_put(struct iommu_group *group)
 static inline int iommu_group_id(struct iommu_group *group)
 {
 	return -ENODEV;
+}
+
+static inline struct kset *iommu_get_group_kset(void)
+{
+	return NULL;
 }
 
 static inline int iommu_set_pgtable_quirks(struct iommu_domain *domain,
@@ -1658,6 +1686,17 @@ static inline ioasid_t iommu_alloc_global_pasid(struct device *dev)
 }
 
 static inline void iommu_free_global_pasid(ioasid_t pasid) {}
+static inline int iommu_group_set_qos_params(struct iommu_group *group,
+					     u16 partition, u8 perf_mon_grp)
+{
+	return -ENODEV;
+}
+
+static inline int iommu_group_get_qos_params(struct iommu_group *group,
+					     u16 *partition, u8 *perf_mon_grp)
+{
+	return -ENODEV;
+}
 #endif /* CONFIG_IOMMU_API */
 
 #if IS_ENABLED(CONFIG_LOCKDEP) && IS_ENABLED(CONFIG_IOMMU_API)
