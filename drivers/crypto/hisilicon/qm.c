@@ -189,8 +189,8 @@
 #define QM_IFC_INT_DISABLE		BIT(0)
 #define QM_IFC_INT_STATUS_MASK		BIT(0)
 #define QM_IFC_INT_SET_MASK		BIT(0)
-#define QM_WAIT_DST_ACK			10
-#define QM_MAX_PF_WAIT_COUNT		10
+#define QM_WAIT_DST_ACK			1000
+#define QM_MAX_PF_WAIT_COUNT		20
 #define QM_MAX_VF_WAIT_COUNT		40
 #define QM_VF_RESET_WAIT_US		20000
 #define QM_VF_RESET_WAIT_CNT		3000
@@ -523,6 +523,10 @@ static bool qm_check_dev_error(struct hisi_qm *qm)
 	struct hisi_qm *pf_qm = pci_get_drvdata(pci_physfn(qm->pdev));
 	u32 err_status;
 
+	if (test_bit(QM_DEVICE_DOWN, &qm->misc_ctl))
+		return true;
+
+	/* VF cannot read status register, return false */
 	if (pf_qm->fun_type == QM_HW_VF)
 		return false;
 
@@ -1721,7 +1725,7 @@ static int qm_ping_all_vfs(struct hisi_qm *qm, enum qm_ifc_cmd cmd)
 	u32 i;
 
 	ret = qm->ops->set_ifc_begin(qm, cmd, 0, QM_MB_PING_ALL_VFS);
-	if (ret) {
+	if (ret && cmd != QM_PF_FLR_PREPARE && cmd != QM_PF_SRST_PREPARE) {
 		dev_err(dev, "failed to send command(0x%x) to all vfs!\n", cmd);
 		qm->ops->set_ifc_end(qm);
 		return ret;
@@ -1759,7 +1763,7 @@ static int qm_ping_pf(struct hisi_qm *qm, enum qm_ifc_cmd cmd)
 	int ret;
 
 	ret = qm->ops->set_ifc_begin(qm, cmd, 0, 0);
-	if (ret) {
+	if (ret && (cmd > QM_VF_START_FAIL || cmd < QM_VF_PREPARE_DONE)) {
 		dev_err(&qm->pdev->dev, "failed to send command(0x%x) to PF!\n", cmd);
 		goto unlock;
 	}
@@ -1769,8 +1773,10 @@ static int qm_ping_pf(struct hisi_qm *qm, enum qm_ifc_cmd cmd)
 	while (true) {
 		msleep(QM_WAIT_DST_ACK);
 		val = readl(qm->io_base + QM_IFC_INT_SET_V);
-		if (!(val & QM_IFC_INT_STATUS_MASK))
+		if (!(val & QM_IFC_INT_STATUS_MASK)) {
+			ret = 0;
 			break;
+		}
 
 		if (++cnt > QM_MAX_VF_WAIT_COUNT) {
 			ret = -ETIMEDOUT;
@@ -5038,6 +5044,7 @@ static void qm_pf_reset_vf_process(struct hisi_qm *qm,
 	if (ret)
 		goto err_get_status;
 
+	clear_bit(QM_DEVICE_DOWN, &qm->misc_ctl);
 	qm_pf_reset_vf_done(qm);
 
 	dev_info(dev, "device reset done.\n");
@@ -5045,6 +5052,7 @@ static void qm_pf_reset_vf_process(struct hisi_qm *qm,
 	return;
 
 err_get_status:
+	clear_bit(QM_DEVICE_DOWN, &qm->misc_ctl);
 	qm_cmd_init(qm);
 	qm_reset_bit_clear(qm);
 }
@@ -5063,8 +5071,13 @@ static void qm_handle_cmd_msg(struct hisi_qm *qm, u32 fun_num)
 	ret = qm->ops->get_ifc(qm, &cmd, &data, fun_num);
 	qm_clear_cmd_interrupt(qm, BIT(fun_num));
 	if (ret) {
-		dev_err(dev, "failed to get command from source!\n");
-		return;
+		if (!fun_num) {
+			cmd = QM_PF_SRST_PREPARE;
+			dev_err(dev, "failed to get response from PF, suppos it is soft reset!\n");
+		} else {
+			dev_err(dev, "failed to get command from source!\n");
+			return;
+		}
 	}
 
 	switch (cmd) {
@@ -5072,6 +5085,7 @@ static void qm_handle_cmd_msg(struct hisi_qm *qm, u32 fun_num)
 		qm_pf_reset_vf_process(qm, QM_DOWN);
 		break;
 	case QM_PF_SRST_PREPARE:
+		set_bit(QM_DEVICE_DOWN, &qm->misc_ctl);
 		qm_pf_reset_vf_process(qm, QM_SOFT_RESET);
 		break;
 	case QM_VF_GET_QOS:
