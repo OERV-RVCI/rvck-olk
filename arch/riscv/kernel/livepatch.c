@@ -169,12 +169,12 @@ int arch_klp_add_breakpoint(struct arch_klp_data *arch_data, void *old_func)
 	u32 insn = EBREAK_INSN;
 
 	arch_data->saved_opcode = *(u32 *)old_func;
-	return patch_text(old_func, &insn, 1);
+	return patch_text(old_func, &insn, 4);
 }
 
 void arch_klp_remove_breakpoint(struct arch_klp_data *arch_data, void *old_func)
 {
-	patch_text(old_func, &arch_data->saved_opcode, 1);
+	patch_text(old_func, &arch_data->saved_opcode, 4);
 }
 
 static int do_patch(unsigned long pc, unsigned long new_addr)
