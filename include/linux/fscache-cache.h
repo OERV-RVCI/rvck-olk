@@ -46,6 +46,7 @@ struct fscache_cache {
 	char			*name;
 	KABI_USE(1, unsigned long flags)
 #define FSCACHE_CACHE_SYNC_VOLUME_UNHASH	0	/* Mark to enable volume sync unhash */
+#define FSCACHE_CACHE_EARLY_UNMARK_INUSE	1	/* Need to unmark earlier */
 
 	KABI_RESERVE(2)
 	KABI_RESERVE(3)
@@ -223,6 +224,29 @@ static inline void fscache_set_sync_volume_unhash(struct fscache_cache *cache)
 static inline bool fscache_test_sync_volume_unhash(struct fscache_cache *cache)
 {
 	return test_bit(FSCACHE_CACHE_SYNC_VOLUME_UNHASH, &cache->flags);
+}
+
+/**
+ * fscache_set_inode_unmark_early - Early unmark the inode inuse
+ * @cache: The cache to set
+ *
+ * Unmark the inode inuse before send close req.
+ */
+static inline void fscache_set_inode_unmark_early(struct fscache_cache *cache)
+{
+	set_bit(FSCACHE_CACHE_EARLY_UNMARK_INUSE, &cache->flags);
+}
+
+/**
+ * fscache_test_inode_unmark_early - Check whether the inode need to
+ * unmark early
+ * @cache: The cache to query
+ *
+ * Indicates whether we need to unmark the inode inuse early.
+ */
+static inline bool fscache_test_inode_unmark_early(struct fscache_cache *cache)
+{
+	return test_bit(FSCACHE_CACHE_EARLY_UNMARK_INUSE, &cache->flags);
 }
 
 #ifdef CONFIG_FSCACHE_STATS
