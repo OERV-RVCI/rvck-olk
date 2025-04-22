@@ -52,9 +52,6 @@
 #define QM_MB_EVENT_SHIFT               8
 #define QM_MB_BUSY_SHIFT		13
 #define QM_MB_OP_SHIFT			14
-#define QM_MB_CMD_DATA_ADDR_L		0x304
-#define QM_MB_CMD_DATA_ADDR_H		0x308
-#define QM_MB_MAX_WAIT_CNT		6000
 
 /* doorbell */
 #define QM_DOORBELL_CMD_SQ              0
@@ -105,6 +102,8 @@
 #define UACCE_MODE_SVA			1 /* use uacce sva mode */
 #define UACCE_MODE_DESC	"0(default) means only register to crypto, 1 means both register to crypto and uacce"
 
+#define QM_ECC_MBIT			BIT(2)
+
 enum qm_stop_reason {
 	QM_NORMAL,
 	QM_SOFT_RESET,
@@ -150,6 +149,7 @@ enum qm_misc_ctl_bits {
 	QM_RST_SCHED,
 	QM_RESETTING,
 	QM_MODULE_PARAM,
+	QM_DEVICE_DOWN,
 };
 
 enum qm_cap_bits {
@@ -240,17 +240,20 @@ enum acc_err_result {
 	ACC_ERR_RECOVERED,
 };
 
-struct hisi_qm_err_info {
-	char *acpi_rst;
-	u32 msi_wr_port;
+struct hisi_qm_err_mask {
 	u32 ecc_2bits_mask;
-	u32 qm_shutdown_mask;
-	u32 dev_shutdown_mask;
-	u32 qm_reset_mask;
-	u32 dev_reset_mask;
+	u32 shutdown_mask;
+	u32 reset_mask;
 	u32 ce;
 	u32 nfe;
 	u32 fe;
+};
+
+struct hisi_qm_err_info {
+	char *acpi_rst;
+	u32 msi_wr_port;
+	struct hisi_qm_err_mask qm_err;
+	struct hisi_qm_err_mask dev_err;
 };
 
 struct hisi_qm_err_status {
@@ -273,6 +276,8 @@ struct hisi_qm_err_ini {
 	enum acc_err_result (*get_err_result)(struct hisi_qm *qm);
 	bool (*dev_is_abnormal)(struct hisi_qm *qm);
 	int (*set_priv_status)(struct hisi_qm *qm);
+	void (*disable_axi_error)(struct hisi_qm *qm);
+	void (*enable_axi_error)(struct hisi_qm *qm);
 };
 
 struct hisi_qm_cap_info {
@@ -539,8 +544,6 @@ void hisi_qm_debug_regs_clear(struct hisi_qm *qm);
 int hisi_qm_sriov_enable(struct pci_dev *pdev, int max_vfs);
 int hisi_qm_sriov_disable(struct pci_dev *pdev, bool is_frozen);
 int hisi_qm_sriov_configure(struct pci_dev *pdev, int num_vfs);
-void hisi_qm_dev_err_init(struct hisi_qm *qm);
-void hisi_qm_dev_err_uninit(struct hisi_qm *qm);
 int hisi_qm_regs_debugfs_init(struct hisi_qm *qm,
 			  struct dfx_diff_registers *dregs, u32 reg_len);
 void hisi_qm_regs_debugfs_uninit(struct hisi_qm *qm, u32 reg_len);
@@ -554,9 +557,9 @@ void hisi_qm_reset_prepare(struct pci_dev *pdev);
 void hisi_qm_reset_done(struct pci_dev *pdev);
 
 int hisi_qm_wait_mb_ready(struct hisi_qm *qm);
-int hisi_qm_mb(struct hisi_qm *qm, u8 cmd, dma_addr_t dma_addr, u16 queue,
-	       bool op);
-
+int hisi_qm_mb_write(struct hisi_qm *qm, u8 cmd, dma_addr_t dma_addr,
+			       u16 queue, bool op);
+int hisi_qm_mb_read(struct hisi_qm *qm, u64 *msg, u8 cmd, u16 queue);
 struct hisi_acc_sgl_pool;
 struct hisi_acc_hw_sgl *hisi_acc_sg_buf_map_to_hw_sgl(struct device *dev,
 	struct scatterlist *sgl, struct hisi_acc_sgl_pool *pool,
