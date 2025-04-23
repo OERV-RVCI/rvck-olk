@@ -67,6 +67,9 @@ bool kvm_ncsnp_support;
 /* Capability of DVMBM */
 bool kvm_dvmbm_support;
 
+/* Capability of IPIV */
+bool kvm_ipiv_support;
+
 static DEFINE_PER_CPU(unsigned char, kvm_hyp_initialized);
 
 bool is_kvm_arm_initialised(void)
@@ -2789,11 +2792,16 @@ static __init int kvm_arm_init(void)
 	probe_hisi_cpu_type();
 	kvm_ncsnp_support = hisi_ncsnp_supported();
 	kvm_dvmbm_support = hisi_dvmbm_supported();
+	kvm_ipiv_support = hisi_ipiv_supported();
 	kvm_info("KVM ncsnp %s\n", kvm_ncsnp_support ? "enabled" : "disabled");
 	kvm_info("KVM dvmbm %s\n", kvm_dvmbm_support ? "enabled" : "disabled");
+	kvm_info("KVM ipiv %s\n", kvm_ipiv_support ? "enabled" : "disabled");
 
 	if (kvm_dvmbm_support)
 		kvm_get_pg_cfg();
+
+	if (kvm_ipiv_support)
+		ipiv_gicd_init();
 
 	in_hyp_mode = is_kernel_in_hyp_mode();
 
