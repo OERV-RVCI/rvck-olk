@@ -10,6 +10,7 @@
 #include <linux/cacheinfo.h>
 #include <linux/cpu.h>
 #include <linux/cpufreq.h>
+#include <linux/cpu_smt.h>
 #include <linux/device.h>
 #include <linux/of.h>
 #include <linux/slab.h>
@@ -485,6 +486,10 @@ core_initcall(free_raw_capacity);
 #endif
 
 #if defined(CONFIG_ARM64) || defined(CONFIG_RISCV)
+
+/* Used to enable the SMT control */
+static unsigned int max_smt_thread_num = 1;
+
 /*
  * This function returns the logic cpu number of the node.
  * There are basically three kinds of return values:
@@ -546,12 +551,7 @@ static int __init parse_core(struct device_node *core, int package_id,
 		i++;
 	} while (1);
 
-	/*
-	 * We've already gotten threads number in this core, update the SMT
-	 * threads number when necessary.
-	 */
-	if (i > topology_smt_get_num_threads())
-		topology_smt_set_num_threads(i);
+	max_smt_thread_num = max_t(unsigned int, max_smt_thread_num, i);
 
 	cpu = get_cpu_for_node(core);
 	if (cpu >= 0) {
@@ -665,6 +665,17 @@ static int __init parse_socket(struct device_node *socket)
 	if (!has_socket)
 		ret = parse_cluster(socket, 0, -1, 0);
 
+	/*
+	 * Reset the max_smt_thread_num to 1 on failure. Since on failure
+	 * we need to notify the framework the SMT is not supported, but
+	 * max_smt_thread_num can be initialized to the SMT thread number
+	 * of the cores which are successfully parsed.
+	 */
+	if (ret)
+		max_smt_thread_num = 1;
+
+	cpu_smt_set_num_threads(max_smt_thread_num, max_smt_thread_num);
+
 	return ret;
 }
 
@@ -757,36 +768,6 @@ const struct cpumask *cpu_clustergroup_mask(int cpu)
 
 	return &cpu_topology[cpu].cluster_sibling;
 }
-
-#ifdef CONFIG_HOTPLUG_SMT
-
-/* Maximum threads number per-Core */
-static unsigned int topology_smt_num_threads = 1;
-
-void __init topology_smt_set_num_threads(unsigned int num_threads)
-{
-	topology_smt_num_threads = num_threads;
-}
-
-unsigned int __init topology_smt_get_num_threads(void)
-{
-	return topology_smt_num_threads;
-}
-
-/*
- * On SMT Hotplug the primary thread of the SMT won't be disabled. For x86 they
- * seem to have a primary thread for special purpose. For other arthitectures
- * like arm64 there's no such restriction for a primary thread, so make the
- * first thread in the SMT as the primary thread.
- */
-bool topology_is_primary_thread(unsigned int cpu)
-{
-	if (cpu == cpumask_first(topology_sibling_cpumask(cpu)))
-		return true;
-
-	return false;
-}
-#endif
 
 void update_siblings_masks(unsigned int cpuid)
 {
@@ -899,14 +880,6 @@ void __init init_cpu_topology(void)
 		 */
 		reset_cpu_topology();
 	}
-
-	/*
-	 * By this stage we get to know whether we support SMT or not, update
-	 * the information for the core. We don't support
-	 * CONFIG_SMT_NUM_THREADS_DYNAMIC so make the max_threads == num_threads.
-	 */
-	cpu_smt_set_num_threads(topology_smt_get_num_threads(),
-				topology_smt_get_num_threads());
 
 	for_each_possible_cpu(cpu) {
 		ret = fetch_cache_info(cpu);
