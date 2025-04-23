@@ -157,9 +157,9 @@ enum hns_roce_uctx_comp_mask {
 
 struct hns_roce_ib_alloc_ucontext {
 	__u32 config;
-	__u32 reserved;
 	__u32 comp; /* use hns_roce_uctx_comp_mask */
 	__u32 dca_max_qps;
+	__u32 reserved;
 };
 
 struct hns_roce_ib_alloc_pd_resp {
