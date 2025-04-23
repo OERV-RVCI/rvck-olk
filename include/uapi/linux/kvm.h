@@ -1211,6 +1211,7 @@ struct kvm_ppc_resize_hpt {
 #define KVM_CAP_HYGON_COCO_EXT_CSV3_INJ_SECRET    (1 << 2)
 
 #define KVM_CAP_ARM_HW_DIRTY_STATE_TRACK 502
+#define KVM_CAP_ARM_IPIV_MODE 503
 
 #define KVM_CAP_ARM_VIRT_MSI_BYPASS 799
 
