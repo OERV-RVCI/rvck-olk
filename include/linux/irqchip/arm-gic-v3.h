@@ -113,6 +113,18 @@
 #define GIC_PAGE_SIZE_64K		2ULL
 #define GIC_PAGE_SIZE_MASK		3ULL
 
+#define GICD_MISC_CTRL			0x2084
+#define GICD_MISC_CTRL_CFG_IPIV_EN	(1U << 19)
+
+/* IPIV private register */
+#define GICD_IPIV_CTRL			0xc05c
+#define GICD_IPIV_CTRL_AFF_DIRECT_VPEID_SHIFT 4
+#define GICD_IPIV_CTRL_AFF1_LEFT_SHIFT_SHIFT 8
+#define GICD_IPIV_CTRL_AFF2_LEFT_SHIFT_SHIFT 12
+#define GICD_IPIV_CTRL_VM_TABLE_INNERCACHE_SHIFT 16
+#define GICD_IPIV_CTRL_VM_TABLE_SHAREABILITY_SHIFT 19
+#define GICD_IPIV_ITS_TA_BASE	0xc010
+
 /*
  * Re-Distributor registers, offsets from RD_base
  */
@@ -361,6 +373,21 @@
 
 #define GICR_VSGIPENDR_BUSY		(1U << 31)
 #define GICR_VSGIPENDR_PENDING		GENMASK(15, 0)
+
+/* IPIV VM table address */
+#define GICR_VM_TABLE_BAR_L		0x140
+#define GICR_VM_TABLE_BAR_H		0x144
+
+#define GICR_IPIV_CTRL		0x148
+#define GICR_IPIV_CTRL_VCPU_ENTRY_NUM_MAX_SHIFT 8
+/*
+ * Select ITS to determine the ITS through which the IPI is sent.
+ */
+#define GICR_IPIV_CTRL_IPIV_ITS_TA_SEL_SHIFT 4
+
+#define GICR_IPIV_ST		0x14c
+#define GICR_IPIV_ST_IPIV_BUSY_SHIFT 0
+#define GICR_IPIV_ST_IPIV_BUSY (1 << GICR_IPIV_ST_IPIV_BUSY_SHIFT)
 
 /*
  * ITS registers, offsets from ITS_base
