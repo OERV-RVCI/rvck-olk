@@ -58,7 +58,6 @@ static DECLARE_WAIT_QUEUE_HEAD(wait_cacheinfo_ready);
 
 /* A dummy mon context to use when the monitors were allocated up front */
 u32 __mon_is_rmid_idx = USE_RMID_IDX;
-void *mon_is_rmid_idx = &__mon_is_rmid_idx;
 
 bool resctrl_arch_alloc_capable(void)
 {
@@ -121,7 +120,7 @@ int resctrl_arch_set_cdp_enabled(enum resctrl_res_level ignored, bool enable)
 	return 0;
 }
 
-static bool mpam_resctrl_hide_cdp(enum resctrl_res_level rid)
+bool resctrl_arch_hide_cdp(enum resctrl_res_level rid)
 {
 	return cdp_enabled && !resctrl_arch_get_cdp_enabled(rid);
 }
@@ -299,7 +298,6 @@ struct rdt_resource *resctrl_arch_get_resource(enum resctrl_res_level l)
 static void *resctrl_arch_mon_ctx_alloc_no_wait(struct rdt_resource *r,
 						int evtid)
 {
-	struct mpam_resctrl_res *res;
 	u32 *ret = kmalloc(sizeof(*ret), GFP_KERNEL);
 
 	if (!ret)
@@ -307,16 +305,15 @@ static void *resctrl_arch_mon_ctx_alloc_no_wait(struct rdt_resource *r,
 
 	switch (evtid) {
 	case QOS_L3_OCCUP_EVENT_ID:
-		res = container_of(r, struct mpam_resctrl_res, resctrl_res);
-
-		*ret = mpam_alloc_csu_mon(res->class);
-		return ret;
 	case QOS_L3_MBM_LOCAL_EVENT_ID:
 	case QOS_L3_MBM_TOTAL_EVENT_ID:
-		return mon_is_rmid_idx;
-	}
+		*ret = __mon_is_rmid_idx;
+		return ret;
 
-	return ERR_PTR(-EOPNOTSUPP);
+	default:
+		kfree(ret);
+		return ERR_PTR(-EOPNOTSUPP);
+	}
 }
 
 void *resctrl_arch_mon_ctx_alloc(struct rdt_resource *r, int evtid)
@@ -341,25 +338,7 @@ void *resctrl_arch_mon_ctx_alloc(struct rdt_resource *r, int evtid)
 void resctrl_arch_mon_ctx_free(struct rdt_resource *r, int evtid,
 			       void *arch_mon_ctx)
 {
-	struct mpam_resctrl_res *res;
-	u32 mon = *(u32 *)arch_mon_ctx;
-
-	if (mon == USE_RMID_IDX)
-		return;
 	kfree(arch_mon_ctx);
-	arch_mon_ctx = NULL;
-
-	res = container_of(r, struct mpam_resctrl_res, resctrl_res);
-
-	switch (evtid) {
-	case QOS_L3_OCCUP_EVENT_ID:
-		mpam_free_csu_mon(res->class, mon);
-		wake_up(&resctrl_mon_ctx_waiters);
-		return;
-	case QOS_L3_MBM_TOTAL_EVENT_ID:
-	case QOS_L3_MBM_LOCAL_EVENT_ID:
-		return;
-	}
 }
 
 static enum mon_filter_options resctrl_evt_config_to_mpam(u32 local_evt_cfg)
@@ -380,7 +359,7 @@ int resctrl_arch_rmid_read(struct rdt_resource	*r, struct rdt_domain *d,
 {
 	int err;
 	u64 cdp_val;
-	u16 num_mbwu_mon;
+	u16 num_mon;
 	struct mon_cfg cfg;
 	struct mpam_resctrl_dom *dom;
 	struct mpam_resctrl_res *res;
@@ -407,12 +386,15 @@ int resctrl_arch_rmid_read(struct rdt_resource	*r, struct rdt_domain *d,
 	if (cfg.mon == USE_RMID_IDX) {
 		/*
 		 * The number of mbwu monitors can't support free run mode,
-		 * adapt the remainder of rmid to the num_mbwu_mon as a
-		 * compromise.
+		 * adapt the remainder of rmid to the num_mon as compromise.
 		 */
 		res = container_of(r, struct mpam_resctrl_res, resctrl_res);
-		num_mbwu_mon = res->class->props.num_mbwu_mon;
-		cfg.mon = resctrl_arch_rmid_idx_encode(closid, rmid) % num_mbwu_mon;
+		if (type == mpam_feat_msmon_mbwu)
+			num_mon = res->class->props.num_mbwu_mon;
+		else
+			num_mon = res->class->props.num_csu_mon;
+
+		cfg.mon = closid % num_mon;
 	}
 
 	cfg.match_pmg = true;
@@ -420,15 +402,19 @@ int resctrl_arch_rmid_read(struct rdt_resource	*r, struct rdt_domain *d,
 	cfg.opts = resctrl_evt_config_to_mpam(dom->mbm_local_evt_cfg);
 
 	if (cdp_enabled) {
-		cfg.partid = closid << 1;
+		cfg.partid = resctrl_get_config_index(closid, CDP_DATA);
 		err = mpam_msmon_read(dom->comp, &cfg, type, val);
 		if (err)
 			return err;
 
-		cfg.partid += 1;
+		cfg.partid = resctrl_get_config_index(closid, CDP_CODE);
 		err = mpam_msmon_read(dom->comp, &cfg, type, &cdp_val);
-		if (!err)
+		if (!err) {
+			pr_debug("read monitor rmid %u %s:%u CODE/DATA: %lld/%lld\n",
+				resctrl_arch_rmid_idx_encode(closid, rmid),
+				r->name, dom->comp->comp_id, cdp_val, *val);
 			*val += cdp_val;
+		}
 	} else {
 		cfg.partid = closid;
 		err = mpam_msmon_read(dom->comp, &cfg, type, val);
@@ -812,6 +798,7 @@ static int mpam_resctrl_resource_init(struct mpam_resctrl_res *res)
 		r->fflags = RFTYPE_RES_CACHE;
 		r->default_ctrl = BIT_MASK(class->props.cpbm_wd) - 1;
 		r->data_width = (class->props.cpbm_wd + 3) / 4;
+		r->cache_level = class->level;
 
 		/*
 		 * Which bits are shared with other ...things...
@@ -970,7 +957,16 @@ u32 resctrl_arch_get_config(struct rdt_resource *r, struct rdt_domain *d,
 	dom = container_of(d, struct mpam_resctrl_dom, resctrl_dom);
 	cprops = &res->class->props;
 
-	partid = resctrl_get_config_index(closid, type);
+	/*
+	 * When CDP is enabled, but the resource doesn't support it, we
+	 * need to get the configuration from the CDP_CODE resctrl_conf_type
+	 * which is same as the CDP_DATA one.
+	 */
+	if (resctrl_arch_hide_cdp(r->rid))
+		partid = resctrl_get_config_index(closid, CDP_CODE);
+	else
+		partid = resctrl_get_config_index(closid, type);
+
 	cfg = &dom->comp->cfg[partid];
 
 	switch (r->rid) {
@@ -1012,7 +1008,6 @@ u32 resctrl_arch_get_config(struct rdt_resource *r, struct rdt_domain *d,
 int resctrl_arch_update_one(struct rdt_resource *r, struct rdt_domain *d,
 			    u32 closid, enum resctrl_conf_type t, u32 cfg_val)
 {
-	int err;
 	u32 partid;
 	struct mpam_config cfg;
 	struct mpam_props *cprops;
@@ -1054,22 +1049,7 @@ int resctrl_arch_update_one(struct rdt_resource *r, struct rdt_domain *d,
 		return -EINVAL;
 	}
 
-	/*
-	 * When CDP is enabled, but the resource doesn't support it, we need to
-	 * apply the same configuration to the other partid.
-	 */
-	if (mpam_resctrl_hide_cdp(r->rid)) {
-		partid = resctrl_get_config_index(closid, CDP_CODE);
-		err = mpam_apply_config(dom->comp, partid, &cfg);
-		if (err)
-			return err;
-
-		partid = resctrl_get_config_index(closid, CDP_DATA);
-		return mpam_apply_config(dom->comp, partid, &cfg);
-
-	} else {
-		return mpam_apply_config(dom->comp, partid, &cfg);
-	}
+	return mpam_apply_config(dom->comp, partid, &cfg);
 }
 
 /* TODO: this is IPI heavy */

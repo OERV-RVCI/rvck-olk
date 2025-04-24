@@ -388,7 +388,7 @@ static int get_cpumask_from_cache_id(u32 cache_id, u32 cache_level,
 			 * during device_initcall(). Use cache_of_get_id().
 			 */
 			iter_cache_id = cache_of_get_id(iter);
-			if (cache_id == ~0UL) {
+			if (cache_id == (~0)) {
 				of_node_put(iter);
 				continue;
 			}
@@ -577,7 +577,8 @@ static void mpam_ris_hw_probe(struct mpam_msc_ris *ris)
 		u32 ccap_features = mpam_read_partsel_reg(msc, CCAP_IDR);
 
 		props->cmax_wd = FIELD_GET(MPAMF_CCAP_IDR_CMAX_WD, ccap_features);
-		if (props->cmax_wd)
+		if (props->cmax_wd &&
+		   !FIELD_GET(MPAMF_CCAP_IDR_NO_CMAX, ccap_features))
 			mpam_set_feature(mpam_feat_ccap_part, props);
 	}
 
@@ -921,6 +922,14 @@ static const struct midr_range mbwu_flowrate_list[] = {
 	{ /* sentinel */ }
 };
 
+bool resctrl_arch_would_mbm_overflow(void)
+{
+	if (is_midr_in_range_list(read_cpuid_id(), mbwu_flowrate_list))
+		return false;
+
+	return true;
+}
+
 static void __ris_msmon_read(void *arg)
 {
 	bool nrdy = false;
@@ -1009,7 +1018,7 @@ static void __ris_msmon_read(void *arg)
 		 * was last reset in the latest version (DDI0598D_b).
 		 */
 		if (ris->comp->class->type == MPAM_CLASS_MEMORY) {
-			if (is_midr_in_range_list(read_cpuid_id(), mbwu_flowrate_list))
+			if (!resctrl_arch_would_mbm_overflow())
 				break;
 		}
 
@@ -1850,9 +1859,10 @@ __resource_props_mismatch(struct mpam_msc_ris *ris, struct mpam_class *class)
 	/* Clear missing features */
 	cprops->features &= rprops->features;
 
-	/* Clear incompatible features */
+	/* Set cpbm_wd with the min cpbm_wd among all cache msc */
 	if (cprops->cpbm_wd != rprops->cpbm_wd)
-		mpam_clear_feature(mpam_feat_cpor_part, &cprops->features);
+		cprops->cpbm_wd = min(cprops->cpbm_wd, rprops->cpbm_wd);
+
 	if (cprops->mbw_pbm_bits != rprops->mbw_pbm_bits)
 		mpam_clear_feature(mpam_feat_mbw_part, &cprops->features);
 

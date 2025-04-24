@@ -66,12 +66,14 @@ bool resctrl_arch_mon_capable(void);
 bool resctrl_arch_is_llc_occupancy_enabled(void);
 bool resctrl_arch_is_mbm_local_enabled(void);
 bool resctrl_arch_is_mbm_total_enabled(void);
+bool resctrl_arch_would_mbm_overflow(void);
 
 /* reset cached configurations, then all devices */
 void resctrl_arch_reset_resources(void);
 
 bool resctrl_arch_get_cdp_enabled(enum resctrl_res_level ignored);
 int resctrl_arch_set_cdp_enabled(enum resctrl_res_level ignored, bool enable);
+bool resctrl_arch_hide_cdp(enum resctrl_res_level rid);
 bool resctrl_arch_match_closid(struct task_struct *tsk, u32 closid);
 bool resctrl_arch_match_rmid(struct task_struct *tsk, u32 closid, u32 rmid);
 void resctrl_arch_set_cpu_default_closid(int cpu, u32 closid);

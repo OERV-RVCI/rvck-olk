@@ -163,6 +163,11 @@ static void closid_init(void)
 	closid_free_map_len = rdt_min_closid;
 }
 
+static void closid_exit(void)
+{
+	bitmap_free(closid_free_map);
+}
+
 static int closid_alloc(void)
 {
 	int cleanest_closid;
@@ -2662,10 +2667,8 @@ static int rdt_get_tree(struct fs_context *fc)
 		goto out_root;
 
 	ret = schemata_list_create();
-	if (ret) {
-		schemata_list_destroy();
-		goto out_ctx;
-	}
+	if (ret)
+		goto out_schemata_free;
 
 	closid_init();
 
@@ -2674,13 +2677,13 @@ static int rdt_get_tree(struct fs_context *fc)
 
 	ret = rdtgroup_add_files(rdtgroup_default.kn, flags);
 	if (ret)
-		goto out_schemata_free;
+		goto out_closid;
 
 	kernfs_activate(rdtgroup_default.kn);
 
 	ret = rdtgroup_create_info_dir(rdtgroup_default.kn);
 	if (ret < 0)
-		goto out_schemata_free;
+		goto out_closid;
 
 	if (resctrl_arch_mon_capable()) {
 		ret = mongroup_create_dir(rdtgroup_default.kn,
@@ -2714,7 +2717,7 @@ static int rdt_get_tree(struct fs_context *fc)
 	if (resctrl_arch_alloc_capable() || resctrl_arch_mon_capable())
 		resctrl_mounted = true;
 
-	if (resctrl_is_mbm_enabled()) {
+	if (resctrl_is_mbm_enabled() && resctrl_arch_would_mbm_overflow()) {
 		list_for_each_entry(dom, &l3->domains, list)
 			mbm_setup_overflow_handler(dom, MBM_OVERFLOW_INTERVAL,
 						   RESCTRL_PICK_ANY_CPU);
@@ -2733,9 +2736,10 @@ out_mongrp:
 		kernfs_remove(kn_mongrp);
 out_info:
 	kernfs_remove(kn_info);
+out_closid:
+	closid_exit();
 out_schemata_free:
 	schemata_list_destroy();
-out_ctx:
 	rdt_disable_ctx();
 out_root:
 	rdtgroup_destroy_root();
@@ -2947,6 +2951,7 @@ static void rdt_kill_sb(struct super_block *sb)
 	if (IS_ENABLED(CONFIG_RESCTRL_FS_PSEUDO_LOCK))
 		rdt_pseudo_lock_release();
 	rdtgroup_default.mode = RDT_MODE_SHAREABLE;
+	closid_exit();
 	schemata_list_destroy();
 	rdtgroup_destroy_root();
 	if (resctrl_arch_alloc_capable())
@@ -3943,7 +3948,7 @@ void resctrl_offline_domain(struct rdt_resource *r, struct rdt_domain *d)
 	if (resctrl_mounted && resctrl_arch_mon_capable())
 		rmdir_mondata_subdir_allrdtgrp(r, d->id);
 
-	if (resctrl_is_mbm_enabled())
+	if (resctrl_is_mbm_enabled() && resctrl_arch_would_mbm_overflow())
 		cancel_delayed_work(&d->mbm_over);
 	if (resctrl_arch_is_llc_occupancy_enabled() && has_busy_rmid(d)) {
 		/*
@@ -4014,7 +4019,7 @@ int resctrl_online_domain(struct rdt_resource *r, struct rdt_domain *d)
 	if (err)
 		goto out_unlock;
 
-	if (resctrl_is_mbm_enabled()) {
+	if (resctrl_is_mbm_enabled() && resctrl_arch_would_mbm_overflow()) {
 		INIT_DELAYED_WORK(&d->mbm_over, mbm_handle_overflow);
 		mbm_setup_overflow_handler(d, MBM_OVERFLOW_INTERVAL,
 					   RESCTRL_PICK_ANY_CPU);
@@ -4075,7 +4080,8 @@ void resctrl_offline_cpu(unsigned int cpu)
 
 	d = resctrl_get_domain_from_cpu(cpu, l3);
 	if (d) {
-		if (resctrl_is_mbm_enabled() && cpu == d->mbm_work_cpu) {
+		if (resctrl_is_mbm_enabled() && cpu == d->mbm_work_cpu &&
+		    resctrl_arch_would_mbm_overflow()) {
 			cancel_delayed_work(&d->mbm_over);
 			mbm_setup_overflow_handler(d, 0, cpu);
 		}
