@@ -370,6 +370,8 @@ static int erofs_fscache_register_volume(struct super_block *sb)
 	} else {
 		/* enable synchronous unhashing for the associated volumes */
 		fscache_set_sync_volume_unhash(volume->cache);
+		/* enable to set inode unmark inuse early before send close req */
+		fscache_set_inode_unmark_early(volume->cache);
 	}
 
 	sbi->volume = volume;

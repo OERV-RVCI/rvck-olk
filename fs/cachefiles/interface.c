@@ -338,6 +338,9 @@ static void cachefiles_clean_up_object(struct cachefiles_object *object,
 				       struct cachefiles_cache *cache)
 {
 	struct file *file;
+	const struct cred *saved_cred;
+
+	cachefiles_begin_secure(cache, &saved_cred);
 
 	if (test_bit(FSCACHE_COOKIE_RETIRED, &object->cookie->flags)) {
 		if (!test_bit(CACHEFILES_OBJECT_USING_TMPFILE, &object->flags)) {
@@ -362,6 +365,8 @@ static void cachefiles_clean_up_object(struct cachefiles_object *object,
 
 	if (file)
 		fput(file);
+
+	cachefiles_end_secure(cache, saved_cred);
 }
 
 /*
@@ -371,7 +376,7 @@ static void cachefiles_withdraw_cookie(struct fscache_cookie *cookie)
 {
 	struct cachefiles_object *object = cookie->cache_priv;
 	struct cachefiles_cache *cache = object->volume->cache;
-	const struct cred *saved_cred;
+	bool unmark_early = fscache_test_inode_unmark_early(cache->cache);
 
 	_enter("o=%x", object->debug_id);
 	cachefiles_see_object(object, cachefiles_obj_see_withdraw_cookie);
@@ -383,13 +388,13 @@ static void cachefiles_withdraw_cookie(struct fscache_cookie *cookie)
 		spin_unlock(&cache->object_list_lock);
 	}
 
+	if (unmark_early && object->file)
+		cachefiles_clean_up_object(object, cache);
+
 	cachefiles_ondemand_clean_object(object);
 
-	if (object->file) {
-		cachefiles_begin_secure(cache, &saved_cred);
+	if (!unmark_early && object->file)
 		cachefiles_clean_up_object(object, cache);
-		cachefiles_end_secure(cache, saved_cred);
-	}
 
 	cookie->cache_priv = NULL;
 	cachefiles_put_object(object, cachefiles_obj_put_detach);
