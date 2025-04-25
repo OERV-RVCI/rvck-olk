@@ -2033,12 +2033,17 @@ int hclge_tm_get_q_to_tc(struct hclge_dev *hdev, u16 q_id, u8 *tc_id)
 #define HCLGE_TM_TC_MASK		0x7
 
 	struct hclge_tqp_tx_queue_tc_cmd *tc;
+	struct hclge_vport *vport;
 	struct hclge_desc desc;
 	int ret;
 
+	vport = container_of(hdev->htqp[q_id].q.handle,
+			     struct hclge_vport, nic);
 	tc = (struct hclge_tqp_tx_queue_tc_cmd *)desc.data;
 	hclge_cmd_setup_basic_desc(&desc, HCLGE_OPC_TQP_TX_QUEUE_TC, true);
-	tc->queue_id = cpu_to_le16(q_id);
+	tc->queue_id = cpu_to_le16(hdev->htqp[q_id].q.tqp_index);
+	tc->func_id = (u8)vport->vport_id;
+
 	ret = hclge_cmd_send(&hdev->hw, &desc, 1);
 	if (ret) {
 		dev_err(&hdev->pdev->dev,
