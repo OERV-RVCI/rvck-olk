@@ -375,6 +375,9 @@ static struct hns3_dbg_cap_info hns3_dbg_cap[] = {
 	}, {
 		.name = "support vf fault detect",
 		.cap_bit = HNAE3_DEV_SUPPORT_VF_FAULT_B,
+	}, {
+		.name = "support vf multi tcs",
+		.cap_bit = HNAE3_DEV_SUPPORT_VF_MULTI_TCS_B,
 	}
 };
 

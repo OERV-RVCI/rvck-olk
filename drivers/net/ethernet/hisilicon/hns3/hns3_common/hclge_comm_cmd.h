@@ -21,6 +21,7 @@
 #define HCLGE_COMM_MAC_STATS_EXT_EN_B		3
 #define HCLGE_COMM_SYNC_RX_RING_HEAD_EN_B	4
 #define HCLGE_COMM_LLRS_FEC_EN_B		5
+#define HCLGE_COMM_VF_MULTI_TC_EN_B		7
 
 #define hclge_comm_dev_phy_imp_supported(ae_dev) \
 	test_bit(HNAE3_DEV_SUPPORT_PHY_IMP_B, (ae_dev)->caps)
@@ -377,6 +378,7 @@ enum HCLGE_COMM_CAP_BITS {
 	HCLGE_COMM_CAP_NOTIFY_PKT_B = 29,
 	HCLGE_COMM_CAP_TM_FLUSH_B = 31,
 	HCLGE_COMM_CAP_ERR_MOD_GEN_REG_B = 32,
+	HCLGE_COMM_CAP_VF_MULTI_TCS = 34,
 };
 
 enum HCLGE_COMM_API_CAP_BITS {

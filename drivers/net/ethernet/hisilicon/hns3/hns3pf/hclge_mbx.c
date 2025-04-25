@@ -5,6 +5,8 @@
 #include "hclge_mbx.h"
 #include "hnae3.h"
 #include "hclge_comm_rss.h"
+#include "hclge_dcb.h"
+#include "hclge_tm.h"
 
 #define CREATE_TRACE_POINTS
 #include "hclge_trace.h"
@@ -492,6 +494,7 @@ static void hclge_get_basic_info(struct hclge_vport *vport,
 {
 	struct hnae3_knic_private_info *kinfo = &vport->nic.kinfo;
 	struct hnae3_ae_dev *ae_dev = vport->back->ae_dev;
+	struct hclge_dev *hdev = vport->back;
 	struct hclge_basic_info *basic_info;
 	unsigned int i;
 	u32 pf_caps;
@@ -503,6 +506,12 @@ static void hclge_get_basic_info(struct hclge_vport *vport,
 	pf_caps = le32_to_cpu(basic_info->pf_caps);
 	if (test_bit(HNAE3_DEV_SUPPORT_VLAN_FLTR_MDF_B, ae_dev->caps))
 		hnae3_set_bit(pf_caps, HNAE3_PF_SUPPORT_VLAN_FLTR_MDF_B, 1);
+	if (test_bit(HNAE3_DEV_SUPPORT_VF_MULTI_TCS_B, ae_dev->caps)) {
+		hnae3_set_bit(pf_caps, HNAE3_PF_SUPPORT_VF_MULTI_TCS_B, 1);
+		basic_info->tc_max = hdev->tc_max;
+	} else {
+		basic_info->tc_max = 1;
+	}
 
 	basic_info->pf_caps = cpu_to_le32(pf_caps);
 	resp_msg->len = HCLGE_MBX_MAX_RESP_DATA_SIZE;
@@ -1032,12 +1041,16 @@ hclge_mbx_get_vf_flr_status_handler(struct hclge_mbx_ops_param *param)
 
 static int hclge_mbx_vf_uninit_handler(struct hclge_mbx_ops_param *param)
 {
+	struct hclge_dev *hdev = param->vport->back;
+
 	hclge_rm_vport_all_mac_table(param->vport, true,
 				     HCLGE_MAC_ADDR_UC);
 	hclge_rm_vport_all_mac_table(param->vport, true,
 				     HCLGE_MAC_ADDR_MC);
 	hclge_rm_vport_all_vlan_table(param->vport, true);
 	param->vport->mps = 0;
+	clear_bit(param->vport->vport_id, hdev->vf_multi_tcs_en);
+	hclge_tm_vport_tc_info_update(param->vport);
 	return 0;
 }
 
@@ -1077,6 +1090,21 @@ static int hclge_mbx_handle_vf_qb_handler(struct hclge_mbx_ops_param *param)
 	return 0;
 }
 
+static int hclge_mbx_set_vf_multi_tc_handler(struct hclge_mbx_ops_param *param)
+{
+	struct hclge_mbx_tc_info *tc_info;
+	int ret;
+
+	tc_info = (struct hclge_mbx_tc_info *)param->req->msg.data;
+
+	ret = hclge_mbx_set_vf_multi_tc(param->vport, tc_info);
+	if (ret)
+		dev_err(&param->vport->back->pdev->dev,
+			"failed to set VF multi TCs, ret = %d\n", ret);
+
+	return ret;
+}
+
 static const hclge_mbx_ops_fn hclge_mbx_ops_list[HCLGE_MBX_OPCODE_MAX] = {
 	[HCLGE_MBX_RESET]   = hclge_mbx_reset_handler,
 	[HCLGE_MBX_SET_UNICAST] = hclge_mbx_set_unicast_handler,
@@ -1105,6 +1133,7 @@ static const hclge_mbx_ops_fn hclge_mbx_ops_list[HCLGE_MBX_OPCODE_MAX] = {
 	[HCLGE_MBX_GET_VF_FLR_STATUS] = hclge_mbx_get_vf_flr_status_handler,
 	[HCLGE_MBX_PUSH_LINK_STATUS] = hclge_mbx_push_link_status_handler,
 	[HCLGE_MBX_NCSI_ERROR] = hclge_mbx_ncsi_error_handler,
+	[HCLGE_MBX_SET_TC] = hclge_mbx_set_vf_multi_tc_handler,
 };
 
 static void hclge_mbx_request_handling(struct hclge_mbx_ops_param *param)
