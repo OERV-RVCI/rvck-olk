@@ -537,9 +537,9 @@ fail_put_swap:
  * __read_swap_cache_async() call them and swap_read_folio() holds the
  * swap cache folio lock.
  */
-struct page *read_swap_cache_async(swp_entry_t entry, gfp_t gfp_mask,
-				   struct vm_area_struct *vma,
-				   unsigned long addr, struct swap_iocb **plug)
+struct folio *read_swap_cache_async(swp_entry_t entry, gfp_t gfp_mask,
+		struct vm_area_struct *vma, unsigned long addr,
+		struct swap_iocb **plug)
 {
 	bool page_was_allocated;
 	struct folio *folio = __read_swap_cache_async(entry, gfp_mask,
@@ -548,7 +548,7 @@ struct page *read_swap_cache_async(swp_entry_t entry, gfp_t gfp_mask,
 	if (page_was_allocated)
 		swap_read_folio(folio, false, plug);
 
-	return folio_file_page(folio, swp_offset(entry));
+	return folio;
 }
 
 static unsigned int __swapin_nr_pages(unsigned long prev_offset,
@@ -680,7 +680,9 @@ struct page *swap_cluster_readahead(swp_entry_t entry, gfp_t gfp_mask,
 	lru_add_drain();	/* Push any new pages onto the LRU now */
 skip:
 	/* The page was likely read above, so no need for plugging here */
-	return read_swap_cache_async(entry, gfp_mask, vma, addr, NULL);
+	folio = read_swap_cache_async(entry, gfp_mask, vma, addr, NULL);
+
+	return folio_file_page(folio, swp_offset(entry));
 }
 
 int init_swap_address_space(unsigned int type, unsigned long nr_pages)
@@ -847,8 +849,10 @@ static struct page *swap_vma_readahead(swp_entry_t fentry, gfp_t gfp_mask,
 	lru_add_drain();
 skip:
 	/* The page was likely read above, so no need for plugging here */
-	return read_swap_cache_async(fentry, gfp_mask, vma, vmf->address,
+	folio = read_swap_cache_async(fentry, gfp_mask, vma, vmf->address,
 				     NULL);
+
+	return folio_file_page(folio, swp_offset(entry));
 }
 
 /**
