@@ -600,6 +600,10 @@ anon_fault_fallback_charge
 	instead falls back to using huge pages with lower orders or
 	small pages even though the allocation was successful.
 
+swpin
+	is incremented every time a huge page is swapped in from a non-zswap
+	swap device in one piece.
+
 swpout
 	is incremented every time a huge page is swapped out in one
 	piece without splitting.
