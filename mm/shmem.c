@@ -1719,18 +1719,16 @@ static struct folio *shmem_swapin(swp_entry_t swap, gfp_t gfp,
 			struct shmem_inode_info *info, pgoff_t index)
 {
 	struct vm_area_struct pvma;
-	struct page *page;
+	struct folio *folio;
 	struct vm_fault vmf = {
 		.vma = &pvma,
 	};
 
 	shmem_pseudo_vma_init(&pvma, info, index);
-	page = swap_cluster_readahead(swap, gfp, &vmf);
+	folio = swap_cluster_readahead(swap, gfp, &vmf);
 	shmem_pseudo_vma_destroy(&pvma);
 
-	if (!page)
-		return NULL;
-	return page_folio(page);
+	return folio;
 }
 
 /*

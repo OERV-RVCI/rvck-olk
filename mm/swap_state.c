@@ -618,7 +618,7 @@ static unsigned long swapin_nr_pages(unsigned long offset)
  * @gfp_mask: memory allocation flags
  * @vmf: fault information
  *
- * Returns the struct page for entry and addr, after queueing swapin.
+ * Returns the struct folio for entry and addr, after queueing swapin.
  *
  * Primitive swap readahead code. We simply read an aligned block of
  * (1 << page_cluster) entries in the swap area. This method is chosen
@@ -630,7 +630,7 @@ static unsigned long swapin_nr_pages(unsigned long offset)
  *
  * Caller must hold read mmap_lock if vmf->vma is not NULL.
  */
-struct page *swap_cluster_readahead(swp_entry_t entry, gfp_t gfp_mask,
+struct folio *swap_cluster_readahead(swp_entry_t entry, gfp_t gfp_mask,
 				struct vm_fault *vmf)
 {
 	struct folio *folio;
@@ -680,9 +680,7 @@ struct page *swap_cluster_readahead(swp_entry_t entry, gfp_t gfp_mask,
 	lru_add_drain();	/* Push any new pages onto the LRU now */
 skip:
 	/* The page was likely read above, so no need for plugging here */
-	folio = read_swap_cache_async(entry, gfp_mask, vma, addr, NULL);
-
-	return folio_file_page(folio, swp_offset(entry));
+	return read_swap_cache_async(entry, gfp_mask, vma, addr, NULL);
 }
 
 int init_swap_address_space(unsigned int type, unsigned long nr_pages)
@@ -784,7 +782,7 @@ static void swap_ra_info(struct vm_fault *vmf,
  * @gfp_mask: memory allocation flags
  * @vmf: fault information
  *
- * Returns the struct page for entry and addr, after queueing swapin.
+ * Returns the struct folio for entry and addr, after queueing swapin.
  *
  * Primitive swap readahead code. We simply read in a few pages whose
  * virtual addresses are around the fault address in the same vma.
@@ -792,7 +790,7 @@ static void swap_ra_info(struct vm_fault *vmf,
  * Caller must hold read mmap_lock if vmf->vma is not NULL.
  *
  */
-static struct page *swap_vma_readahead(swp_entry_t fentry, gfp_t gfp_mask,
+static struct folio *swap_vma_readahead(swp_entry_t fentry, gfp_t gfp_mask,
 				       struct vm_fault *vmf)
 {
 	struct blk_plug plug;
@@ -849,10 +847,8 @@ static struct page *swap_vma_readahead(swp_entry_t fentry, gfp_t gfp_mask,
 	lru_add_drain();
 skip:
 	/* The page was likely read above, so no need for plugging here */
-	folio = read_swap_cache_async(fentry, gfp_mask, vma, vmf->address,
+	return read_swap_cache_async(fentry, gfp_mask, vma, vmf->address,
 				     NULL);
-
-	return folio_file_page(folio, swp_offset(entry));
 }
 
 /**
@@ -870,9 +866,15 @@ skip:
 struct page *swapin_readahead(swp_entry_t entry, gfp_t gfp_mask,
 				struct vm_fault *vmf)
 {
-	return swap_use_vma_readahead() ?
+	struct folio *folio;
+
+	folio = swap_use_vma_readahead() ?
 			swap_vma_readahead(entry, gfp_mask, vmf) :
 			swap_cluster_readahead(entry, gfp_mask, vmf);
+
+	if (!folio)
+		return NULL;
+	return folio_file_page(folio, swp_offset(entry));
 }
 
 #ifdef CONFIG_SYSFS
