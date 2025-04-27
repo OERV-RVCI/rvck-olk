@@ -1041,14 +1041,14 @@ static int zswap_enabled_param_set(const char *val,
 * writeback code
 **********************************/
 /*
- * Attempts to free an entry by adding a page to the swap cache,
- * decompressing the entry data into the page, and issuing a
- * bio write to write the page back to the swap device.
+ * Attempts to free an entry by adding a folio to the swap cache,
+ * decompressing the entry data into the folio, and issuing a
+ * bio write to write the folio back to the swap device.
  *
- * This can be thought of as a "resumed writeback" of the page
+ * This can be thought of as a "resumed writeback" of the folio
  * to the swap device.  We are basically resuming the same swap
  * writeback path that was intercepted with the zswap_store()
- * in the first place.  After the page has been decompressed into
+ * in the first place.  After the folio has been decompressed into
  * the swap cache, the compressed version stored by zswap can be
  * freed.
  */
@@ -1056,11 +1056,11 @@ static int zswap_writeback_entry(struct zswap_entry *entry,
 				 struct zswap_tree *tree)
 {
 	swp_entry_t swpentry = entry->swpentry;
-	struct page *page;
+	struct folio *folio;
 	struct scatterlist input, output;
 	struct crypto_acomp_ctx *acomp_ctx;
 	struct zpool *pool = zswap_find_zpool(entry);
-	bool page_was_allocated;
+	bool folio_was_allocated;
 	u8 *src, *tmp = NULL;
 	unsigned int dlen;
 	int ret;
@@ -1074,34 +1074,34 @@ static int zswap_writeback_entry(struct zswap_entry *entry,
 			return -ENOMEM;
 	}
 
-	/* try to allocate swap cache page */
-	page = __read_swap_cache_async(swpentry, GFP_KERNEL, NULL, 0,
-				       &page_was_allocated);
-	if (!page) {
+	/* try to allocate swap cache folio */
+	folio = __read_swap_cache_async(swpentry, GFP_KERNEL, NULL, 0,
+				       &folio_was_allocated);
+	if (!folio) {
 		ret = -ENOMEM;
 		goto fail;
 	}
 
-	/* Found an existing page, we raced with load/swapin */
-	if (!page_was_allocated) {
-		put_page(page);
+	/* Found an existing folio, we raced with load/swapin */
+	if (!folio_was_allocated) {
+		folio_put(folio);
 		ret = -EEXIST;
 		goto fail;
 	}
 
 	/*
-	 * Page is locked, and the swapcache is now secured against
+	 * folio is locked, and the swapcache is now secured against
 	 * concurrent swapping to and from the slot. Verify that the
 	 * swap entry hasn't been invalidated and recycled behind our
 	 * backs (our zswap_entry reference doesn't prevent that), to
-	 * avoid overwriting a new swap page with old compressed data.
+	 * avoid overwriting a new swap folio with old compressed data.
 	 */
 	spin_lock(&tree->lock);
 	if (zswap_rb_search(&tree->rbroot, swp_offset(entry->swpentry)) != entry) {
 		spin_unlock(&tree->lock);
-		delete_from_swap_cache(page_folio(page));
-		unlock_page(page);
-		put_page(page);
+		delete_from_swap_cache(folio);
+		folio_unlock(folio);
+		folio_put(folio);
 		ret = -ENOMEM;
 		goto fail;
 	}
@@ -1121,7 +1121,7 @@ static int zswap_writeback_entry(struct zswap_entry *entry,
 	mutex_lock(acomp_ctx->mutex);
 	sg_init_one(&input, src, entry->length);
 	sg_init_table(&output, 1);
-	sg_set_page(&output, page, PAGE_SIZE, 0);
+	sg_set_page(&output, &folio->page, PAGE_SIZE, 0);
 	acomp_request_set_params(acomp_ctx->req, &input, &output, entry->length, dlen);
 	ret = crypto_wait_req(crypto_acomp_decompress(acomp_ctx->req), &acomp_ctx->wait);
 	dlen = acomp_ctx->req->dlen;
@@ -1135,15 +1135,15 @@ static int zswap_writeback_entry(struct zswap_entry *entry,
 	BUG_ON(ret);
 	BUG_ON(dlen != PAGE_SIZE);
 
-	/* page is up to date */
-	SetPageUptodate(page);
+	/* folio is up to date */
+	folio_mark_uptodate(folio);
 
 	/* move it to the tail of the inactive list after end_writeback */
-	SetPageReclaim(page);
+	folio_set_reclaim(folio);
 
 	/* start writeback */
-	__swap_writepage(page, &wbc);
-	put_page(page);
+	__swap_writepage(&folio->page, &wbc);
+	folio_put(folio);
 	zswap_written_back_pages++;
 
 	return ret;
@@ -1294,7 +1294,7 @@ bool zswap_store(struct folio *folio)
 
 	dst = acomp_ctx->dstmem;
 	sg_init_table(&input, 1);
-	sg_set_page(&input, page, PAGE_SIZE, 0);
+	sg_set_page(&input, &folio->page, PAGE_SIZE, 0);
 
 	/* zswap_dstmem is of size (PAGE_SIZE * 2). Reflect same in sg_list */
 	sg_init_one(&output, dst, PAGE_SIZE * 2);

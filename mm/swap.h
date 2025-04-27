@@ -48,7 +48,7 @@ struct page *read_swap_cache_async(swp_entry_t entry, gfp_t gfp_mask,
 				   struct vm_area_struct *vma,
 				   unsigned long addr,
 				   struct swap_iocb **plug);
-struct page *__read_swap_cache_async(swp_entry_t entry, gfp_t gfp_mask,
+struct folio *__read_swap_cache_async(swp_entry_t entry, gfp_t gfp_mask,
 				     struct vm_area_struct *vma,
 				     unsigned long addr,
 				     bool *new_page_allocated);
