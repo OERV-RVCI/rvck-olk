@@ -133,6 +133,8 @@ struct rdt_domain {
  * @arch_has_sparse_bitmasks:	True if a bitmask like f00f is valid.
  * @arch_has_per_cpu_cfg:	True if QOS_CFG register for this cache
  *				level has CPU scope.
+ * @intpri_wd:		Number of implemented bits in the priority
+ *			partition.
  */
 struct resctrl_cache {
 	unsigned int	cbm_len;
@@ -140,6 +142,7 @@ struct resctrl_cache {
 	unsigned int	shareable_bits;
 	bool		arch_has_sparse_bitmasks;
 	bool		arch_has_per_cpu_cfg;
+	unsigned int	intpri_wd;
 };
 
 /**
@@ -166,6 +169,8 @@ enum membw_throttle_mode {
  *			different memory bandwidths
  * @mba_sc:		True if MBA software controller(mba_sc) is enabled
  * @mb_map:		Mapping of memory B/W percentage to memory B/W delay
+ * @intpri_wd:		Number of implemented bits in the priority
+ *			partition.
  */
 struct resctrl_membw {
 	u32				min_bw;
@@ -175,6 +180,17 @@ struct resctrl_membw {
 	enum membw_throttle_mode	throttle_mode;
 	bool				mba_sc;
 	u32				*mb_map;
+	u32                             intpri_wd;
+};
+
+/**
+ * enum resctrl_schema_fmt - The format user-space provides for a schema.
+ * @RESCTRL_SCHEMA_BITMAP:	The schema is a bitmap in hex.
+ * @RESCTRL_SCHEMA_RANGE:	The schema is a decimal number.
+ */
+enum resctrl_schema_fmt {
+	RESCTRL_SCHEMA_BITMAP,
+	RESCTRL_SCHEMA_RANGE,
 };
 
 /**
@@ -211,6 +227,7 @@ struct rdt_resource {
 	struct list_head	evt_list;
 	unsigned long		fflags;
 	bool			cdp_capable;
+	enum resctrl_schema_fmt schema_fmt;
 };
 
 /*
@@ -234,7 +251,7 @@ struct rdt_resource *resctrl_arch_get_resource(enum resctrl_res_level l);
  */
 struct resctrl_schema {
 	struct list_head		list;
-	char				name[8];
+	char				name[16];
 	enum resctrl_conf_type		conf_type;
 	struct rdt_resource		*res;
 	u32				num_closid;

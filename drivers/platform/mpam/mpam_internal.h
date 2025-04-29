@@ -52,7 +52,7 @@ struct mpam_msc
 	struct mpam_msc * __percpu	*error_dev_id;
 
 	atomic_t		online_refs;
-	
+
 	struct mutex		lock;
 	bool			probed;
 	bool			error_irq_requested;
@@ -86,9 +86,11 @@ typedef u32 mpam_features_t;
 enum mpam_device_features {
 	mpam_feat_ccap_part = 0,
 	mpam_feat_cpor_part,
+	mpam_feat_cmin,
 	mpam_feat_mbw_part,
 	mpam_feat_mbw_min,
 	mpam_feat_mbw_max,
+	mpam_feat_max_limit,
 	mpam_feat_mbw_prop,
 	mpam_feat_intpri_part,
 	mpam_feat_intpri_part_0_low,
@@ -162,6 +164,17 @@ struct mpam_config {
 	u32	cpbm;
 	u32	mbw_pbm;
 	u16	mbw_max;
+	u16	mbw_min;
+	bool	max_limit;
+	u16	cmax;
+	u16	cmin;
+
+	/*
+	 * dspri is downstream priority
+	 * intpri is internal priority
+	 */
+	u16	dspri;
+	u16	intpri;
 };
 
 struct mpam_component
@@ -341,6 +354,7 @@ void mpam_resctrl_exit(void);
 #define MPAMCFG_PART_SEL        0x0100  /* partid to configure: */
 #define MPAMCFG_CPBM            0x1000  /* cache-portion config */
 #define MPAMCFG_CMAX            0x0108  /* cache-capacity config */
+#define MPAMCFG_CMIN            0x0110  /* cache-capacity min config */
 #define MPAMCFG_MBW_MIN         0x0200  /* min mem-bw config */
 #define MPAMCFG_MBW_MAX         0x0208  /* max mem-bw config */
 #define MPAMCFG_MBW_WINWD       0x0220  /* mem-bw accounting window config */
