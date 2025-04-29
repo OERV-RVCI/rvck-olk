@@ -304,17 +304,17 @@ static int xsc_set_port_pfc(struct xsc_core_device *xdev, u8 pfcbitmap)
 {
 	u8 i;
 	u8 pfc_en[IEEE_8021QAZ_MAX_TCS] = {0};
-	struct xsc_pfc_set req;
-	struct xsc_pfc_set rsp;
+	struct xsc_pfc_set_new req;
+	struct xsc_pfc_set_new rsp;
 
 	xsc_pfc_bitmap2array(pfcbitmap, pfc_en);
 
 	memset(&req, 0, sizeof(struct xsc_pfc_set));
 	for (i = 0; i <= xsc_max_tc(xdev); i++) {
 		req.pfc_on = pfc_en[i];
-		req.priority = i;
+		req.req_prio = i;
 		xsc_core_dbg(xdev, "%s: prio %d, pfc %d\n", __func__, i, req.pfc_on);
-		xsc_hw_kernel_call(xdev, XSC_CMD_OP_IOCTL_SET_PFC, &req, &rsp);
+		xsc_hw_kernel_call(xdev, XSC_CMD_OP_IOCTL_SET_PFC_NEW, &req, &rsp);
 	}
 	return 0;
 }

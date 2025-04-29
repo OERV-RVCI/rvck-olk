@@ -117,3 +117,4 @@ void xsc_tx_dim_work(struct work_struct *work)
 	xsc_complete_dim_work(dim, cur_moder, sq->cq.xdev, &sq->cq.xcq);
 	sq->stats->dim_pkts = cur_moder.pkts;
 }
+

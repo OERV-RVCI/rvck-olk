@@ -27,7 +27,9 @@ int xsc_eswitch_enable(struct xsc_eswitch *esw, int mode, int num_vfs);
 void xsc_eswitch_disable_locked(struct xsc_eswitch *esw, bool clear_vf);
 void xsc_eswitch_disable(struct xsc_eswitch *esw, bool clear_vf);
 
-int xsc_devlink_eswitch_mode_set(struct devlink *devlink, u16 mod, struct netlink_ext_ack *extack);
+int xsc_devlink_eswitch_mode_set(struct devlink *devlink, u16 mod
+				, struct netlink_ext_ack *extack
+				);
 int xsc_devlink_eswitch_mode_get(struct devlink *devlink, u16 *mode);
 
 struct xsc_vport *__must_check
@@ -146,6 +148,12 @@ static inline bool xsc_host_is_dpu_mode(struct xsc_core_device *dev)
 		dev->pdev->device == XSC_MV_HOST_PF_DEV_ID);
 }
 
+static inline bool xsc_is_soc_pf(struct xsc_core_device *dev)
+{
+	return (dev->pdev->device == XSC_MF_SOC_PF_DEV_ID ||
+		dev->pdev->device == XSC_MV_SOC_PF_DEV_ID);
+}
+
 static inline bool xsc_pf_vf_is_dpu_mode(struct xsc_core_device *dev)
 {
 	return (dev->pdev->device == XSC_MF_HOST_PF_DEV_ID ||
@@ -159,12 +167,30 @@ static inline bool xsc_get_pp_bypass_res(struct xsc_core_device *dev, bool esw_s
 	return esw_set || xsc_pf_vf_is_dpu_mode(dev);
 }
 
-static inline bool xsc_get_pct_drop_config(struct xsc_core_device *dev)
+static inline bool xsc_dev_is_pf(struct xsc_core_device *dev)
 {
 	return (dev->pdev->device == XSC_MC_PF_DEV_ID) ||
 		(dev->pdev->device == XSC_MF_SOC_PF_DEV_ID) ||
 		(dev->pdev->device == XSC_MS_PF_DEV_ID) ||
 		(dev->pdev->device == XSC_MV_SOC_PF_DEV_ID);
+}
+
+static inline bool xsc_get_pf_isolate_config(struct xsc_core_device *dev, bool up)
+{
+	struct net_device *netdev = dev->netdev;
+	bool is_not_slave = up ? (!(netdev->flags & IFF_SLAVE)) :
+				  (!(netdev->priv_flags & IFF_BONDING));
+
+	return xsc_dev_is_pf(dev) && is_not_slave;
+}
+
+static inline bool xsc_get_mac_drop_config(struct xsc_core_device *dev, bool up)
+{
+	struct net_device *netdev = dev->netdev;
+	bool is_not_slave = up ? (!(netdev->flags & IFF_SLAVE)) :
+				(!(netdev->priv_flags & IFF_BONDING));
+
+	return xsc_dev_is_pf(dev) && is_not_slave;
 }
 
 #endif /* ESWITCH_H */

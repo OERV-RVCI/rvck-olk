@@ -137,7 +137,6 @@ struct xsc_adapter {
 	struct workqueue_struct		*workq;
 	struct work_struct		update_carrier_work;
 	struct work_struct		set_rx_mode_work;
-	struct work_struct		event_work;
 
 	struct xsc_eth_channels	channels;
 	struct xsc_sq **txq2sq;
@@ -190,6 +189,11 @@ struct xsc_tx_wqe {
 	struct xsc_wqe_data_seg data[];
 };
 
+struct xsc_user_mode_attr {
+	u16 pkt_bitmap;
+	u16 dst_info[8];
+};
+
 typedef int (*xsc_eth_fp_preactivate)(struct xsc_adapter *priv);
 typedef int (*xsc_eth_fp_postactivate)(struct xsc_adapter *priv);
 
@@ -203,8 +207,13 @@ int xsc_eth_get_link_info(struct xsc_adapter *adapter,
 			  struct xsc_event_linkinfo *plinkinfo);
 int xsc_eth_set_link_info(struct xsc_adapter *adapter,
 			  struct xsc_event_linkinfo *plinkinfo);
-
 int xsc_eth_set_led_status(int id, struct xsc_adapter *adapter);
+int xsc_eth_enable_nic_hca(struct xsc_adapter *adapter);
+int xsc_eth_query_pkt_dst_info(struct xsc_adapter *adapter, u8 mac_bitmap,
+			       u16 pkt_bitmap, u16 *dst_info);
+int xsc_eth_modify_pkt_dst_info(struct xsc_adapter *adapter, u8 mac_bitmap,
+				u16 pkt_bitmap, u16 dst_info);
+
 
 /* Use this function to get max num channels after netdev was created */
 static inline int xsc_get_netdev_max_channels(struct xsc_adapter *adapter)

@@ -11,14 +11,16 @@
 #include "common/xsc_pph.h"
 #include "common/xsc_hsi.h"
 
-#define SW_MIN_MTU		64
+#define SW_MIN_MTU		ETH_MIN_MTU
 #define SW_DEFAULT_MTU		1500
 #define SW_MAX_MTU		9600
 
 #define XSC_ETH_HW_MTU_SEND	9800		/*need to obtain from hardware*/
 #define XSC_ETH_HW_MTU_RECV	9800		/*need to obtain from hardware*/
 #define XSC_SW2HW_MTU(mtu)	((mtu) + 14 + 4)
-#define XSC_SW2HW_FRAG_SIZE(mtu)	((mtu) + 14 + 8 + 4 + XSC_PPH_HEAD_LEN)
+#define XSC_SW2HW_HLEN          (14 + 8 + 4 + XSC_PPH_HEAD_LEN)
+#define XSC_SW2HW_FRAG_SIZE(mtu)	((mtu) + XSC_SW2HW_HLEN)
+#define XSC_HW2SW_MTU_SIZE(buf)		((buf) - XSC_SW2HW_HLEN)
 #define XSC_SW2HW_RX_PKT_LEN(mtu)	((mtu) + 14 + 256)
 
 #define XSC_RX_MAX_HEAD			(256)
@@ -30,11 +32,7 @@
 #define XSC_LOG_INDIR_RQT_SIZE		0x8
 
 #define XSC_INDIR_RQT_SIZE			BIT(XSC_LOG_INDIR_RQT_SIZE)
-#ifdef XSC_RSS_SUPPORT
 #define XSC_ETH_MIN_NUM_CHANNELS	2
-#else
-#define XSC_ETH_MIN_NUM_CHANNELS	1
-#endif
 #define XSC_ETH_MAX_NUM_CHANNELS	XSC_INDIR_RQT_SIZE
 
 #define XSC_TX_NUM_TC			1
@@ -275,22 +273,6 @@ struct xsc_eth_redirect_rqt_param {
 			struct xsc_eth_channels *channels;
 		} rss; /* RSS data */
 	};
-};
-
-union xsc_send_doorbell {
-	struct{
-		s32  next_pid : 16;
-		u32 qp_num : 15;
-	};
-	u32 send_data;
-};
-
-union xsc_recv_doorbell {
-	struct{
-		s32  next_pid : 13;
-		u32 qp_num : 15;
-	};
-	u32 recv_data;
 };
 
 #endif /* XSC_ETH_COMMON_H */

@@ -20,21 +20,12 @@ static inline void xsc_rq_notify_hw(struct xsc_rq *rq)
 {
 	struct xsc_core_device *xdev = rq->cq.xdev;
 	struct xsc_wq_cyc *wq = &rq->wqe.wq;
-	union xsc_recv_doorbell doorbell_value;
 	u64 rqwqe_id = wq->wqe_ctr << (ilog2(xdev->caps.recv_ds_num));
 
-	ETH_DEBUG_LOG("rq%d_db_val=0x%x, recv_ds=%d\n",
-		      rq->rqn, doorbell_value.recv_data,
-		      xdev->caps.recv_ds_num);
-	/*reverse wqe index to ds index*/
-	doorbell_value.next_pid = rqwqe_id;
-	doorbell_value.qp_num = rq->rqn;
+	ETH_DEBUG_LOG("rq=%d, next_pid=%#x, recv_ds=%d\n",
+		      rq->rqn, rqwqe_id, xdev->caps.recv_ds_num);
 
-	/* Make sure that descriptors are written before
-	 * updating doorbell record and ringing the doorbell
-	 */
-	wmb();
-	writel(doorbell_value.recv_data, REG_ADDR(xdev, xdev->regs.rx_db));
+	xsc_update_rx_db(xdev, rq->rqn, rqwqe_id);
 }
 
 static inline void xsc_skb_set_hash(struct xsc_adapter *adapter,
@@ -491,12 +482,13 @@ static inline bool xsc_rx_cache_put(struct xsc_rq *rq,
 	return true;
 }
 
-void xsc_page_dma_unmap(struct xsc_rq *rq, struct xsc_dma_info *dma_info)
+static void xsc_page_dma_unmap(struct xsc_rq *rq, struct xsc_dma_info *dma_info)
 {
 	struct xsc_channel *c = rq->cq.channel;
 	struct device *dev = c->adapter->dev;
 
-	dma_unmap_page(dev, dma_info->addr, XSC_RX_FRAG_SZ, rq->buff.map_dir);
+	dma_unmap_page(dev, dma_info->addr,
+		       PAGE_SIZE << rq->buff.page_order, rq->buff.map_dir);
 }
 
 static inline void xsc_put_page(struct xsc_dma_info *dma_info)
@@ -556,7 +548,8 @@ static void xsc_dump_error_rqcqe(struct xsc_rq *rq,
 
 	net_err_ratelimited("Error cqe on dev=%s, cqn=%d, ci=%d, rqn=%d, qpn=%d, error_code=0x%x\n",
 			    netdev->name, rq->cq.xcq.cqn, ci,
-			    rq->rqn, cqe->qp_id, get_cqe_opcode(cqe));
+			    rq->rqn, cqe->qp_id, xsc_get_cqe_error_code(rq->cq.xdev, cqe));
+
 }
 
 void xsc_eth_handle_rx_cqe(struct xsc_cqwq *cqwq,
@@ -564,7 +557,6 @@ void xsc_eth_handle_rx_cqe(struct xsc_cqwq *cqwq,
 {
 	struct xsc_wq_cyc *wq = &rq->wqe.wq;
 	struct xsc_channel *c = rq->cq.channel;
-	u8 cqe_opcode = get_cqe_opcode(cqe);
 	struct xsc_wqe_frag_info *wi;
 	struct sk_buff *skb;
 	u32 cqe_bcnt;
@@ -572,7 +564,7 @@ void xsc_eth_handle_rx_cqe(struct xsc_cqwq *cqwq,
 
 	ci = xsc_wq_cyc_ctr2ix(wq, cqwq->cc);
 	wi = get_frag(rq, ci);
-	if (unlikely(cqe_opcode & BIT(7))) {
+	if (unlikely(xsc_is_err_cqe(rq->cq.xdev, cqe))) {
 		xsc_dump_error_rqcqe(rq, cqe);
 		rq->stats->cqe_err++;
 		goto free_wqe;
@@ -676,7 +668,8 @@ static inline int xsc_page_alloc_mapped(struct xsc_rq *rq,
 		return -ENOMEM;
 
 	dma_info->addr = dma_map_page(dev, dma_info->page, 0,
-				      XSC_RX_FRAG_SZ, rq->buff.map_dir);
+				      PAGE_SIZE << rq->buff.page_order,
+				      rq->buff.map_dir);
 	if (unlikely(dma_mapping_error(dev, dma_info->addr))) {
 		page_pool_recycle_direct(rq->page_pool, dma_info->page);
 		dma_info->page = NULL;
@@ -766,13 +759,16 @@ free_wqes:
 	return err;
 }
 
-bool xsc_eth_post_rx_wqes(struct xsc_rq *rq)
+bool xsc_eth_post_rx_wqes(struct xsc_rq *rq, bool force)
 {
 	struct xsc_wq_cyc *wq = &rq->wqe.wq;
 	u8 wqe_bulk, wqe_bulk_min;
 	int alloc;
 	u16 head;
 	int err;
+
+	if (!force && !test_bit(XSC_ETH_RQ_STATE_ENABLED, &rq->state))
+		return false;
 
 	wqe_bulk = rq->wqe.info.wqe_bulk;
 	wqe_bulk_min = rq->wqe.info.wqe_bulk_min;

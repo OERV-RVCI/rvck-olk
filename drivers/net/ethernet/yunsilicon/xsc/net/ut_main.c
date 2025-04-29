@@ -68,7 +68,7 @@ u32 xsc_eth_process_napi(struct xsc_adapter *adapter)
 
 			if (work_done != 0) {
 				xsc_cq_notify_hw(&prq->cq);
-				err |= prq->post_wqes(prq);
+				err |= prq->post_wqes(prq, false);
 
 				ETH_DEBUG_LOG("err=%u.\r\n", err);
 			} else {

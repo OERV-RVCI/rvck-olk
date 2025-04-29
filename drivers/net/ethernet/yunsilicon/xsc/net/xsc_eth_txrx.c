@@ -10,18 +10,8 @@
 
 void xsc_cq_notify_hw_rearm(struct xsc_cq *cq)
 {
-	union xsc_cq_doorbell db;
-
 	ETH_DEBUG_LOG("cc = %d cqn = %d\n", cq->wq.cc, cq->xcq.cqn);
-
-	db.val = 0;
-	db.cq_next_cid = cpu_to_le32(cq->wq.cc);
-	db.cq_id = cpu_to_le32(cq->xcq.cqn);
-	db.arm = 0;
-
-	/* ensure doorbell record is visible to device before ringing the doorbell */
-	wmb();
-	writel(db.val, REG_ADDR(cq->xdev, cq->xdev->regs.complete_db));
+	xsc_arm_cq(cq->xdev, cq->xcq.cqn, cq->wq.cc, 0);
 	if (cq->channel && cq->channel->stats)
 		cq->channel->stats->arm++;
 }
@@ -29,17 +19,9 @@ void xsc_cq_notify_hw_rearm(struct xsc_cq *cq)
 void xsc_cq_notify_hw(struct xsc_cq *cq)
 {
 	struct xsc_core_device *xdev  = cq->xdev;
-	union xsc_cq_doorbell db;
 
 	ETH_DEBUG_LOG("cc = %d cqn = %d\n", cq->wq.cc, cq->xcq.cqn);
-
-	dma_wmb();
-
-	db.val = 0;
-	db.cq_next_cid = cpu_to_le32(cq->wq.cc);
-	db.cq_id = cpu_to_le32(cq->xcq.cqn);
-
-	writel(db.val, REG_ADDR(xdev, xdev->regs.complete_reg));
+	xsc_update_cq_ci(xdev, cq->xcq.cqn, cq->wq.cc);
 	if (cq->channel && cq->channel->stats)
 		cq->channel->stats->noarm++;
 }
@@ -86,7 +68,7 @@ int xsc_eth_napi_poll(struct napi_struct *napi, int budget)
 		busy |= work_done == budget;
 	}
 
-	busy |= rq->post_wqes(rq);
+	busy |= rq->post_wqes(rq, false);
 
 	if (busy) {
 		if (likely(xsc_channel_no_affinity_change(c))) {
@@ -98,12 +80,8 @@ int xsc_eth_napi_poll(struct napi_struct *napi, int budget)
 			work_done--;
 	}
 
-#ifdef NETDEV_NAPI_COMP_DONE_RETURN_VOID
-	napi_complete_done(napi, work_done);
-#else
 	if (unlikely(!napi_complete_done(napi, work_done)))
 		goto out;
-#endif
 
 	for (i = 0; i < c->num_tc; i++) {
 		sq = &c->qp.sq[i];
@@ -165,9 +143,7 @@ int xsc_eth_napi_poll(struct napi_struct *napi, int budget)
 
 	xsc_cq_notify_hw_rearm(&rq->cq);
 
-#ifndef NETDEV_NAPI_COMP_DONE_RETURN_VOID
 out:
-#endif
 	rcu_read_unlock();
 	return work_done;
 }

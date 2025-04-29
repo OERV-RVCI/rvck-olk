@@ -4,6 +4,10 @@
 
 ccflags-y += -I$(srctree)/drivers/net/ethernet/yunsilicon/xsc
 
+ifeq ($(HAVE_TO_USE_M_IB_CORE), 1)
+	ccflags-y += $(xsc-ccflags)
+endif
+
 obj-$(CONFIG_YUNSILICON_XSC_ETH) += xsc_eth.o
 
 xsc_eth-y := main.o xsc_eth_ctrl.o xsc_eth_tx.o xsc_eth_rx.o xsc_eth_txrx.o \
