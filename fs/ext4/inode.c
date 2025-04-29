@@ -5359,7 +5359,8 @@ bool ext4_should_use_buffered_iomap(struct inode *inode)
 		return false;
 	if (ext4_has_feature_verity(sb))
 		return false;
-	if (test_opt(sb, DATA_FLAGS) == EXT4_MOUNT_JOURNAL_DATA)
+	if (test_opt(sb, DATA_FLAGS) == EXT4_MOUNT_JOURNAL_DATA ||
+		ext4_test_inode_flag(inode, EXT4_INODE_JOURNAL_DATA))
 		return false;
 	if (!S_ISREG(inode->i_mode))
 		return false;
