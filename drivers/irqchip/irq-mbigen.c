@@ -719,6 +719,9 @@ static int vtimer_mbigen_set_regs(struct platform_device *pdev)
 	if (!vtimer_irqbypass)
 		return 0;
 
+	if (!mgn_chip)
+		return -ENOMEM;
+
 	addr = mgn_chip->base + MBIGEN_CTLR_OFFSET;
 	val = readl_relaxed(addr);
 	mpidr_aff3 = (val & MBIGEN_AFF3_MASK) >> MBIGEN_AFF3_SHIFT;
@@ -728,9 +731,6 @@ static int vtimer_mbigen_set_regs(struct platform_device *pdev)
 	}
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (!mgn_chip)
-		return -ENOMEM;
-
 	if (res->start == CHIP0_TA_MBIGEN_PHY_BASE) {
 		addr = ioremap(CHIP0_TA_PERI_PHY_BASE, 4);
 		if (!addr) {
