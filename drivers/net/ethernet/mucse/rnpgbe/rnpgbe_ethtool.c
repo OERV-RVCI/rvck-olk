@@ -1639,8 +1639,11 @@ static int rnpgbe_add_ethtool_fdir_entry(struct rnpgbe_adapter *adapter,
 		e_err(drv, "Unrecognized flow type\n");
 		goto err_out;
 	}
+	if (input->filter.formatted.flow_type == RNP_ATR_FLOW_TYPE_ETHER) {
+		/* it is a layer2 proto */
+		/* no need to setup other */
 
-	if (input->filter.formatted.flow_type == RNP_ATR_FLOW_TYPE_IPV4) {
+	} else if (input->filter.formatted.flow_type == RNP_ATR_FLOW_TYPE_IPV4) {
 		/* Copy input into formatted structures */
 		input->filter.formatted.src_ip[0] =
 			fsp->h_u.usr_ip4_spec.ip4src;

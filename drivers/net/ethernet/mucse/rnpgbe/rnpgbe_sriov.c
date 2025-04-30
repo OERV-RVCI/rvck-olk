@@ -298,12 +298,14 @@ int rnpgbe_disable_sriov(struct rnpgbe_adapter *adapter)
 	return 0;
 }
 
+#if IS_ENABLED(CONFIG_PCI_IOV)
 static bool check_ari_mode(struct pci_dev *dev)
 {
 	struct pci_bus *bus = dev->bus;
 
 	return bus->self && bus->self->ari_enabled;
 }
+#endif
 
 static int rnpgbe_pci_sriov_enable(struct pci_dev *dev, int num_vfs)
 {

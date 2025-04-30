@@ -524,13 +524,13 @@ static inline __le16 rnpgbe_test_ext_cmd(union rnpgbe_rx_desc *rx_desc,
 	return rx_desc->wb.rev1 & cpu_to_le16(stat_err_bits);
 }
 
-#ifdef RNP_HWMON
+#ifdef RNPGBE_HWMON
 
-#define RNP_HWMON_TYPE_LOC 0
-#define RNP_HWMON_TYPE_TEMP 1
-#define RNP_HWMON_TYPE_CAUTION 2
-#define RNP_HWMON_TYPE_MAX 3
-#define RNP_HWMON_TYPE_NAME 4
+#define RNPGBE_HWMON_TYPE_LOC 0
+#define RNPGBE_HWMON_TYPE_TEMP 1
+#define RNPGBE_HWMON_TYPE_CAUTION 2
+#define RNPGBE_HWMON_TYPE_MAX 3
+#define RNPGBE_HWMON_TYPE_NAME 4
 
 struct hwmon_attr {
 	struct device_attribute dev_attr;
@@ -969,9 +969,9 @@ struct rnpgbe_adapter {
 	u32 vferr_refcount;
 	struct kobject *info_kobj;
 #ifdef RNP_SYSFS
-#ifdef RNP_HWMON
+#ifdef RNPGBE_HWMON
 	struct hwmon_buff *rnpgbe_hwmon_buff;
-#endif /* RNP_HWMON */
+#endif /* RNPGBE_HWMON */
 #endif /* RNPM_SYSFS */
 #ifdef CONFIG_DEBUG_FS
 	struct dentry *rnpgbe_dbg_adapter;
@@ -1117,10 +1117,10 @@ extern s32 rnpgbe_fdir_erase_perfect_filter(int fdir_mode, struct rnpgbe_hw *hw,
 					    u16 hw_id);
 extern u32 rnpgbe_rss_indir_tbl_entries(struct rnpgbe_adapter *adapter);
 extern void rnpgbe_do_reset(struct net_device *netdev);
-#ifdef CONFIG_RNP_HWMON
+#ifdef RNPGBE_HWMON
 extern void rnpgbe_sysfs_exit(struct rnpgbe_adapter *adapter);
 extern int rnpgbe_sysfs_init(struct rnpgbe_adapter *adapter);
-#endif /* CONFIG_RNP_HWMON */
+#endif /* RNPGBE_HWMON */
 #ifdef CONFIG_DEBUG_FS
 extern void rnpgbe_dbg_adapter_init(struct rnpgbe_adapter *adapter);
 extern void rnpgbe_dbg_adapter_exit(struct rnpgbe_adapter *adapter);
