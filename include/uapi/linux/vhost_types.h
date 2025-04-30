@@ -163,6 +163,11 @@ struct vhost_vdpa_iova_range {
 	__u64 last;
 };
 
+struct vhost_vdpa_bind_iommufd {
+	__s32 iommufd;
+	__u32 out_devid;
+};
+
 /* vhost vdpa device migration statue */
 enum {
 	VHOST_VDPA_DEVICE_START,
