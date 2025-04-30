@@ -1419,6 +1419,17 @@ bool zswap_load(struct folio *folio)
 	if (zswap_never_enabled())
 		return false;
 
+	/*
+	 * Large folios should not be swapped in while zswap is being used, as
+	 * they are not properly handled. Zswap does not properly load large
+	 * folios, and a large folio may only be partially in zswap.
+	 *
+	 * Return true without marking the folio uptodate so that an IO error is
+	 * emitted (e.g. do_swap_page() will sigbus).
+	 */
+	if (WARN_ON_ONCE(folio_test_large(folio)))
+		return true;
+
 	/* find */
 	spin_lock(&tree->lock);
 	entry = zswap_entry_find_get(&tree->rbroot, offset);
@@ -1487,6 +1498,9 @@ freeentry:
 	}
 	zswap_entry_put(tree, entry);
 	spin_unlock(&tree->lock);
+
+	if (ret == true)
+		folio_mark_uptodate(folio);
 
 	return ret;
 }
