@@ -70,7 +70,7 @@
 #define RNPM_MAX_SENSORS 1
 struct rnpm_thermal_diode_data {
 	u8 location;
-	u8 temp;
+	int temp;
 	u8 caution_thresh;
 	u8 max_op_thresh;
 };

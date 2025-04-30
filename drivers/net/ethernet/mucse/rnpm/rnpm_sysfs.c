@@ -1594,16 +1594,7 @@ static struct attribute *dev_attrs[] = {
 	&dev_attr_pf_reset.attr,
 	&dev_attr_ring_num.attr,
 	&dev_attr_port_idx.attr,
-	&dev_attr_own_vpd.attr,
 	&dev_attr_nr_lane.attr,
-	&dev_attr_temperature.attr,
-	&dev_attr_si.attr,
-	&dev_attr_sfp.attr,
-	&dev_attr_autoneg.attr,
-	&dev_attr_sfp_tx_disable.attr,
-	&dev_attr_fec.attr,
-	&dev_attr_link_traing.attr,
-	&dev_attr_pci.attr,
 	&dev_attr_prbs.attr,
 	&dev_attr_debug_linkstat.attr,
 	&dev_attr_debug_aptstat.attr,
@@ -1612,11 +1603,24 @@ static struct attribute *dev_attrs[] = {
 	&dev_attr_bar4_reg.attr,
 	&dev_attr_phy_statistics.attr,
 	&dev_attr_pcs_reg.attr,
-	&dev_attr_phy_reg.attr,
 	&dev_attr_pma_rx2tx_loopback.attr,
 	&dev_attr_pcs_rx2tx_loopback.attr,
 	&dev_attr_switch_loopback_off.attr,
 	&dev_attr_switch_loopback_on.attr,
+	NULL,
+};
+
+static struct attribute *vendor_dev_attrs[] = {
+	&dev_attr_si.attr,
+	&dev_attr_sfp.attr,
+	&dev_attr_autoneg.attr,
+	&dev_attr_own_vpd.attr,
+	&dev_attr_pci.attr,
+	&dev_attr_sfp_tx_disable.attr,
+	&dev_attr_link_traing.attr,
+	&dev_attr_fec.attr,
+	&dev_attr_temperature.attr,
+	&dev_attr_phy_reg.attr,
 	NULL,
 };
 
@@ -1631,6 +1635,17 @@ static struct attribute_group dev_attr_grp = {
 #ifndef NO_BIT_ATTRS
 	.bin_attrs = dev_bin_attrs,
 #endif
+};
+
+static const struct attribute_group vendor_attr_grp = {
+	.name = "vendor",
+	.attrs = vendor_dev_attrs,
+};
+
+static const struct attribute_group *attr_grps[] = {
+	&dev_attr_grp,
+	&vendor_attr_grp,
+	NULL,
 };
 
 /* hwmon callback functions */
@@ -1655,7 +1670,7 @@ static ssize_t rnpm_hwmon_show_temp(struct device __always_unused *dev,
 {
 	struct hwmon_attr *rnpm_attr =
 		container_of(attr, struct hwmon_attr, dev_attr);
-	unsigned int value;
+	int value;
 
 	/* reset the temp field */
 	rnpm_attr->hw->mac.ops.get_thermal_sensor_data(rnpm_attr->hw);
@@ -1664,7 +1679,7 @@ static ssize_t rnpm_hwmon_show_temp(struct device __always_unused *dev,
 	/* display millidegree */
 	value *= 1000;
 
-	return snprintf(buf, PAGE_SIZE, "%u\n", value);
+	return snprintf(buf, PAGE_SIZE, "%d\n", value);
 }
 
 static ssize_t rnpm_hwmon_show_cautionthresh(struct device __always_unused *dev,
@@ -1673,11 +1688,11 @@ static ssize_t rnpm_hwmon_show_cautionthresh(struct device __always_unused *dev,
 {
 	struct hwmon_attr *rnpm_attr =
 		container_of(attr, struct hwmon_attr, dev_attr);
-	unsigned int value = rnpm_attr->sensor->caution_thresh;
+	int value = rnpm_attr->sensor->caution_thresh;
+
 	/* display millidegree */
 	value *= 1000;
-
-	return snprintf(buf, PAGE_SIZE, "%u\n", value);
+	return snprintf(buf, PAGE_SIZE, "%d\n", value);
 }
 
 static ssize_t rnpm_hwmon_show_maxopthresh(struct device __always_unused *dev,
@@ -1686,12 +1701,12 @@ static ssize_t rnpm_hwmon_show_maxopthresh(struct device __always_unused *dev,
 {
 	struct hwmon_attr *rnpm_attr =
 		container_of(attr, struct hwmon_attr, dev_attr);
-	unsigned int value = rnpm_attr->sensor->max_op_thresh;
+	int value = rnpm_attr->sensor->max_op_thresh;
 
 	/* display millidegree */
 	value *= 1000;
 
-	return snprintf(buf, PAGE_SIZE, "%u\n", value);
+	return snprintf(buf, PAGE_SIZE, "%d\n", value);
 }
 
 /**
@@ -1766,7 +1781,7 @@ static int rnpm_add_hwmon_attr(struct rnpm_adapter *adapter,
 /* called from rnpm_main.c */
 void rnpm_sysfs_exit(struct rnpm_adapter *adapter)
 {
-	sysfs_remove_group(&adapter->netdev->dev.kobj, &dev_attr_grp);
+	sysfs_remove_groups(&adapter->netdev->dev.kobj, &attr_grps[0]);
 }
 
 /* called from rnpm_main.c */
@@ -1777,7 +1792,7 @@ int rnpm_sysfs_init(struct rnpm_adapter *adapter, int port)
 	struct device *hwmon_dev;
 	unsigned int i;
 
-	err = sysfs_create_group(&adapter->netdev->dev.kobj, &dev_attr_grp);
+	err = sysfs_create_groups(&adapter->netdev->dev.kobj, &attr_grps[0]);
 	if (err != 0) {
 		dev_err(&adapter->netdev->dev,
 			"sysfs_create_group failed:err:%d\n", err);

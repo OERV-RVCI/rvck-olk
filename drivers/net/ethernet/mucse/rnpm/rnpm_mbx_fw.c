@@ -32,6 +32,9 @@ int rnpm_mbx_write_posted_locked(struct rnpm_hw *hw, struct mbx_fw_cmd_req *req)
 	int retry = 3;
 	struct rnpm_pf_adapter *pf_adapter = pci_get_drvdata(hw->pdev);
 
+	if (pci_channel_offline(hw->pdev))
+		return -EIO;
+
 	if (mutex_lock_interruptible(hw->mbx.lock)) {
 		rnpm_err("[%s] get mbx lock failed opcode:0x%x\n", __func__,
 			 req->opcode);
@@ -80,6 +83,9 @@ int rnpm_mbx_fw_post_req(struct rnpm_hw *hw, struct mbx_fw_cmd_req *req,
 {
 	int err = 0;
 	struct rnpm_pf_adapter *pf_adapter = pci_get_drvdata(hw->pdev);
+
+	if (pci_channel_offline(hw->pdev))
+		return -EIO;
 
 	cookie->errcode = 0;
 	cookie->done = 0;
@@ -141,6 +147,9 @@ int rnpm_fw_send_cmd_wait(struct rnpm_hw *hw, struct mbx_fw_cmd_req *req,
 	int err = 0;
 	int retry_cnt = 3;
 	struct rnpm_pf_adapter *pf_adapter = pci_get_drvdata(hw->pdev);
+
+	if (pci_channel_offline(hw->pdev))
+		return -EIO;
 
 	if (!hw || !req || !reply || !hw->mbx.ops.read_posted) {
 		rnpm_err("error: hw:%p req:%p reply:%p\n", hw, req, reply);
@@ -872,6 +881,9 @@ int rnpm_mbx_pf_link_event_enable_nolock(struct rnpm_hw *hw, int enable)
 	int err, v;
 #define DM_MAGIC_CODE 0xa5000000
 
+	if (pci_channel_offline(hw->pdev))
+		return -EIO;
+
 	memset(&req, 0, sizeof(req));
 	memset(&reply, 0, sizeof(reply));
 
@@ -1201,6 +1213,9 @@ void rnpm_link_stat_mark(struct rnpm_hw *hw, int nr_lane, int up)
 	struct rnpm_pf_adapter *pf_adapter = adapter->pf_adapter;
 	unsigned long flags;
 
+	if (pci_channel_offline(hw->pdev))
+		return;
+
 	spin_lock_irqsave(&pf_adapter->dummy_setup_lock, flags);
 	v = rd32(hw, RNPM_DMA_DUMY);
 	v &= ~(0xffff0000);
@@ -1219,6 +1234,9 @@ void rnpm_mbx_probe_stat_set(struct rnpm_pf_adapter *pf_adapter, int stat)
 	unsigned long flags;
 	struct rnpm_hw *hw = &pf_adapter->hw;
 	u32 v;
+
+	if (pci_channel_offline(hw->pdev))
+		return;
 
 	spin_lock_irqsave(&pf_adapter->dummy_setup_lock, flags);
 	v = rd32(hw, RNPM_DMA_DUMY);
