@@ -12,25 +12,80 @@
 
 #define RNP_FW_MAILBOX_SIZE RNP_VFMAILBOX_SIZE
 
-static struct mbx_req_cookie *mbx_cookie_zalloc(int priv_len)
+static bool is_cookie_valid(struct rnp_hw *hw, void *cookie)
 {
-	struct mbx_req_cookie *cookie =
-		kzalloc(struct_size(cookie, priv, priv_len), GFP_KERNEL);
+	unsigned char *begin = (unsigned char *)(&hw->mbx.cookie_pool.cookies[0]);
+	unsigned char *end = (unsigned char *)(&hw->mbx.cookie_pool.cookies[MAX_COOKIES_ITEMS]);
 
-	if (cookie) {
-		cookie->timeout_jiffes = 30 * HZ;
-		cookie->magic = COOKIE_MAGIC;
-		cookie->priv_len = priv_len;
+	if (((unsigned char *)cookie) >= begin && ((unsigned char *)cookie) < end)
+		return true;
+
+	return false;
+}
+
+static struct mbx_req_cookie *mbx_cookie_zalloc(struct rnp_hw *hw, int priv_len)
+{
+	struct mbx_req_cookie *cookie = NULL;
+	int loop_cnt = MAX_COOKIES_ITEMS, i;
+	bool find = false;
+
+	u64 now_jiffies = get_jiffies_64();
+
+	if (mutex_lock_interruptible(&hw->mbx.lock)) {
+		rnp_err("[%s] get mbx lock failed,priv_len:%d\n", __func__, priv_len);
+		return NULL;
 	}
+	i = hw->mbx.cookie_pool.next_idx;
+	while (loop_cnt--) {
+		cookie = &hw->mbx.cookie_pool.cookies[i];
+		/* force free cookie if cookie not freed after 120 seconds */
+		if (cookie->stat == COOKIE_FREE ||
+		    time_after64(now_jiffies, cookie->alloced_jiffies + (2 * 60) * HZ)) {
+			find = true;
+			cookie->alloced_jiffies = get_jiffies_64();
+			cookie->stat = COOKIE_ALLOCED;
+			hw->mbx.cookie_pool.next_idx = (i + 1) % MAX_COOKIES_ITEMS;
+			break;
+		}
+		i = (i + 1) % MAX_COOKIES_ITEMS;
+	}
+	mutex_unlock(&hw->mbx.lock);
+
+	if (!find) {
+		rnp_err("[%s] no free cookies available\n", __func__);
+		return NULL;
+	}
+
+	cookie->timeout_jiffes = 30 * HZ;
+	cookie->priv_len = priv_len;
 
 	return cookie;
 }
 
-static int rnp_mbx_write_posted_locked(struct rnp_hw *hw,
-				       struct mbx_fw_cmd_req *req)
+/**
+ * @force_free:
+ * true: no other reference to this cookie, it is save to mark cookie reusable
+ * false: cookie may used by other(firmware), only available after 2min
+ **/
+static void mbx_free_cookie(struct mbx_req_cookie *cookie, bool force_free)
+{
+	if (!cookie)
+		return;
+
+	if (force_free) {
+		cookie->stat = COOKIE_FREE;
+	} else {
+		cookie->stat = COOKIE_FREE_WAIT_TIMEOUT;
+	}
+}
+
+static int rnp_mbx_write_posted_locked(struct rnp_hw *hw, struct mbx_fw_cmd_req *req)
 {
 	int err = 0;
 	int retry = 3;
+
+	if (pci_channel_offline(hw->pdev))
+		return -EIO;
 
 	if (mutex_lock_interruptible(&hw->mbx.lock)) {
 		rnp_err("[%s] get mbx lock failed opcode:0x%x\n", __func__,
@@ -81,6 +136,9 @@ static int rnp_mbx_fw_post_req(struct rnp_hw *hw, struct mbx_fw_cmd_req *req,
 	int err = 0;
 	struct rnp_adapter *adpt = hw->back;
 
+	if (pci_channel_offline(hw->pdev))
+		return -EIO;
+
 	cookie->errcode = 0;
 	cookie->done = 0;
 	init_waitqueue_head(&cookie->wait);
@@ -104,20 +162,22 @@ static int rnp_mbx_fw_post_req(struct rnp_hw *hw, struct mbx_fw_cmd_req *req,
 	}
 
 	if (cookie->timeout_jiffes != 0) {
+		int retry_cnt = 4;
 retry:
 		err = wait_event_interruptible_timeout(cookie->wait,
 						       cookie->done == 1,
 						       cookie->timeout_jiffes);
 
-		if (err == -ERESTARTSYS)
+		if (err == -ERESTARTSYS && retry_cnt) {
+			retry_cnt--;
 			goto retry;
-
+		}
 		if (err == 0) {
 			rnp_err("[%s] %s failed! pfvfnum:0x%x hw:%p timeout err:%d opcode:%x\n",
 				adpt->name, __func__, hw->pfvfnum, hw, err,
 				req->opcode);
 			err = -ETIME;
-		} else {
+		} else if (err > 0) {
 			err = 0;
 		}
 	} else {
@@ -142,6 +202,9 @@ static int rnp_fw_send_cmd_wait(struct rnp_hw *hw, struct mbx_fw_cmd_req *req,
 		rnp_err("error: hw:%p req:%p reply:%p\n", hw, req, reply);
 		return -EINVAL;
 	}
+
+	if (pci_channel_offline(hw->pdev))
+		return -EIO;
 
 	if (mutex_lock_interruptible(&hw->mbx.lock)) {
 		rnp_err("[%s] get mbx lock failed opcode:0x%x\n", __func__,
@@ -221,13 +284,9 @@ int rnp_mbx_get_lane_stat(struct rnp_hw *hw)
 	memset(&req, 0, sizeof(req));
 
 	if (hw->mbx.other_irq_enabled) {
-		cookie = mbx_cookie_zalloc(sizeof(struct lane_stat_data));
-
-		if (!cookie) {
-			rnp_err("%s: no memory\n", __func__);
+		cookie = mbx_cookie_zalloc(hw, sizeof(struct lane_stat_data));
+		if (!cookie)
 			return -ENOMEM;
-		}
-
 		st = (struct lane_stat_data *)cookie->priv;
 		build_get_lane_status_req(&req, hw->nr_lane, cookie);
 		err = rnp_mbx_fw_post_req(hw, &req, cookie);
@@ -300,7 +359,9 @@ int rnp_mbx_get_lane_stat(struct rnp_hw *hw)
 	rnp_logd(LOG_MBX_LINK_STAT, "speed:%d sfp_connector:0x%x\n",
 		 st->speed, st->sfp_connector);
 quit:
-	kfree(cookie);
+	if (cookie)
+		mbx_free_cookie(cookie, err ? false : true);
+
 	return err;
 }
 
@@ -336,15 +397,14 @@ int rnp_mbx_fw_reset_phy(struct rnp_hw *hw)
 	memset(&reply, 0, sizeof(reply));
 
 	if (hw->mbx.other_irq_enabled) {
-		struct mbx_req_cookie *cookie = mbx_cookie_zalloc(0);
+		struct mbx_req_cookie *cookie = mbx_cookie_zalloc(hw, 0);
 
 		if (!cookie)
 			return -ENOMEM;
 
 		build_reset_phy_req(&req, cookie);
 		ret = rnp_mbx_fw_post_req(hw, &req, cookie);
-		kfree(cookie);
-
+		mbx_free_cookie(cookie, ret ? false : true);
 		return ret;
 	}
 
@@ -363,7 +423,7 @@ int rnp_maintain_req(struct rnp_hw *hw, int cmd, int arg0,
 	struct mbx_fw_cmd_reply reply;
 	u64 address = dma_phy_addr;
 
-	cookie = mbx_cookie_zalloc(0);
+	cookie = mbx_cookie_zalloc(hw, 0);
 	if (!cookie)
 		return -ENOMEM;
 
@@ -386,8 +446,8 @@ int rnp_maintain_req(struct rnp_hw *hw, int cmd, int arg0,
 		hw->mbx.timeout = old_mbx_timeout;
 	}
 
-	kfree(cookie);
-
+	if (cookie)
+		mbx_free_cookie(cookie, err ? false : true);
 	return (err) ? -EIO : 0;
 }
 
@@ -416,7 +476,7 @@ int rnp_fw_get_macaddr(struct rnp_hw *hw, int pfvfnum, u8 *mac_addr,
 	}
 	if (hw->mbx.other_irq_enabled) {
 		struct mbx_req_cookie *cookie =
-			mbx_cookie_zalloc(sizeof(reply.mac_addr));
+			mbx_cookie_zalloc(hw, sizeof(reply.mac_addr));
 		struct mac_addr *mac = (struct mac_addr *)cookie->priv;
 
 		if (!cookie)
@@ -426,13 +486,14 @@ int rnp_fw_get_macaddr(struct rnp_hw *hw, int pfvfnum, u8 *mac_addr,
 					 cookie);
 		err = rnp_mbx_fw_post_req(hw, &req, cookie);
 		if (err) {
-			kfree(cookie);
+			mbx_free_cookie(cookie, false);
 			return err;
 		}
 		hw->pcode = mac->pcode;
 		if ((1 << nr_lane) & mac->lanes)
 			memcpy(mac_addr, mac->addrs[nr_lane].mac, 6);
-		kfree(cookie);
+
+		mbx_free_cookie(cookie, true);
 		return 0;
 	}
 
@@ -466,7 +527,7 @@ static int rnp_mbx_sfp_read(struct rnp_hw *hw, int sfp_i2c_addr, int reg,
 	}
 	memset(&req, 0, sizeof(req));
 	if (hw->mbx.other_irq_enabled) {
-		struct mbx_req_cookie *cookie = mbx_cookie_zalloc(cnt);
+		struct mbx_req_cookie *cookie = mbx_cookie_zalloc(hw, cnt);
 
 		if (!cookie)
 			return -ENOMEM;
@@ -474,12 +535,13 @@ static int rnp_mbx_sfp_read(struct rnp_hw *hw, int sfp_i2c_addr, int reg,
 				   cookie);
 		err = rnp_mbx_fw_post_req(hw, &req, cookie);
 		if (err) {
-			kfree(cookie);
+			mbx_free_cookie(cookie, false);
 			return err;
+		} else {
+			memcpy(out_buf, cookie->priv, cnt);
+			err = 0;
+			mbx_free_cookie(cookie, true);
 		}
-		memcpy(out_buf, cookie->priv, cnt);
-		err = 0;
-		kfree(cookie);
 	} else {
 		struct mbx_fw_cmd_reply reply;
 
@@ -565,23 +627,25 @@ int rnp_mbx_fw_reg_read(struct rnp_hw *hw, int fw_reg)
 		return -EOPNOTSUPP;
 	if (hw->mbx.other_irq_enabled) {
 		struct mbx_req_cookie *cookie =
-			mbx_cookie_zalloc(sizeof(reply.r_reg));
+			mbx_cookie_zalloc(hw, sizeof(reply.r_reg));
 
 		build_readreg_req(&req, fw_reg, cookie);
 		err = rnp_mbx_fw_post_req(hw, &req, cookie);
 		if (err) {
-			kfree(cookie);
+			mbx_free_cookie(cookie, false);
 			return ret;
 		}
 		ret = ((int *)(cookie->priv))[0];
+		mbx_free_cookie(cookie, true);
 	} else {
 		build_readreg_req(&req, fw_reg, &reply);
 		err = rnp_fw_send_cmd_wait(hw, &req, &reply);
 		if (err) {
 			rnp_err("%s: failed. err:%d\n", __func__, err);
 			return err;
+		} else {
+			ret = reply.r_reg.value[0];
 		}
-		ret = reply.r_reg.value[0];
 	}
 
 	return ret;
@@ -717,7 +781,7 @@ int rnp_mbx_get_dump(struct rnp_hw *hw, int flags, u8 *data_out, int bytes)
 	dma_addr_t dma_phy = 0;
 	u64 address;
 
-	cookie = mbx_cookie_zalloc(sizeof(*get_dump));
+	cookie = mbx_cookie_zalloc(hw, sizeof(*get_dump));
 	if (!cookie)
 		return -ENOMEM;
 	get_dump = (struct get_dump_reply *)cookie->priv;
@@ -757,8 +821,8 @@ quit:
 	}
 	if (dma_buf)
 		dma_free_coherent(&hw->pdev->dev, bytes, dma_buf, dma_phy);
-	kfree(cookie);
-
+	if (cookie)
+		mbx_free_cookie(cookie, err ? false : true);
 	return err ? -err : 0;
 }
 
@@ -781,7 +845,7 @@ int rnp_fw_update(struct rnp_hw *hw, int partition, const u8 *fw_bin,
 	dma_addr_t dma_phy;
 	u64 address;
 
-	cookie = mbx_cookie_zalloc(0);
+	cookie = mbx_cookie_zalloc(hw, 0);
 	if (!cookie) {
 		dev_err(&hw->pdev->dev, "%s: mbx_zalloc :%d!", __func__, 0);
 		return -ENOMEM;
@@ -814,8 +878,8 @@ int rnp_fw_update(struct rnp_hw *hw, int partition, const u8 *fw_bin,
 quit:
 	if (dma_buf)
 		dma_free_coherent(&hw->pdev->dev, bytes, dma_buf, dma_phy);
-	kfree(cookie);
-
+	if (cookie)
+		mbx_free_cookie(cookie, err ? false : true);
 	return (err) ? -EIO : 0;
 }
 
@@ -1112,31 +1176,32 @@ int rnp_mbx_get_capability(struct rnp_hw *hw, struct rnp_info *info)
  **/
 int rnp_mbx_get_temp(struct rnp_hw *hw, int *voltage)
 {
+	int err;
 	struct mbx_req_cookie *cookie = NULL;
 	struct mbx_fw_cmd_reply reply;
 	struct mbx_fw_cmd_req req;
 	struct get_temp *temp;
 	int temp_v = 0;
 
-	cookie = mbx_cookie_zalloc(sizeof(*temp));
+	cookie = mbx_cookie_zalloc(hw, sizeof(*temp));
 	if (!cookie)
 		return -ENOMEM;
 	temp = (struct get_temp *)cookie->priv;
 	memset(&req, 0, sizeof(req));
 	build_get_temp(&req, cookie);
 	if (hw->mbx.other_irq_enabled) {
-		rnp_mbx_fw_post_req(hw, &req, cookie);
+		err = rnp_mbx_fw_post_req(hw, &req, cookie);
 	} else {
 		memset(&reply, 0, sizeof(reply));
-		rnp_fw_send_cmd_wait(hw, &req, &reply);
+		err = rnp_fw_send_cmd_wait(hw, &req, &reply);
 		temp = &reply.get_temp;
 	}
 	if (voltage)
 		*voltage = temp->volatage;
 	temp_v = temp->temp;
 
-	kfree(cookie);
-
+	if (cookie)
+		mbx_free_cookie(cookie, err ? false : true);
 	return temp_v;
 }
 
@@ -1182,6 +1247,9 @@ void rnp_mbx_probe_stat_set(struct rnp_hw *hw, int stat)
 {
 #define RNP10_DMA_DUMMY_PROBE_STAT_BIT (4)
 	u32 v;
+
+	if (pci_channel_offline(hw->pdev))
+		return;
 
 	v = rd32(hw, RNP_DMA_DUMY);
 	if (hw->hw_type == rnp_hw_n10 || hw->hw_type == rnp_hw_n400) {
@@ -1262,7 +1330,8 @@ static inline int rnp_mbx_fw_reply_handler(struct rnp_adapter *adapter,
 	struct mbx_req_cookie *cookie;
 
 	cookie = reply->cookie;
-	if (!cookie || cookie->magic != COOKIE_MAGIC)
+	if (!cookie || is_cookie_valid(&adapter->hw, cookie) == false ||
+	    cookie->stat != COOKIE_ALLOCED)
 		return -EIO;
 
 	if (cookie->priv_len > 0)
@@ -1272,7 +1341,11 @@ static inline int rnp_mbx_fw_reply_handler(struct rnp_adapter *adapter,
 		cookie->errcode = reply->error_code;
 	else
 		cookie->errcode = 0;
-	wake_up_interruptible(&cookie->wait);
+
+	if (cookie->stat == COOKIE_ALLOCED)
+		wake_up_interruptible(&cookie->wait);
+
+	mbx_free_cookie(cookie, false);
 
 	return 0;
 }
@@ -1356,8 +1429,7 @@ int rnp_mbx_phy_read(struct rnp_hw *hw, u32 reg, u32 *val)
 	memset(&req, 0, sizeof(req));
 
 	if (hw->mbx.other_irq_enabled) {
-		struct mbx_req_cookie *cookie = mbx_cookie_zalloc(4);
-
+		struct mbx_req_cookie *cookie = mbx_cookie_zalloc(hw, 4);
 		if (!cookie)
 			return -ENOMEM;
 		build_get_phy_reg(&req, cookie, PHY_EXTERNAL_PHY_MDIO,
@@ -1365,12 +1437,13 @@ int rnp_mbx_phy_read(struct rnp_hw *hw, u32 reg, u32 *val)
 
 		err = rnp_mbx_fw_post_req(hw, &req, cookie);
 		if (err) {
-			kfree(cookie);
+			mbx_free_cookie(cookie, false);
 			return err;
+		} else {
+			memcpy(val, cookie->priv, 4);
+			err = 0;
 		}
-		memcpy(val, cookie->priv, 4);
-		err = 0;
-		kfree(cookie);
+		mbx_free_cookie(cookie, true);
 	} else {
 		struct mbx_fw_cmd_reply reply;
 
@@ -1474,7 +1547,7 @@ int rnp_mbx_lldp_status_get(struct rnp_hw *hw)
 
 	if (hw->mbx.other_irq_enabled) {
 		struct mbx_req_cookie *cookie =
-			mbx_cookie_zalloc(sizeof(reply.lldp));
+			mbx_cookie_zalloc(hw, sizeof(reply.lldp));
 
 		if (!cookie)
 			return -ENOMEM;
@@ -1483,10 +1556,11 @@ int rnp_mbx_lldp_status_get(struct rnp_hw *hw)
 
 		err = rnp_mbx_fw_post_req(hw, &req, cookie);
 		if (err) {
-			kfree(cookie);
+			mbx_free_cookie(cookie, false);
 			return ret;
 		}
 		ret = ((int *)(cookie->priv))[0];
+		mbx_free_cookie(cookie, true);
 	} else {
 		build_lldp_ctrl_get(&req, hw->nr_lane, &reply);
 		err = rnp_fw_send_cmd_wait(hw, &req, &reply);
@@ -1498,4 +1572,3 @@ int rnp_mbx_lldp_status_get(struct rnp_hw *hw)
 	}
 	return ret;
 }
-

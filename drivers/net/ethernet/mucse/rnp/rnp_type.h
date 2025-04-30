@@ -58,6 +58,7 @@
 #define RNP_DEV_ID_N10_PF1 0x7002
 
 #define PCI_DEVICE_ID_N10 0x1000
+#define PCI_DEVICE_ID_N10_TP 0x1004
 #define PCI_DEVICE_ID_N10_X1 0x1002
 #define PCI_DEVICE_ID_N10_VF 0x1080
 #define PCI_DEVICE_ID_N400_VF 0x1081
@@ -103,7 +104,7 @@
 #define RNP_MAX_SENSORS 1
 struct rnp_thermal_diode_data {
 	u8 location;
-	u8 temp;
+	int temp;
 	u8 caution_thresh;
 	u8 max_op_thresh;
 };
@@ -655,6 +656,8 @@ struct rnp_hw_stats {
 	u64 mac_rx_broadcast;
 	u64 mac_rx_multicast;
 	u64 mac_rx_csum_err;
+	u64 mac_rx_pause_count;
+	u64 mac_tx_pause_count;
 	u64 tx_broadcast;
 	u64 tx_multicast;
 
@@ -981,6 +984,35 @@ struct rnp_pcs_info {
 	int pcs_count;
 };
 
+struct mbx_fw_cmd_reply;
+
+typedef void (*cookie_cb)(struct mbx_fw_cmd_reply *reply, void *priv);
+
+enum cookie_stat {
+	COOKIE_FREE = 0,
+	COOKIE_FREE_WAIT_TIMEOUT,
+	COOKIE_ALLOCED,
+};
+
+struct mbx_req_cookie {
+	u64 alloced_jiffies;
+	enum cookie_stat stat;
+	cookie_cb cb;
+	int timeout_jiffes;
+	int errcode;
+	wait_queue_head_t wait;
+	int done;
+	int priv_len;
+#define MAX_PRIV_LEN 64
+	char priv[MAX_PRIV_LEN];
+};
+
+struct mbx_req_cookie_pool {
+#define MAX_COOKIES_ITEMS (20 * 400)
+	struct mbx_req_cookie cookies[MAX_COOKIES_ITEMS];
+	int next_idx;
+};
+
 struct rnp_mbx_info {
 	struct rnp_mbx_operations ops;
 	struct rnp_mbx_stats stats;
@@ -1016,6 +1048,8 @@ struct rnp_mbx_info {
 	u32 vf2pf_mbox_vec_base;
 	u32 cpu_vf_share_ram;
 	int share_size;
+
+	struct mbx_req_cookie_pool cookie_pool;
 };
 
 struct vf_vebvlans {

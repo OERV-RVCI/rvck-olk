@@ -74,7 +74,7 @@ static ssize_t rnp_hwmon_show_temp(struct device __always_unused *dev,
 {
 	struct hwmon_attr *rnp_attr =
 		container_of(attr, struct hwmon_attr, dev_attr);
-	unsigned int value;
+	int value;
 
 	/* reset the temp field */
 	rnp_attr->hw->ops.get_thermal_sensor_data(rnp_attr->hw);
@@ -83,7 +83,7 @@ static ssize_t rnp_hwmon_show_temp(struct device __always_unused *dev,
 	/* display millidegree */
 	value *= 1000;
 
-	return snprintf(buf, PAGE_SIZE, "%u\n", value);
+	return snprintf(buf, PAGE_SIZE, "%d\n", value);
 }
 
 static ssize_t
@@ -92,11 +92,11 @@ rnp_hwmon_show_cautionthresh(struct device __always_unused *dev,
 {
 	struct hwmon_attr *rnp_attr =
 		container_of(attr, struct hwmon_attr, dev_attr);
-	unsigned int value = rnp_attr->sensor->caution_thresh;
+	int value = rnp_attr->sensor->caution_thresh;
 	/* display millidegree */
 	value *= 1000;
 
-	return snprintf(buf, PAGE_SIZE, "%u\n", value);
+	return snprintf(buf, PAGE_SIZE, "%d\n", value);
 }
 
 static ssize_t
@@ -105,12 +105,12 @@ rnp_hwmon_show_maxopthresh(struct device __always_unused *dev,
 {
 	struct hwmon_attr *rnp_attr =
 		container_of(attr, struct hwmon_attr, dev_attr);
-	unsigned int value = rnp_attr->sensor->max_op_thresh;
+	int value = rnp_attr->sensor->max_op_thresh;
 
 	/* display millidegree */
 	value *= 1000;
 
-	return snprintf(buf, PAGE_SIZE, "%u\n", value);
+	return snprintf(buf, PAGE_SIZE, "%d\n", value);
 }
 
 /**
@@ -297,6 +297,7 @@ err_quit:
 
 static BIN_ATTR(maintain, 0644, maintain_read,
 		maintain_write, 1 * 1024 * 1024);
+
 static ssize_t rx_desc_info_show(struct device *dev,
 				 struct device_attribute *attr, char *buf)
 {
@@ -307,6 +308,9 @@ static ssize_t rx_desc_info_show(struct device *dev,
 	struct rnp_ring *ring = adapter->rx_ring[rx_ring_num];
 	int ret = 0;
 	union rnp_rx_desc *desc;
+
+	if (test_bit(__RNP_DOWN, &adapter->state))
+		return ret;
 
 	desc = RNP_RX_DESC(ring, rx_desc_num);
 	ret += sprintf(buf + ret, "rx ring %d desc %d:\n", rx_ring_num,
@@ -324,11 +328,12 @@ static ssize_t rx_desc_info_store(struct device *dev,
 	struct net_device *netdev = to_net_device(dev);
 	struct rnp_adapter *adapter = netdev_priv(netdev);
 	int ret = count;
-
 	u32 rx_desc_num = adapter->sysfs_rx_desc_num;
 	u32 rx_ring_num = adapter->sysfs_rx_ring_num;
-
 	struct rnp_ring *ring = adapter->rx_ring[rx_ring_num];
+
+	if (test_bit(__RNP_DOWN, &adapter->state))
+		return ret;
 
 	if (kstrtou32(buf, 0, &rx_desc_num) != 0)
 		return -EINVAL;
@@ -582,6 +587,9 @@ static ssize_t tx_desc_info_show(struct device *dev,
 	int ret = 0;
 	struct rnp_tx_desc *desc;
 
+	if (test_bit(__RNP_DOWN, &adapter->state))
+		return ret;
+
 	desc = RNP_TX_DESC(ring, tx_desc_num);
 	ret += sprintf(buf + ret, "tx ring %d desc %d:\n", tx_ring_num,
 		       tx_desc_num);
@@ -599,11 +607,12 @@ static ssize_t tx_desc_info_store(struct device *dev,
 	struct net_device *netdev = to_net_device(dev);
 	struct rnp_adapter *adapter = netdev_priv(netdev);
 	int ret = count;
-
 	u32 tx_desc_num = adapter->sysfs_tx_desc_num;
 	u32 tx_ring_num = adapter->sysfs_tx_ring_num;
-
 	struct rnp_ring *ring = adapter->tx_ring[tx_ring_num];
+
+	if (test_bit(__RNP_DOWN, &adapter->state))
+		return ret;
 
 	if (kstrtou32(buf, 0, &tx_desc_num) != 0)
 		return -EINVAL;
@@ -677,6 +686,9 @@ static ssize_t rx_ring_info_show(struct device *dev,
 	int ret = 0;
 	union rnp_rx_desc *rx_desc;
 
+	if (test_bit(__RNP_DOWN, &adapter->state))
+		return ret;
+
 	ret += sprintf(buf + ret, "queue %d info:\n", rx_ring_num);
 	ret += sprintf(buf + ret, "next_to_use %d\n", ring->next_to_use);
 	ret += sprintf(buf + ret, "next_to_clean %d\n",
@@ -696,8 +708,10 @@ static ssize_t rx_ring_info_store(struct device *dev,
 	struct net_device *netdev = to_net_device(dev);
 	struct rnp_adapter *adapter = netdev_priv(netdev);
 	int ret = count;
-
 	u32 rx_ring_num = adapter->sysfs_rx_ring_num;
+
+	if (test_bit(__RNP_DOWN, &adapter->state))
+		return ret;
 
 	if (kstrtou32(buf, 0, &rx_ring_num) != 0)
 		return -EINVAL;
@@ -720,6 +734,8 @@ static ssize_t tx_ring_info_show(struct device *dev,
 	struct rnp_tx_buffer *tx_buffer;
 	struct rnp_tx_desc *eop_desc;
 
+	if (test_bit(__RNP_DOWN, &adapter->state))
+		return ret;
 	/* print all tx_ring_num info */
 	ret += sprintf(buf + ret, "queue %d info:\n", tx_ring_num);
 	ret += sprintf(buf + ret, "next_to_use %d\n", ring->next_to_use);
@@ -747,8 +763,10 @@ static ssize_t tx_ring_info_store(struct device *dev,
 	struct net_device *netdev = to_net_device(dev);
 	struct rnp_adapter *adapter = netdev_priv(netdev);
 	int ret = count;
-
 	u32 tx_ring_num = adapter->sysfs_tx_ring_num;
+
+	if (test_bit(__RNP_DOWN, &adapter->state))
+		return ret;
 
 	if (kstrtou32(buf, 0, &tx_ring_num) != 0)
 		return -EINVAL;
@@ -758,56 +776,6 @@ static ssize_t tx_ring_info_store(struct device *dev,
 		ret = -EINVAL;
 
 	return ret;
-}
-
-static ssize_t queue_mapping_show(struct device *dev,
-				  struct device_attribute *attr, char *buf)
-{
-	int ret = 0;
-	int i;
-	struct net_device *netdev = to_net_device(dev);
-	struct rnp_adapter *adapter = netdev_priv(netdev);
-	struct rnp_ring *ring;
-	struct rnp_q_vector *q_vector;
-
-	ret += sprintf(buf + ret, "tx_queue count %d\n",
-		       adapter->num_tx_queues);
-	ret += sprintf(buf + ret, "queue-mapping :\n");
-	for (i = 0; i < adapter->num_tx_queues; i++) {
-		ring = adapter->tx_ring[i];
-		ret += sprintf(buf + ret, "tx queue %d <---> ring %d\n", i,
-			       ring->rnp_queue_idx);
-	}
-	ret += sprintf(buf + ret, "rx_queue count %d\n",
-		       adapter->num_rx_queues);
-	ret += sprintf(buf + ret, "queue-mapping :\n");
-	for (i = 0; i < adapter->num_rx_queues; i++) {
-		ring = adapter->rx_ring[i];
-		ret += sprintf(buf + ret, "rx queue %d <---> ring %d\n", i,
-			       ring->rnp_queue_idx);
-	}
-	ret += sprintf(buf + ret, "vector-queue mapping:\n");
-	for (i = 0; i < adapter->num_q_vectors; i++) {
-		q_vector = adapter->q_vector[i];
-		ret += sprintf(buf + ret, "---vector %d---\n", i);
-		rnp_for_each_ring(ring, q_vector->tx) {
-			ret += sprintf(buf + ret, "tx ring %d\n",
-				       ring->rnp_queue_idx);
-		}
-		rnp_for_each_ring(ring, q_vector->rx) {
-			ret += sprintf(buf + ret, "rx ring %d\n",
-				       ring->rnp_queue_idx);
-		}
-	}
-
-	return ret;
-}
-
-static ssize_t queue_mapping_store(struct device *dev,
-				   struct device_attribute *attr,
-				   const char *buf, size_t count)
-{
-	return count;
 }
 
 static ssize_t tx_counter_show(struct device *dev,
@@ -2013,7 +1981,6 @@ static DEVICE_ATTR_WO(switch_loopback_off);
 static DEVICE_ATTR_RO(root_slot_info);
 static DEVICE_ATTR_RO(temperature);
 static DEVICE_ATTR_RW(active_vid);
-static DEVICE_ATTR_RW(queue_mapping);
 static DEVICE_ATTR_RW(tx_ring_info);
 static DEVICE_ATTR_RW(rx_ring_info);
 static DEVICE_ATTR_RO(para_info);
@@ -2028,35 +1995,43 @@ static struct attribute *dev_attrs[] = {
 	&dev_attr_tx_stags_info.attr,
 	&dev_attr_root_slot_info.attr,
 	&dev_attr_active_vid.attr,
-	&dev_attr_queue_mapping.attr,
 	&dev_attr_rx_drop_info.attr,
 	&dev_attr_outer_vlan_info.attr,
 	&dev_attr_tcp_sync_info.attr,
-	&dev_attr_rx_skip_info.attr,
-	&dev_attr_tx_ring_info.attr,
-	&dev_attr_rx_ring_info.attr,
 	&dev_attr_para_info.attr,
-	&dev_attr_tx_desc_info.attr,
-	&dev_attr_rx_desc_info.attr,
-	&dev_attr_tx_counter.attr,
-	&dev_attr_rx_counter.attr,
-	&dev_attr_own_vpd.attr,
 	&dev_attr_port_idx.attr,
-	&dev_attr_temperature.attr,
-	&dev_attr_si.attr,
-	&dev_attr_sfp.attr,
-	&dev_attr_autoneg.attr,
-	&dev_attr_sfp_tx_disable.attr,
-	&dev_attr_fec.attr,
-	&dev_attr_link_traing.attr,
-	&dev_attr_pci.attr,
-	&dev_attr_prbs.attr,
-	&dev_attr_pcs_reg.attr,
-	&dev_attr_phy_reg.attr,
 	&dev_attr_debug_linkstat.attr,
 	&dev_attr_switch_loopback_off.attr,
 	&dev_attr_switch_loopback_on.attr,
 	NULL,
+};
+
+static struct attribute *vendor_dev_attrs[] = {
+	&dev_attr_si.attr,
+	&dev_attr_sfp.attr,
+	&dev_attr_autoneg.attr,
+	&dev_attr_own_vpd.attr,
+	&dev_attr_pci.attr,
+	&dev_attr_sfp_tx_disable.attr,
+	&dev_attr_link_traing.attr,
+	&dev_attr_fec.attr,
+	&dev_attr_temperature.attr,
+	&dev_attr_phy_reg.attr,
+	&dev_attr_tx_desc_info.attr,
+	&dev_attr_rx_desc_info.attr,
+	&dev_attr_tx_counter.attr,
+	&dev_attr_rx_counter.attr,
+	&dev_attr_tx_ring_info.attr,
+	&dev_attr_rx_ring_info.attr,
+	&dev_attr_rx_skip_info.attr,
+	&dev_attr_pcs_reg.attr,
+	&dev_attr_prbs.attr,
+	NULL,
+};
+
+static const struct attribute_group vendor_attr_grp = {
+	.name = "vendor",
+	.attrs = vendor_dev_attrs,
 };
 
 static struct bin_attribute *dev_bin_attrs[] = {
@@ -2069,6 +2044,12 @@ static struct attribute_group dev_attr_grp = {
 	.bin_attrs = dev_bin_attrs,
 };
 
+static const struct attribute_group *attr_grps[] = {
+	&dev_attr_grp,
+	&vendor_attr_grp,
+	NULL,
+};
+
 static void
 rnp_sysfs_del_adapter(struct rnp_adapter __maybe_unused *adapter)
 {
@@ -2078,7 +2059,7 @@ rnp_sysfs_del_adapter(struct rnp_adapter __maybe_unused *adapter)
 void rnp_sysfs_exit(struct rnp_adapter *adapter)
 {
 	rnp_sysfs_del_adapter(adapter);
-	sysfs_remove_group(&adapter->netdev->dev.kobj, &dev_attr_grp);
+	sysfs_remove_groups(&adapter->netdev->dev.kobj, &attr_grps[0]);
 }
 
 /* called from rnp_main.c */
@@ -2090,8 +2071,8 @@ int rnp_sysfs_init(struct rnp_adapter *adapter)
 	struct device *hwmon_dev;
 	unsigned int i;
 
-	flag = sysfs_create_group(&adapter->netdev->dev.kobj,
-				  &dev_attr_grp);
+	flag = sysfs_create_groups(&adapter->netdev->dev.kobj,
+				   &attr_grps[0]);
 	if (flag != 0) {
 		dev_err(&adapter->netdev->dev,
 			"sysfs_create_group failed:flag:%d\n", flag);

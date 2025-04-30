@@ -820,6 +820,12 @@ enum power_event {
 #define RNP_MAC_STATS_MULTICAST_LOW (RNP_XLMAC + 0x0920)
 #define RNP_MAC_STATS_MULTICAST_HIGH (RNP_XLMAC + 0x0924)
 
+#define RNP10_MAC_STATS_RX_PAUSE_COUNT_LOW (0x0988)
+#define RNP10_MAC_STATS_RX_PAUSE_COUNT_HIGH (0x098C)
+
+#define RNP10_MAC_STATS_TX_PAUSE_COUNT_LOW (0x0894)
+#define RNP10_MAC_STATS_TX_PAUSE_COUNT_HIGH (0x898)
+
 #define RNP_TX_FLOW_ENABLE_MASK (0x2)
 #define RNP_RX_FLOW_ENABLE_MASK (0x1)
 /* ================================================================== */

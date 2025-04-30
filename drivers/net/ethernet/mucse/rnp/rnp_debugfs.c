@@ -5,6 +5,7 @@
 #include <linux/module.h>
 
 #include "rnp.h"
+#include "rnp_type.h"
 
 static struct dentry *rnp_dbg_root;
 
