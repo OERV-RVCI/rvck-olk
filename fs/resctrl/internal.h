@@ -57,6 +57,7 @@ struct rdt_fs_context {
 	bool				enable_cdpl3;
 	bool				enable_mba_mbps;
 	bool				enable_debug;
+	bool				enable_l2;
 };
 
 static inline struct rdt_fs_context *rdt_fc2context(struct fs_context *fc)
@@ -96,7 +97,6 @@ struct rmid_read {
 };
 
 extern struct list_head resctrl_schema_all;
-extern bool resctrl_mounted;
 
 enum rdt_group_type {
 	RDTCTRL_GROUP = 0,
