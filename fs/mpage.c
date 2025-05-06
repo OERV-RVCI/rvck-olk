@@ -376,6 +376,7 @@ void mpage_readahead(struct readahead_control *rac, get_block_t get_block)
 	};
 
 	while ((folio = readahead_folio(rac))) {
+		cond_resched();
 		prefetchw(&folio->flags);
 		args.folio = folio;
 		args.nr_pages = readahead_count(rac);
