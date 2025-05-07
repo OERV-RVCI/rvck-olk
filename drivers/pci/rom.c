@@ -90,7 +90,6 @@ static size_t pci_get_rom_size(struct pci_dev *pdev, void __iomem *rom,
 
 	if (is_virtcca_cvm_enable()) {
 		int ret = virtcca_pci_get_rom_size(pdev, rom, size);
-
 		if (ret != 0)
 			return ret;
 	}

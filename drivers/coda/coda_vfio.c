@@ -352,7 +352,7 @@ int virtcca_iommu_group_set_dev_msi_addr(struct iommu_group *iommu_group, unsign
 }
 
 /**
- * virtcca_msi_map - Vfio driver mapping device side msi address
+ * virtcca_msi_map - VFIO driver maps device msi address
  * @vdev: Vfio pci core device
  *
  * Returns:
@@ -374,8 +374,11 @@ int virtcca_msi_map(struct vfio_pci_core_device *vdev)
 	/*
 	 * If the device is secure and has not done MSI address mapping,
 	 * Mapping is required.
+	 * In the SR-IOV scenario, only the secure devices assigned to the CVM need to have
+	 * their MSI addresses mapping.
 	 */
-	if (cc_dev && !get_g_cc_dev_msi_addr(pci_dev_id(pdev))) {
+	if (cc_dev && !get_g_cc_dev_msi_addr(pci_dev_id(pdev)) &&
+		get_g_coda_dev_vm_type(pci_dev_id(pdev)) == CC_DEV_CVM_TYPE) {
 		domain = iommu_get_domain_for_dev(&(pdev->dev));
 		/* Get the MSI address of the device */
 		virtcca_iommu_dma_get_msi_page((void *)domain->iova_cookie, &iova, &msi_addr);

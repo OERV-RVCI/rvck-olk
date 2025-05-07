@@ -203,7 +203,7 @@ void kvm_destroy_cvm(struct kvm *kvm)
 	/* Unmap the cvm with arm smmu domain */
 	kvm_get_arm_smmu_domain(kvm, &smmu_domain_group_list);
 	list_for_each_entry(arm_smmu_domain, &smmu_domain_group_list, node) {
-		if (arm_smmu_domain->kvm && arm_smmu_domain->kvm == kvm)
+		if (arm_smmu_domain && arm_smmu_domain->kvm && arm_smmu_domain->kvm == kvm)
 			arm_smmu_domain->kvm = NULL;
 	}
 #endif
@@ -214,8 +214,6 @@ void kvm_destroy_cvm(struct kvm *kvm)
 
 	if (virtcca_cvm_state(kvm) == CVM_STATE_NONE)
 		return;
-
-	cvm_vmid_release(cvm_vmid);
 
 	WRITE_ONCE(cvm->state, CVM_STATE_DYING);
 
@@ -239,6 +237,7 @@ void kvm_destroy_cvm(struct kvm *kvm)
 	if (!tmi_cvm_destroy(cvm->rd))
 		kvm_info("KVM has destroyed cVM: %d\n", cvm->cvm_vmid);
 
+	cvm_vmid_release(cvm_vmid);
 	cvm->is_mapped = false;
 	kfree(cvm);
 	kvm->arch.virtcca_cvm = NULL;
@@ -556,7 +555,7 @@ static int kvm_tmm_config_cvm(struct kvm *kvm, struct kvm_enable_cap *cap)
 
 int kvm_cvm_map_range(struct kvm *kvm)
 {
-	int ret;
+	int ret = 0;
 	u64 curr_numa_set;
 	int idx;
 	u64 l2_granule = cvm_granule_size(TMM_TTT_LEVEL_2);

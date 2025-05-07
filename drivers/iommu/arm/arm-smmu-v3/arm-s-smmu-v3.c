@@ -52,7 +52,7 @@ static inline void virtcca_smmu_set_irq(struct arm_smmu_device *smmu)
  * @cmd1: Cmdq is the high 64 bits of command
  * @forward: Need transfer to secure world or not
  */
-static void virtcca_smmu_cmdq_need_forward(u64 cmd0, u64 cmd1, u64 *forward)
+static void virtcca_smmu_cmdq_need_forward(u64 cmd0, u64 cmd1, u64 s_smmu_id, bool *forward)
 {
 	u64 opcode = FIELD_GET(CMDQ_0_OP, cmd0);
 
@@ -65,41 +65,41 @@ static void virtcca_smmu_cmdq_need_forward(u64 cmd0, u64 cmd1, u64 *forward)
 	case CMDQ_OP_CFGI_CD:
 	case CMDQ_OP_CFGI_STE:
 	case CMDQ_OP_CFGI_CD_ALL:
-		*forward = (uint64_t)is_cc_dev(FIELD_GET(CMDQ_CFGI_0_SID, cmd0));
+		*forward = is_cc_dev(FIELD_GET(CMDQ_CFGI_0_SID, cmd0));
 		break;
 
 	case CMDQ_OP_CFGI_ALL:
-		*forward = 1;
+		*forward = true;
 		break;
 	case CMDQ_OP_TLBI_NH_VA:
 	case CMDQ_OP_TLBI_S2_IPA:
 	case CMDQ_OP_TLBI_NH_ASID:
 	case CMDQ_OP_TLBI_S12_VMALL:
-		*forward = (uint64_t)is_cc_vmid(FIELD_GET(CMDQ_TLBI_0_VMID, cmd0));
+		*forward = is_cc_vmid(FIELD_GET(CMDQ_TLBI_0_VMID, cmd0), s_smmu_id);
 		break;
 	case CMDQ_OP_TLBI_EL2_VA:
 	case CMDQ_OP_TLBI_EL2_ASID:
-		*forward = 0;
+		*forward = false;
 		break;
 	case CMDQ_OP_ATC_INV:
-		*forward = (uint64_t)is_cc_dev(FIELD_GET(CMDQ_ATC_0_SID, cmd0));
+		*forward = is_cc_dev(FIELD_GET(CMDQ_ATC_0_SID, cmd0));
 		break;
 	case CMDQ_OP_PRI_RESP:
-		*forward = (uint64_t)is_cc_dev(FIELD_GET(CMDQ_PRI_0_SID, cmd0));
+		*forward = is_cc_dev(FIELD_GET(CMDQ_PRI_0_SID, cmd0));
 		break;
 	case CMDQ_OP_RESUME:
-		*forward = (uint64_t)is_cc_dev(FIELD_GET(CMDQ_RESUME_0_SID, cmd0));
+		*forward = is_cc_dev(FIELD_GET(CMDQ_RESUME_0_SID, cmd0));
 		break;
 	case CMDQ_OP_CMD_SYNC:
-		*forward = 0;
+		*forward = false;
 		break;
 	default:
-		*forward = 0;
+		*forward = false;
 	}
 }
 
 /**
- * virtcca_smmu_queue_write - Write queue command to TMM
+ * virtcca_smmu_queue_write - write secure smmu queue command via TMM
  * @smmu: An SMMUv3 instance
  * @src: Command information
  * @n_dwords: Num of command
@@ -107,7 +107,7 @@ static void virtcca_smmu_cmdq_need_forward(u64 cmd0, u64 cmd1, u64 *forward)
 static void virtcca_smmu_queue_write(struct arm_smmu_device *smmu, u64 *src, size_t n_dwords)
 {
 	u64 cmd0, cmd1;
-	u64 forward = 0;
+	bool forward = false;
 
 	if (!is_virtcca_cvm_enable())
 		return;
@@ -118,7 +118,7 @@ static void virtcca_smmu_queue_write(struct arm_smmu_device *smmu, u64 *src, siz
 	if (n_dwords == ARM_S_SMMU_CMD_COUNT) {
 		cmd0 = cpu_to_le64(src[0]);
 		cmd1 = cpu_to_le64(src[1]);
-		virtcca_smmu_cmdq_need_forward(cmd0, cmd1, &forward);
+		virtcca_smmu_cmdq_need_forward(cmd0, cmd1, smmu->s_smmu_id, &forward);
 
 		/* need forward queue command to TMM */
 		if (forward) {
@@ -553,7 +553,7 @@ bool virtcca_smmu_map_init(struct arm_smmu_device *smmu, resource_size_t ioaddr)
 {
 	if (!g_s_smmu_id_map_init) {
 		set_bit(0, g_s_smmu_id_map);
-		g_cc_dev_table_init();
+		g_coda_dev_table_init();
 		g_s_smmu_id_map_init = true;
 	}
 	smmu->ioaddr = ioaddr;

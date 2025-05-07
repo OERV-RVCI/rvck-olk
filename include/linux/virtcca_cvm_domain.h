@@ -5,7 +5,7 @@
 
 #ifndef __VIRTCCA_CVM_DOMAIN_H
 #define __VIRTCCA_CVM_DOMAIN_H
-
+#include <linux/device.h>
 #ifdef CONFIG_HISI_VIRTCCA_GUEST
 
 #include <asm/virtcca_cvm_guest.h>
@@ -47,6 +47,13 @@ static inline u64 virtcca_get_tmi_version(void)
 #ifdef CONFIG_HISI_VIRTCCA_CODA
 size_t virtcca_pci_get_rom_size(void  *pdev, void __iomem *rom,
 			       size_t size);
+bool is_virtcca_cc_dev(u32 sid);
+int virtcca_add_coda_pci_dev(struct pci_dev *pdev);
+void virtcca_dev_destroy(u64 dev_num, u64 clean);
+bool is_virtcca_pci_cc_dev(struct device *dev);
+int virtcca_create_vdev(struct device *dev);
+bool is_virtcca_secure_vf(struct device *dev, struct device_driver *drv);
+
 #else
 static inline size_t virtcca_pci_get_rom_size(void  *pdev, void __iomem *rom,
 			       size_t size)
@@ -54,6 +61,31 @@ static inline size_t virtcca_pci_get_rom_size(void  *pdev, void __iomem *rom,
 	return 0;
 }
 
-#endif
+static inline bool is_virtcca_cc_dev(u32 sid)
+{
+	return false;
+}
 
+static inline int virtcca_add_coda_pci_dev(struct pci_dev *pdev)
+{
+	return 0;
+}
+
+static inline void virtcca_dev_destroy(u64 dev_num, u64 clean) {}
+
+static inline bool is_virtcca_pci_cc_dev(struct device *dev)
+{
+	return false;
+}
+
+static inline int virtcca_create_vdev(struct device *dev)
+{
+	return 0;
+}
+
+static inline bool is_virtcca_secure_vf(struct device *dev, struct device_driver *drv)
+{
+	return false;
+}
+#endif /* CONFIG_HISI_VIRTCCA_CODA */
 #endif /* __VIRTCCA_CVM_DOMAIN_H */

@@ -12,6 +12,7 @@
 #include <linux/export.h>
 #include <linux/string.h>
 #include <linux/delay.h>
+#include <linux/virtcca_cvm_domain.h>
 #include "pci.h"
 
 #define VIRTFN_ID_LEN	17	/* "virtfn%u\0" for 2^32 - 1 */
@@ -304,6 +305,11 @@ int pci_iov_add_virtfn(struct pci_dev *dev, int id)
 		goto failed0;
 
 	virtfn->devfn = pci_iov_virtfn_devfn(dev, id);
+	if (is_virtcca_cc_dev(pci_dev_id(dev))) {
+		rc = virtcca_add_coda_pci_dev(virtfn);
+		if (rc)
+			goto failed0;
+	}
 	virtfn->vendor = dev->vendor;
 	virtfn->device = iov->vf_device;
 	virtfn->is_virtfn = 1;
@@ -379,6 +385,9 @@ void pci_iov_remove_virtfn(struct pci_dev *dev, int id)
 	/* balance pci_get_domain_bus_and_slot() */
 	pci_dev_put(virtfn);
 	pci_dev_put(dev);
+	if (is_virtcca_cc_dev(pci_dev_id(virtfn))) {
+		virtcca_dev_destroy(pci_dev_id(virtfn), true);
+	}
 }
 
 static ssize_t sriov_totalvfs_show(struct device *dev,

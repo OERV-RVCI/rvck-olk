@@ -7,6 +7,8 @@
 
 #include <linux/iommu.h>
 #include <linux/vfio_pci_core.h>
+#include <linux/io-64-nonatomic-lo-hi.h>
+#include <linux/io-64-nonatomic-hi-lo.h>
 
 #include "../../../drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.h"
 #include "../../../drivers/iommu/arm/arm-smmu-v3/arm-s-smmu-v3.h"
@@ -34,6 +36,9 @@ enum cc_dev_type {
 int virtcca_attach_dev(struct iommu_domain *domain, struct iommu_group *group,
 	bool iommu_secure);
 void virtcca_detach_dev(struct iommu_domain *domain, struct iommu_group *group);
+
+int virtcca_vdev_create(struct pci_dev *pci_dev);
+int add_coda_pci_dev(struct pci_dev *pdev);
 
 u64 virtcca_get_iommu_device_msi_addr(struct iommu_group *iommu_group);
 int virtcca_iommu_group_set_dev_msi_addr(struct iommu_group *iommu_group, unsigned long *iova);
@@ -69,6 +74,10 @@ void virtcca_pci_io_write(struct vfio_pci_core_device *vdev, u64 val,
 	u64 size, void __iomem *io);
 u64 virtcca_pci_io_read(struct vfio_pci_core_device *vdev,
 	u64 size, void __iomem *io);
+void virtcca_pci_mmio_write(struct pci_dev *pdev, u64 val,
+	u64 size, void __iomem *io);
+u64 virtcca_pci_mmio_read(struct pci_dev *pdev,
+	u64 size, void __iomem *io);
 
 bool virtcca_iommu_domain_get_kvm(struct iommu_domain *domain, struct kvm **kvm);
 bool virtcca_check_is_cvm_or_not(void *iommu, struct kvm **kvm);
@@ -81,7 +90,7 @@ struct iommu_group *cvm_vfio_file_iommu_group(struct file *file);
 
 struct iommu_group *virtcca_vfio_file_iommu_group(struct file *file);
 
-bool is_cc_vmid(u32 vmid);
+bool is_cc_vmid(u32 vmid, u64 s_smmu_id);
 /* Has the root bus device number switched to secure */
 bool is_cc_dev(u32 sid);
 
@@ -91,7 +100,9 @@ void set_g_cc_dev_msi_addr(u32 sid, u64 msi_addr);
 
 u32 get_g_coda_dev_vm_type(u32 sid);
 
-void g_cc_dev_table_init(void);
+u32 get_g_coda_dev_vm_type(u32 sid);
+
+void g_coda_dev_table_init(void);
 
 u32 virtcca_tmi_dev_attach(struct arm_smmu_domain *arm_smmu_domain, struct kvm *kvm);
 
@@ -113,7 +124,136 @@ static inline u32 virtcca_readl(void __iomem *addr, struct pci_dev *pdev)
 {
 	return tmi_mmio_read(mmio_va_to_pa(addr), CVM_RW_32_BIT, pci_dev_id(pdev));
 }
+
 size_t virtcca_pci_get_rom_size(void *pdev, void __iomem *rom,
 			       size_t size);
-#endif
-#endif
+bool is_virtcca_cc_dev(u32 sid);
+int virtcca_add_coda_pci_dev(struct pci_dev *pdev);
+void virtcca_dev_destroy(u64 dev_num, u64 clean);
+bool is_virtcca_pci_cc_dev(struct device *dev);
+int virtcca_create_vdev(struct device *dev);
+
+static inline void iowrite32be_hook(u32 val, void __iomem *addr, struct pci_dev *pdev)
+{
+	if (is_virtcca_cvm_enable() && is_cc_dev(pci_dev_id(pdev))) {
+		virtcca_pci_mmio_write(pdev, cpu_to_be32(val), CVM_RW_32_BIT, addr);
+		return;
+	}
+	iowrite32be(val, addr);
+}
+
+static inline u32 ioread32be_hook(void __iomem *addr, struct pci_dev *pdev)
+{
+	if (is_virtcca_cvm_enable() && is_cc_dev(pci_dev_id(pdev)))
+		return cpu_to_be32(virtcca_pci_mmio_read(pdev, CVM_RW_32_BIT, addr));
+
+	return ioread32be(addr);
+}
+
+static inline u16 ioread16be_hook(void __iomem *addr, struct pci_dev *pdev)
+{
+	if (is_virtcca_cvm_enable() && is_cc_dev(pci_dev_id(pdev)))
+		return cpu_to_be16(virtcca_pci_mmio_read(pdev, CVM_RW_16_BIT, addr));
+
+	return ioread16be(addr);
+}
+
+static inline u8 ioread8_hook(void __iomem *addr, struct pci_dev *pdev)
+{
+	if (is_virtcca_cvm_enable() && is_cc_dev(pci_dev_id(pdev)))
+		return virtcca_pci_mmio_read(pdev, CVM_RW_8_BIT, addr);
+
+	return ioread8(addr);
+}
+
+static inline void __raw_writel_hook(u32 val, void __iomem *addr, struct pci_dev *pdev)
+{
+	if (is_virtcca_cvm_enable() && is_cc_dev(pci_dev_id(pdev))) {
+		virtcca_pci_mmio_write(pdev, val, CVM_RW_32_BIT, addr);
+		return;
+	}
+	__raw_writel(val, addr);
+}
+
+static inline void writel_hook(u32 val, void __iomem *addr, struct pci_dev *pdev)
+{
+	if (is_virtcca_cvm_enable() && is_cc_dev(pci_dev_id(pdev))) {
+		virtcca_pci_mmio_write(pdev, val, CVM_RW_32_BIT, addr);
+		return;
+	}
+	writel(val, addr);
+}
+
+static inline u32 readl_hook(void __iomem *addr, struct pci_dev *pdev)
+{
+	if (is_virtcca_cvm_enable() && is_cc_dev(pci_dev_id(pdev)))
+		return virtcca_pci_mmio_read(pdev, CVM_RW_32_BIT, addr);
+
+	return readl(addr);
+}
+
+static inline void writeq_hook(u64 val, void __iomem *addr, struct pci_dev *pdev)
+{
+	if (is_virtcca_cvm_enable() && is_cc_dev(pci_dev_id(pdev))) {
+		virtcca_pci_mmio_write(pdev, val, CVM_RW_64_BIT, addr);
+		return;
+	}
+	writeq(val, addr);
+}
+
+static inline void lo_hi_writeq_hook(__u64 val, void __iomem *addr, struct pci_dev *pdev)
+{
+	if (is_virtcca_cvm_enable() && is_cc_dev(pci_dev_id(pdev))) {
+		virtcca_pci_mmio_write(pdev, (u32)val, CVM_RW_32_BIT, addr);
+		virtcca_pci_mmio_write(pdev, (u32)(val >> 32), CVM_RW_32_BIT, addr + 4);
+		return;
+	}
+	lo_hi_writeq(val, addr);
+}
+
+static inline void hi_lo_writeq_hook(__u64 val, void __iomem *addr, struct pci_dev *pdev)
+{
+	if (is_virtcca_cvm_enable() && is_cc_dev(pci_dev_id(pdev))) {
+		virtcca_pci_mmio_write(pdev, (u32)(val >> 32), CVM_RW_32_BIT, addr + 4);
+		virtcca_pci_mmio_write(pdev, (u32)val, CVM_RW_32_BIT, addr);
+		return;
+	}
+	hi_lo_writeq(val, addr);
+}
+
+static inline u64 lo_hi_readq_hook(void __iomem *addr, struct pci_dev *pdev)
+{
+	if (is_virtcca_cvm_enable() && is_cc_dev(pci_dev_id(pdev)))
+		return virtcca_pci_mmio_read(pdev, CVM_RW_64_BIT, addr);
+
+	return lo_hi_readq(addr);
+}
+
+static inline void __iowrite64_copy_hook(void __iomem *to, const void *from,
+	size_t count, struct pci_dev *pdev)
+{
+	if (is_virtcca_cvm_enable() && is_cc_dev(pci_dev_id(pdev))) {
+		u64 __iomem *dst = to;
+		const u64 *src = from;
+		const u64 *end = src + count;
+
+		while (src < end)
+			virtcca_pci_mmio_write(pdev, *src++, CVM_RW_64_BIT, dst++);
+		return;
+	}
+	__iowrite64_copy(to, from, count);
+}
+
+#else /* CONFIG_HISI_VIRTCCA_CODA */
+#define iowrite32be_hook(v, a, p) iowrite32be(v, a)
+#define ioread32be_hook(a, p) ioread32be(a)
+#define ioread16be_hook(a, p) ioread16be(a)
+#define ioread8_hook(a, p) ioread8(a)
+#define __raw_writel_hook(v, a, p) __raw_writel(v, a)
+#define writel_hook(v, a, p) writel(v, a)
+#define readl_hook(a, p) readl(a)
+#define lo_hi_writeq_hook(v, a, p) lo_hi_writeq(v, a)
+#define hi_lo_writeq_hook(v, a, p) hi_lo_writeq(v, a)
+#define lo_hi_readq_hook(a, p) lo_hi_readq(a)
+#endif /* CONFIG_HISI_VIRTCCA_CODA */
+#endif /* __VIRTCCA_CODA_H */
