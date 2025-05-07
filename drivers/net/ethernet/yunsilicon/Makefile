@@ -4,5 +4,9 @@
 # Makefile for the Yunsilicon device drivers.
 #
 
+ifeq ($(HAVE_TO_USE_M_IB_CORE), 1)
+	subdir-ccflags-y += $(xsc-ccflags)
+endif
+
 obj-$(CONFIG_YUNSILICON_XSC_ETH) += xsc/net/
 obj-$(CONFIG_YUNSILICON_XSC_PCI) += xsc/pci/

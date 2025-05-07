@@ -71,7 +71,6 @@ static inline void skbdata_debug_dump(struct sk_buff *skb, u16 headlen, int dire
 		for (j = 0; j < skb_shinfo(skb)->nr_frags; j++) {
 			skb_frag_t *frag = &skb_shinfo(skb)->frags[j];
 			int fsz = skb_frag_size(frag);
-
 			buf = (char *)(page_address(frag->bv_page) + frag->bv_offset);
 			for (i = 0; i < fsz; i++) {
 				if (i % 16 == 0)

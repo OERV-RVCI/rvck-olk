@@ -275,3 +275,4 @@ int xsc_query_module_eeprom_by_page(struct xsc_core_device *dev,
 	return xsc_query_mcia(dev, params, data);
 }
 EXPORT_SYMBOL_GPL(xsc_query_module_eeprom_by_page);
+

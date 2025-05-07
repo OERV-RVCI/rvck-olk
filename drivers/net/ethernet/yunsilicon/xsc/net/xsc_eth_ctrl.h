@@ -8,5 +8,6 @@
 
 void xsc_eth_ctrl_fini(void);
 int xsc_eth_ctrl_init(void);
+void xsc_handle_netlink_cmd(struct xsc_core_device *xdev, void *in, void *out);
 
 #endif /* XSC_RXTX_H */

@@ -863,6 +863,7 @@ static struct attribute *vf_eth_attrs[] = {
 	&vf_attr_group.attr,
 	NULL
 };
+
 ATTRIBUTE_GROUPS(vf_eth);
 
 static struct attribute *vf_group_attrs[] = {
@@ -871,6 +872,7 @@ static struct attribute *vf_group_attrs[] = {
 	&vf_group_attr_config.attr,
 	NULL
 };
+
 ATTRIBUTE_GROUPS(vf_group);
 
 static const struct kobj_type vf_type_eth = {
@@ -903,6 +905,7 @@ static struct attribute *vf_ib_attrs[] = {
 	&vf_attr_policy.attr,
 	NULL
 };
+
 ATTRIBUTE_GROUPS(vf_ib);
 
 static const struct kobj_type vf_type_ib = {
@@ -995,12 +998,8 @@ int xsc_create_vfs_sysfs(struct xsc_core_device *dev, int num_vfs)
 {
 	struct xsc_core_sriov *sriov = &dev->priv.sriov;
 	struct xsc_sriov_vf *tmp;
-	static const struct kobj_type *sysfs;
 	int err;
 	int vf;
-
-	sysfs = &vf_type_ib;
-	sysfs = &vf_type_eth;
 
 	sriov->vfs = kcalloc(num_vfs + 1, sizeof(*sriov->vfs), GFP_KERNEL);
 	if (!sriov->vfs)
@@ -1010,7 +1009,7 @@ int xsc_create_vfs_sysfs(struct xsc_core_device *dev, int num_vfs)
 		tmp = &sriov->vfs[vf];
 		tmp->dev = dev;
 		tmp->vf = vf;
-		err = kobject_init_and_add(&tmp->kobj, sysfs, sriov->config,
+		err = kobject_init_and_add(&tmp->kobj, &vf_type_eth, sriov->config,
 					   "%d", vf);
 		if (err)
 			goto err_vf;
