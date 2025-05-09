@@ -19,7 +19,7 @@
 #endif
 #endif
 
-#if IS_ENABLED(CONFIG_MXGBEM_FIX_MAC_PADDING)
+#ifndef RNPM_FIX_MAC_PADDING
 #define RNPM_FIX_MAC_PADDING
 #endif
 
@@ -317,8 +317,8 @@ typedef u32 rnpm_link_speed;
 /* PHY ID */
 #define RNPM_YT8614_PHY_ID 0x4f51e91a
 
-#define RNPM_LINK_SPEED_n10_AUTONEG                                            \
-	(RNPM_LINK_SPEED_10_FULL | RNPM_LINK_SPEED_100_FULL |                  \
+#define RNPM_LINK_SPEED_n10_AUTONEG                           \
+	(RNPM_LINK_SPEED_10_FULL | RNPM_LINK_SPEED_100_FULL | \
 	 RNPM_LINK_SPEED_1GB_FULL | RNPM_LINK_SPEED_10GB_FULL)
 
 /* Flow Control Data Sheet defined values
