@@ -15,14 +15,15 @@
 #include "ossl_knl.h"
 #include "hinic3_crm.h"
 #include "hinic3_nic_cfg.h"
-#include "hinic3_nic_cmd.h"
+#include "nic_mpu_cmd.h"
+#include "nic_npu_cmd.h"
 #include "hinic3_hw.h"
 #include "hinic3_nic.h"
 #include "hinic3_nic_cmdq.h"
 #include "hinic3_common.h"
 
 static int hinic3_rss_cfg_hash_key(struct hinic3_nic_io *nic_io, u8 opcode,
-				   u8 *key)
+				   u8 *key, u16 key_size)
 {
 	struct hinic3_cmd_rss_hash_key hash_key;
 	u16 out_size = sizeof(hash_key);
@@ -33,7 +34,7 @@ static int hinic3_rss_cfg_hash_key(struct hinic3_nic_io *nic_io, u8 opcode,
 	hash_key.opcode = opcode;
 
 	if (opcode == HINIC3_CMD_OP_SET)
-		memcpy(hash_key.key, key, NIC_RSS_KEY_SIZE);
+		memcpy(hash_key.key, key, key_size);
 
 	err = l2nic_msg_to_mgmt_sync(nic_io->hwdev,
 				     HINIC3_NIC_CMD_CFG_RSS_HASH_KEY,
@@ -47,7 +48,7 @@ static int hinic3_rss_cfg_hash_key(struct hinic3_nic_io *nic_io, u8 opcode,
 	}
 
 	if (opcode == HINIC3_CMD_OP_GET)
-		memcpy(key, hash_key.key, NIC_RSS_KEY_SIZE);
+		memcpy(key, hash_key.key, key_size);
 
 	return 0;
 }
@@ -61,8 +62,12 @@ int hinic3_rss_set_hash_key(void *hwdev, const u8 *key)
 		return -EINVAL;
 
 	nic_io = hinic3_get_service_adapter(hwdev, SERVICE_T_NIC);
+	if (!nic_io)
+		return -EINVAL;
+
 	memcpy(hash_key, key, NIC_RSS_KEY_SIZE);
-	return hinic3_rss_cfg_hash_key(nic_io, HINIC3_CMD_OP_SET, hash_key);
+	return hinic3_rss_cfg_hash_key(nic_io, HINIC3_CMD_OP_SET,
+				       hash_key, NIC_RSS_KEY_SIZE);
 }
 
 int hinic3_rss_get_hash_key(void *hwdev, u8 *key)
@@ -73,7 +78,11 @@ int hinic3_rss_get_hash_key(void *hwdev, u8 *key)
 		return -EINVAL;
 
 	nic_io = hinic3_get_service_adapter(hwdev, SERVICE_T_NIC);
-	return hinic3_rss_cfg_hash_key(nic_io, HINIC3_CMD_OP_GET, key);
+	if (!nic_io)
+		return -EINVAL;
+
+	return hinic3_rss_cfg_hash_key(nic_io, HINIC3_CMD_OP_GET,
+				       key, NIC_RSS_KEY_SIZE);
 }
 
 int hinic3_rss_get_indir_tbl(void *hwdev, u32 *indir_table)
@@ -89,6 +98,7 @@ int hinic3_rss_get_indir_tbl(void *hwdev, u32 *indir_table)
 	nic_io = hinic3_get_service_adapter(hwdev, SERVICE_T_NIC);
 	if (nic_io == NULL)
 		return -EINVAL;
+
 	cmd_buf = hinic3_alloc_cmd_buf(hwdev);
 	if (cmd_buf == NULL) {
 		nic_err(nic_io->dev_hdl, "Failed to allocate cmd_buf.\n");
@@ -159,6 +169,8 @@ static int hinic3_cmdq_set_rss_type(void *hwdev, struct nic_rss_type rss_type)
 		return -EINVAL;
 
 	nic_io = hinic3_get_service_adapter(hwdev, SERVICE_T_NIC);
+	if (!nic_io)
+		return -EINVAL;
 
 	cmd_buf = hinic3_alloc_cmd_buf(hwdev);
 	if (!cmd_buf) {
@@ -210,6 +222,9 @@ static int hinic3_mgmt_set_rss_type(void *hwdev, struct nic_rss_type rss_type)
 		return -EINVAL;
 
 	nic_io = hinic3_get_service_adapter(hwdev, SERVICE_T_NIC);
+	if (!nic_io)
+		return -EINVAL;
+
 	memset(&ctx_tbl, 0, sizeof(ctx_tbl));
 	ctx_tbl.func_id = hinic3_global_func_id(hwdev);
 	ctx |= HINIC3_RSS_TYPE_SET(1, VALID) |
@@ -259,6 +274,8 @@ int hinic3_get_rss_type(void *hwdev, struct nic_rss_type *rss_type)
 		return -EINVAL;
 
 	nic_io = hinic3_get_service_adapter(hwdev, SERVICE_T_NIC);
+	if (!nic_io)
+		return -EINVAL;
 
 	memset(&ctx_tbl, 0, sizeof(struct hinic3_rss_context_table));
 	ctx_tbl.func_id = hinic3_global_func_id(hwdev);
@@ -291,6 +308,9 @@ static int hinic3_rss_cfg_hash_engine(struct hinic3_nic_io *nic_io, u8 opcode,
 	struct hinic3_cmd_rss_engine_type hash_type;
 	u16 out_size = sizeof(hash_type);
 	int err;
+
+	if (!nic_io)
+		return -EINVAL;
 
 	memset(&hash_type, 0, sizeof(struct hinic3_cmd_rss_engine_type));
 
@@ -325,6 +345,9 @@ int hinic3_rss_set_hash_engine(void *hwdev, u8 type)
 		return -EINVAL;
 
 	nic_io = hinic3_get_service_adapter(hwdev, SERVICE_T_NIC);
+	if (!nic_io)
+		return -EINVAL;
+
 	return hinic3_rss_cfg_hash_engine(nic_io, HINIC3_CMD_OP_SET, &type);
 }
 
@@ -336,6 +359,9 @@ int hinic3_rss_get_hash_engine(void *hwdev, u8 *type)
 		return -EINVAL;
 
 	nic_io = hinic3_get_service_adapter(hwdev, SERVICE_T_NIC);
+	if (!nic_io)
+		return -EINVAL;
+
 	return hinic3_rss_cfg_hash_engine(nic_io, HINIC3_CMD_OP_GET, type);
 }
 
@@ -351,6 +377,9 @@ int hinic3_rss_cfg(void *hwdev, u8 rss_en, u8 cos_num, u8 *prio_tc, u16 num_qps)
 		return -EINVAL;
 
 	nic_io = hinic3_get_service_adapter(hwdev, SERVICE_T_NIC);
+	if (!nic_io)
+		return -EINVAL;
+
 	memset(&rss_cfg, 0, sizeof(struct hinic3_cmd_rss_config));
 	rss_cfg.func_id = hinic3_global_func_id(hwdev);
 	rss_cfg.rss_en = rss_en;

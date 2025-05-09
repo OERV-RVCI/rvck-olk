@@ -23,6 +23,8 @@
 #include "cqm_memsec.h"
 #include "cqm_main.h"
 
+#include "vram_common.h"
+
 static unsigned char roce_qpc_rsv_mode = CQM_QPC_ROCE_NORMAL;
 module_param(roce_qpc_rsv_mode, byte, 0644);
 MODULE_PARM_DESC(roce_qpc_rsv_mode,
@@ -98,9 +100,16 @@ static s32 cqm_set_timer_enable(void *ex_handle)
 {
 	struct hinic3_hwdev *handle = (struct hinic3_hwdev *)ex_handle;
 	struct tag_cqm_handle *cqm_handle = NULL;
+	int is_in_kexec;
 
 	if (!ex_handle)
 		return CQM_FAIL;
+
+	is_in_kexec = vram_get_kexec_flag();
+	if (is_in_kexec != 0) {
+		cqm_info(handle->dev_hdl, "Skip starting cqm timer during kexec\n");
+		return CQM_SUCCESS;
+	}
 
 	cqm_handle = (struct tag_cqm_handle *)(handle->cqm_hdl);
 	if (cqm_handle->func_capability.fake_func_type == CQM_FAKE_FUNC_PARENT &&
@@ -473,7 +482,8 @@ static void cqm_service_capability_init_roce(struct tag_cqm_handle *cqm_handle, 
 	func_cap->qpc_number += roce_own_cap->max_qps;
 	func_cap->qpc_basic_size = GET_MAX(roce_own_cap->qpc_entry_sz,
 					   func_cap->qpc_basic_size);
-	if (cqm_handle->func_attribute.func_type == CQM_PF && (IS_MASTER_HOST(handle))) {
+	if (cqm_handle->func_attribute.func_type == CQM_PF &&
+	    (IS_MASTER_HOST(handle))) {
 		func_cap->hash_number = roce_own_cap->max_qps;
 		func_cap->hash_basic_size = CQM_HASH_BUCKET_SIZE_64;
 	}
@@ -1129,8 +1139,9 @@ static s32 cqm_fake_mem_init(struct tag_cqm_handle *cqm_handle)
 
 	for (i = 0; i < (u32)child_func_number; i++) {
 		fake_cqm_handle = cqm_handle->fake_cqm_handle[i];
-		snprintf(fake_cqm_handle->name, VRAM_NAME_MAX_LEN - 1,
-			 "%s%s%02u", cqm_handle->name, VRAM_CQM_FAKE_MEM_BASE, i);
+		snprintf(fake_cqm_handle->name, VRAM_NAME_MAX_LEN,
+			 "%s%s%02u", cqm_handle->name,
+			 VRAM_CQM_FAKE_MEM_BASE, i);
 
 		if (cqm_bat_init(fake_cqm_handle) != CQM_SUCCESS) {
 			cqm_err(handle->dev_hdl,
@@ -1174,8 +1185,9 @@ s32 cqm_mem_init(void *ex_handle)
 	struct tag_cqm_handle *cqm_handle = NULL;
 
 	cqm_handle = (struct tag_cqm_handle *)(handle->cqm_hdl);
-	snprintf(cqm_handle->name, VRAM_NAME_MAX_LEN - 1,
-		 "%s%02u", VRAM_CQM_GLB_FUNC_BASE, hinic3_global_func_id(handle));
+	snprintf(cqm_handle->name, VRAM_NAME_MAX_LEN,
+		 "%s%02u", VRAM_CQM_GLB_FUNC_BASE,
+		 hinic3_global_func_id(handle));
 
 	if (cqm_fake_init(cqm_handle) != CQM_SUCCESS) {
 		cqm_err(handle->dev_hdl, CQM_FUNCTION_FAIL(cqm_fake_init));

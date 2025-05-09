@@ -38,13 +38,12 @@ struct hinic3_prof_adapter {
 #define LLT_STATIC_DEF_SAVED
 #endif
 
-/*lint -save -e661 */
 static inline struct hinic3_prof_adapter *
 hinic3_prof_init(void *device, struct hinic3_prof_adapter *adap_objs, int num_adap,
 		 void **prof_attr)
 {
 	struct hinic3_prof_adapter *prof_obj = NULL;
-	u16 i;
+	int i;
 
 	for (i = 0; i < num_adap; i++) {
 		prof_obj = &adap_objs[i];
@@ -68,7 +67,6 @@ static inline void hinic3_prof_deinit(struct hinic3_prof_adapter *prof_obj, void
 		prof_obj->deinit(prof_attr);
 }
 
-/*lint -restore*/
 
 /* module-level interface */
 #ifdef CONFIG_MODULE_PROF

@@ -28,6 +28,8 @@
 #include "cqm_npu_cmd.h"
 #include "cqm_npu_cmd_defs.h"
 
+#include "vram_common.h"
+
 static void cqm_bat_fill_cla_common_gpa(struct tag_cqm_handle *cqm_handle,
 					struct tag_cqm_cla_table *cla_table,
 					struct tag_cqm_bat_entry_standerd *bat_entry_standerd)
@@ -366,6 +368,13 @@ static s32 cqm_bat_update_cmd(struct tag_cqm_handle *cqm_handle, struct tag_cqm_
 	struct hinic3_hwdev *handle = cqm_handle->ex_handle;
 	struct tag_cqm_cmdq_bat_update *bat_update_cmd = NULL;
 	s32 ret = CQM_FAIL;
+	int is_in_kexec;
+
+	is_in_kexec = vram_get_kexec_flag();
+	if (is_in_kexec != 0) {
+		cqm_info(handle->dev_hdl, "Skip updating the cqm_bat to chip during kexec!\n");
+		return CQM_SUCCESS;
+	}
 
 	bat_update_cmd = (struct tag_cqm_cmdq_bat_update *)(buf_in->buf);
 	bat_update_cmd->offset = 0;
@@ -768,8 +777,10 @@ static s32 cqm_cla_xyz_lvl1(struct tag_cqm_handle *cqm_handle,
 	/* Applying for CLA_Z_BUF Space */
 	cla_z_buf = &cla_table->cla_z_buf;
 	cla_z_buf->buf_size = trunk_size;
-	cla_z_buf->buf_number = (ALIGN(cla_table->max_buffer_size, trunk_size)) / trunk_size;
-	cla_z_buf->page_number = cla_z_buf->buf_number << cla_table->trunk_order;
+	cla_z_buf->buf_number =
+		(ALIGN(cla_table->max_buffer_size, trunk_size)) / trunk_size;
+	cla_z_buf->page_number = cla_z_buf->buf_number <<
+						cla_table->trunk_order;
 
 	/* All buffer space must be statically allocated. */
 	if (cla_table->alloc_static) {
@@ -840,6 +851,7 @@ static s32 cqm_cla_xyz_lvl2_xyz_apply(struct tag_cqm_handle *cqm_handle,
 	cla_x_buf->buf_size = trunk_size;
 	cla_x_buf->buf_number = 1;
 	cla_x_buf->page_number = cla_x_buf->buf_number << cla_table->trunk_order;
+	cla_x_buf->buf_info.use_vram = get_use_vram_flag();
 	ret = cqm_buf_alloc(cqm_handle, cla_x_buf, false);
 	if (ret != CQM_SUCCESS)
 		return CQM_FAIL;
@@ -869,14 +881,20 @@ static s32 cqm_cla_xyz_vram_name_init(struct tag_cqm_cla_table *cla_table,
 	cla_x_buf = &cla_table->cla_x_buf;
 	cla_z_buf = &cla_table->cla_z_buf;
 	cla_y_buf = &cla_table->cla_y_buf;
+	cla_x_buf->buf_info.use_vram = get_use_vram_flag();
 	snprintf(cla_x_buf->buf_info.buf_vram_name,
-		 VRAM_NAME_MAX_LEN - 1, "%s%s", cla_table->name, VRAM_CQM_CLA_COORD_X);
+		 VRAM_NAME_MAX_LEN, "%s%s", cla_table->name,
+		 VRAM_CQM_CLA_COORD_X);
 
+	cla_y_buf->buf_info.use_vram = get_use_vram_flag();
 	snprintf(cla_y_buf->buf_info.buf_vram_name,
-		 VRAM_NAME_MAX_LEN - 1, "%s%s", cla_table->name, VRAM_CQM_CLA_COORD_Y);
+		 VRAM_NAME_MAX_LEN, "%s%s", cla_table->name,
+		 VRAM_CQM_CLA_COORD_Y);
 
+	cla_z_buf->buf_info.use_vram = get_use_vram_flag();
 	snprintf(cla_z_buf->buf_info.buf_vram_name,
-		 VRAM_NAME_MAX_LEN - 1, "%s%s", cla_table->name, VRAM_CQM_CLA_COORD_Z);
+		 VRAM_NAME_MAX_LEN, "%s%s", cla_table->name,
+		 VRAM_CQM_CLA_COORD_Z);
 
 	return CQM_SUCCESS;
 }
@@ -1188,7 +1206,7 @@ static void cqm_cla_init_entry_extern(struct tag_cqm_handle *cqm_handle,
 		 * exceed 128 x 4 KB. Otherwise, clearing the timer buffer of
 		 * the function is complex.
 		 */
-		cla_table->trunk_order = CQM_4K_PAGE_ORDER;
+		cla_table->trunk_order = CQM_8K_PAGE_ORDER;
 		cla_table->max_buffer_size = capability->timer_number *
 					     capability->timer_basic_size;
 		cla_table->obj_size = capability->timer_basic_size;
@@ -1237,7 +1255,7 @@ static s32 cqm_cla_init_entry_condition(struct tag_cqm_handle *cqm_handle, u32 e
 			memcpy(cla_table_timer, cla_table, sizeof(struct tag_cqm_cla_table));
 
 			snprintf(cla_table_timer->name,
-				 VRAM_NAME_MAX_LEN - 1, "%s%s%01u", cla_table->name,
+				 VRAM_NAME_MAX_LEN, "%s%s%01u", cla_table->name,
 				 VRAM_CQM_CLA_SMF_BASE, i);
 
 			if (cqm_cla_xyz(cqm_handle, cla_table_timer) ==
@@ -1268,7 +1286,7 @@ static s32 cqm_cla_init_entry(struct tag_cqm_handle *cqm_handle,
 	for (i = 0; i < CQM_BAT_ENTRY_MAX; i++) {
 		cla_table = &bat_table->entry[i];
 		cla_table->type = bat_table->bat_entry_type[i];
-		snprintf(cla_table->name, VRAM_NAME_MAX_LEN - 1,
+		snprintf(cla_table->name, VRAM_NAME_MAX_LEN,
 			 "%s%s%s%02u", cqm_handle->name, VRAM_CQM_CLA_BASE,
 			 VRAM_CQM_CLA_TYPE_BASE, cla_table->type);
 
@@ -1485,11 +1503,11 @@ static s32 cqm_cla_update(struct tag_cqm_handle *cqm_handle,
 		spu_en = 0;
 
 	pa = ((buf_node_parent->pa + (child_index * sizeof(dma_addr_t))) |
-	      (u32)spu_en);
+	      spu_en);
 	cmd.gpa_h = CQM_ADDR_HI(pa);
 	cmd.gpa_l = CQM_ADDR_LW(pa);
 
-	pa = (buf_node_child->pa | (u32)spu_en);
+	pa = (buf_node_child->pa | spu_en);
 	cmd.value_h = CQM_ADDR_HI(pa);
 	cmd.value_l = CQM_ADDR_LW(pa);
 

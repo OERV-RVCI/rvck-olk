@@ -23,7 +23,11 @@
 #define VRAM_CQM_BITMAP_BASE		"B"
 
 #define VRAM_NIC_DCB			"DCB"
+#define VRAM_NIC_MHOST_MGMT		"MHOST_MGMT"
 #define VRAM_NIC_VRAM			"NIC_VRAM"
+#define VRAM_NIC_IRQ_VRAM		"NIC_IRQ"
+
+#define VRAM_NIC_MQM			"NM"
 
 #define VRAM_VBS_BASE_IOCB		"BASE_IOCB"
 #define VRAM_VBS_EX_IOCB		"EX_IOCB"
@@ -31,6 +35,9 @@
 
 #define VRAM_VBS_VOLQ_MTT		"VOLQ_MTT"
 #define VRAM_VBS_VOLQ_MTT_PAGE		"MTT_PAGE"
+
+#define VRAM_OVS_PORT_CONF		"OVS_PORT_CONF"
+#define VRAM_OVS_DFX_MGR		"OVS_DFX_MGR"
 
 #define VRAM_VROCE_ENTRY_POOL		"VROCE_ENTRY"
 #define VRAM_VROCE_GROUP_POOL		"VROCE_GROUP"
@@ -42,6 +49,17 @@
 #define VRAM_VROCE_DEV			"VROCE_DEV"
 #define VRAM_VROCE_RGROUP_HT_CNT	"RGROUP_CNT"
 #define VRAM_VROCE_RACL_HT_CNT		"RACL_CNT"
+#define VRAM_VROCE_MQM_ENQC		"VROCE_MQM_ENQC"
+
+#define VRAM_DTOE_NUMA_MEM		"DTOE_NUMA"
+#define VRAM_DTOE_CARD_MEM		"DTOE_CARD"
+#define VRAM_DTOE_CONN_MEM		"DTOE_CONN"
+#define VRAM_DTOE_SUB_LEN		10
+
+#define VRAM_VROCE_MIG_ENTRY_POOL	"VROCE_MIG_ENTRY"
+#define VRAM_VROCE_MIG_ENTRY_HT_CNT	"MIG_ENTRY_CNT"
+
+#define VRAM_VBS_DEV_INDEX		"VBS_INDEX"
 
 #define VRAM_NAME_APPLY_LEN 64
 
@@ -55,11 +73,16 @@ enum KUP_HOOK_POINT {
 	PRE_FREEZE,
 	FREEZE_TO_KILL,
 	PRE_UPDATE_KERNEL,
-	FLUSH_DURING_KUP,
 	POST_UPDATE_KERNEL,
 	UNFREEZE_TO_RUN,
 	POST_RUN,
 	KUP_HOOK_MAX,
 };
+
+#define hi_vram_kalloc(name, size) 0
+#define hi_vram_kfree(vaddr, name, size)
+#define get_use_vram_flag(void) 0
+#define vram_get_kexec_flag(void) 0
+#define hi_vram_get_gfp_vram(void) 0
 
 #endif /* VRAM_COMMON_H */

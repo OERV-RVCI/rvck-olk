@@ -166,6 +166,11 @@ struct service_cap {
 	u8 srv_multi_host_mode;
 	u16 virtio_vq_size;
 
+	u8 hot_plug_disable;
+	u8 bond_create_mode;
+	u8 os_hot_replace;
+	u8 rsvd1;
+
 	u8 timer_pf_num;
 	u8 timer_pf_id_start;
 	u16 timer_vf_num;
@@ -334,6 +339,8 @@ int init_capability(struct hinic3_hwdev *dev);
 void free_capability(struct hinic3_hwdev *dev);
 
 int hinic3_init_vf_dev_cap(void *hwdev);
+
+u8 hinic3_get_bond_create_mode(void *dev);
 
 #endif
 

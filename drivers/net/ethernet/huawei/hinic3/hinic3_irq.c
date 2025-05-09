@@ -47,12 +47,16 @@ static void qp_add_napi(struct hinic3_irq *irq_cfg)
 	netif_napi_add_weight(nic_dev->netdev, &irq_cfg->napi,
 			      hinic3_poll, nic_dev->poll_weight);
 	napi_enable(&irq_cfg->napi);
+	irq_cfg->napi_reign = NAPI_IS_REGIN;
 }
 
-static void qp_del_napi(struct hinic3_irq *irq_cfg)
+void qp_del_napi(struct hinic3_irq *irq_cfg)
 {
-	napi_disable(&irq_cfg->napi);
-	netif_napi_del(&irq_cfg->napi);
+	if (irq_cfg->napi_reign == NAPI_IS_REGIN) {
+		napi_disable(&irq_cfg->napi);
+		netif_napi_del(&irq_cfg->napi);
+		irq_cfg->napi_reign = NAPI_NOT_REGIN;
+	}
 }
 
 static irqreturn_t qp_irq(int irq, void *data)
@@ -60,7 +64,8 @@ static irqreturn_t qp_irq(int irq, void *data)
 	struct hinic3_irq *irq_cfg = (struct hinic3_irq *)data;
 	struct hinic3_nic_dev *nic_dev = netdev_priv(irq_cfg->netdev);
 
-	hinic3_misx_intr_clear_resend_bit(nic_dev->hwdev, irq_cfg->msix_entry_idx, 1);
+	hinic3_misx_intr_clear_resend_bit(nic_dev->hwdev,
+					  irq_cfg->msix_entry_idx, 1);
 
 	napi_schedule(&irq_cfg->napi);
 
@@ -95,7 +100,8 @@ static int hinic3_request_irq(struct hinic3_irq *irq_cfg, u16 q_id)
 		return err;
 	}
 
-	err = request_irq(irq_cfg->irq_id, &qp_irq, 0, irq_cfg->irq_name, irq_cfg);
+	err = request_irq(irq_cfg->irq_id, &qp_irq, 0,
+			  irq_cfg->irq_name, irq_cfg);
 	if (err) {
 		nicif_err(nic_dev, drv, irq_cfg->netdev, "Failed to request Rx irq\n");
 		qp_del_napi(irq_cfg);
@@ -138,12 +144,8 @@ int hinic3_qps_irq_init(struct hinic3_nic_dev *nic_dev)
 		local_cpu = cpumask_local_spread(q_id, dev_to_node(&pdev->dev));
 		cpumask_set_cpu(local_cpu, &irq_cfg->affinity_mask);
 
-		err = snprintf(irq_cfg->irq_name, sizeof(irq_cfg->irq_name),
-			       "%s_qp%u", nic_dev->netdev->name, q_id);
-		if (err < 0) {
-			err = -EINVAL;
-			goto req_tx_irq_err;
-		}
+		snprintf(irq_cfg->irq_name, sizeof(irq_cfg->irq_name),
+			 "%s_qp%u", nic_dev->netdev->name, q_id);
 
 		err = hinic3_request_irq(irq_cfg, q_id);
 		if (err) {
@@ -151,20 +153,25 @@ int hinic3_qps_irq_init(struct hinic3_nic_dev *nic_dev)
 			goto req_tx_irq_err;
 		}
 
-		hinic3_set_msix_auto_mask_state(nic_dev->hwdev, irq_cfg->msix_entry_idx,
+		hinic3_set_msix_auto_mask_state(nic_dev->hwdev,
+						irq_cfg->msix_entry_idx,
 						HINIC3_SET_MSIX_AUTO_MASK);
-		hinic3_set_msix_state(nic_dev->hwdev, irq_cfg->msix_entry_idx, HINIC3_MSIX_ENABLE);
+		hinic3_set_msix_state(nic_dev->hwdev, irq_cfg->msix_entry_idx,
+				      HINIC3_MSIX_ENABLE);
 	}
 
-	INIT_DELAYED_WORK(&nic_dev->moderation_task, hinic3_auto_moderation_work);
+	INIT_DELAYED_WORK(&nic_dev->moderation_task,
+			  hinic3_auto_moderation_work);
 
 	return 0;
 
 req_tx_irq_err:
 	for (i = 0; i < q_id; i++) {
 		irq_cfg = &nic_dev->q_params.irq_cfg[i];
-		hinic3_set_msix_state(nic_dev->hwdev, irq_cfg->msix_entry_idx, HINIC3_MSIX_DISABLE);
-		hinic3_set_msix_auto_mask_state(nic_dev->hwdev, irq_cfg->msix_entry_idx,
+		hinic3_set_msix_state(nic_dev->hwdev, irq_cfg->msix_entry_idx,
+				      HINIC3_MSIX_DISABLE);
+		hinic3_set_msix_auto_mask_state(nic_dev->hwdev,
+						irq_cfg->msix_entry_idx,
 						HINIC3_CLR_MSIX_AUTO_MASK);
 		hinic3_release_irq(irq_cfg);
 	}

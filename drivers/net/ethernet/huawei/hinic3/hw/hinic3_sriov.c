@@ -52,26 +52,25 @@ static int hinic3_deinit_vf_hw(void *hwdev, u16 start_vf_id, u16 end_vf_id)
 }
 
 #if !(defined(HAVE_SRIOV_CONFIGURE) || defined(HAVE_RHEL6_SRIOV_CONFIGURE))
-ssize_t hinic3_sriov_totalvfs_show(struct device *dev,
-				   struct device_attribute *attr, char *buf)
+ssize_t sriov_totalvfs_show(struct device *dev,
+			    struct device_attribute *attr, char *buf)
 {
 	struct pci_dev *pdev = to_pci_dev(dev);
 
 	return sprintf(buf, "%d\n", pci_sriov_get_totalvfs(pdev));
 }
 
-ssize_t hinic3_sriov_numvfs_show(struct device *dev,
-				 struct device_attribute *attr, char *buf)
+ssize_t sriov_numvfs_show(struct device *dev,
+			  struct device_attribute *attr, char *buf)
 {
 	struct pci_dev *pdev = to_pci_dev(dev);
 
 	return sprintf(buf, "%d\n", pci_num_vf(pdev));
 }
 
-/*lint -save -e713*/
-ssize_t hinic3_sriov_numvfs_store(struct device *dev,
-				  struct device_attribute *attr,
-				  const char *buf, size_t count)
+ssize_t sriov_numvfs_store(struct device *dev,
+			   struct device_attribute *attr,
+			   const char *buf, size_t count)
 {
 	struct pci_dev *pdev = to_pci_dev(dev);
 	int ret;
@@ -116,7 +115,6 @@ ssize_t hinic3_sriov_numvfs_store(struct device *dev,
 	return count;
 }
 
-/*lint -restore*/
 #endif /* !(HAVE_SRIOV_CONFIGURE || HAVE_RHEL6_SRIOV_CONFIGURE) */
 
 int hinic3_pci_sriov_disable(struct pci_dev *dev)
@@ -174,24 +172,15 @@ int hinic3_pci_sriov_disable(struct pci_dev *dev)
 	return 0;
 }
 
-int hinic3_pci_sriov_enable(struct pci_dev *dev, int num_vfs)
-{
 #ifdef CONFIG_PCI_IOV
-	struct hinic3_sriov_info *sriov_info = NULL;
-	struct hinic3_event_info event = {0};
-	void *hwdev = NULL;
-	int pre_existing_vfs = 0;
-	int err = 0;
-
-	sriov_info = hinic3_get_sriov_info_by_pcidev(dev);
-	hwdev = hinic3_get_hwdev_by_pcidev(dev);
-	if (!hwdev) {
-		sdk_err(&dev->dev, "SR-IOV enable is not permitted, please wait...\n");
-		return -EPERM;
-	}
+int hinic3_pci_sriov_check(struct hinic3_sriov_info *sriov_info, struct pci_dev *dev, int num_vfs)
+{
+	int pre_existing_vfs;
+	int err;
 
 	if (test_and_set_bit(HINIC3_SRIOV_ENABLE, &sriov_info->state)) {
-		sdk_err(&dev->dev, "SR-IOV enable in process, please wait, num_vfs %d\n",
+		sdk_err(&dev->dev,
+			"SR-IOV enable in process, please wait, num_vfs %d\n",
 			num_vfs);
 		return -EPERM;
 	}
@@ -202,6 +191,7 @@ int hinic3_pci_sriov_enable(struct pci_dev *dev, int num_vfs)
 		clear_bit(HINIC3_SRIOV_ENABLE, &sriov_info->state);
 		return -ERANGE;
 	}
+
 	if (pre_existing_vfs && pre_existing_vfs != num_vfs) {
 		err = hinic3_pci_sriov_disable(dev);
 		if (err) {
@@ -212,6 +202,29 @@ int hinic3_pci_sriov_enable(struct pci_dev *dev, int num_vfs)
 		clear_bit(HINIC3_SRIOV_ENABLE, &sriov_info->state);
 		return num_vfs;
 	}
+
+	return 0;
+}
+#endif
+
+int hinic3_pci_sriov_enable(struct pci_dev *dev, int num_vfs)
+{
+#ifdef CONFIG_PCI_IOV
+	struct hinic3_sriov_info *sriov_info = NULL;
+	struct hinic3_event_info event = {0};
+	void *hwdev = NULL;
+	int err = 0;
+
+	sriov_info = hinic3_get_sriov_info_by_pcidev(dev);
+	hwdev = hinic3_get_hwdev_by_pcidev(dev);
+	if (!hwdev) {
+		sdk_err(&dev->dev, "SR-IOV enable is not permitted, please wait...\n");
+		return -EPERM;
+	}
+
+	err = hinic3_pci_sriov_check(sriov_info, dev, num_vfs);
+	if (err != 0)
+		return err;
 
 	err = hinic3_init_vf_hw(hwdev, 1, (u16)num_vfs);
 	if (err) {
@@ -262,6 +275,3 @@ int hinic3_pci_sriov_configure(struct pci_dev *dev, int num_vfs)
 	else
 		return hinic3_pci_sriov_enable(dev, num_vfs);
 }
-
-/*lint -restore*/
-
