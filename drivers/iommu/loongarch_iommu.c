@@ -109,7 +109,7 @@ u16	la_iommu_last_bdf;			/* largest PCI device id
 						 *  we have to handle
 						 */
 
-int loongarch_iommu_disable;
+int loongarch_iommu_disable = 1;
 
 #define iommu_write_regl(iommu, off, val) \
 	writel(val, iommu->confbase + off)
@@ -196,6 +196,22 @@ static void flush_iotlb_by_domain_id(struct loongarch_iommu *iommu, u16 domain_i
 	val = iommu_read_regl(iommu, LA_IOMMU_VBTC);
 	val &= ~0x10f;
 	val |= (flush_read_tlb << 8) | 4;
+	iommu_write_regl(iommu, LA_IOMMU_VBTC, val);
+}
+
+static void flush_iotlb(struct loongarch_iommu *iommu)
+{
+	u32 val;
+
+	if (iommu == NULL) {
+		pr_err("%s iommu is NULL", __func__);
+		return;
+	}
+
+	/* Flush all tlb */
+	val = iommu_read_regl(iommu, LA_IOMMU_VBTC);
+	val &= ~0x1f;
+	val |= 0x5;
 	iommu_write_regl(iommu, LA_IOMMU_VBTC, val);
 }
 
@@ -336,22 +352,6 @@ static int update_dev_table(struct la_iommu_dev_data *dev_data, int flag)
 	return 0;
 }
 
-static void flush_iotlb(struct loongarch_iommu *iommu)
-{
-	u32 val;
-
-	if (iommu == NULL) {
-		pr_err("%s iommu is NULL", __func__);
-		return;
-	}
-
-	/* Flush all tlb */
-	val = iommu_read_regl(iommu, LA_IOMMU_VBTC);
-	val &= ~0x1f;
-	val |= 0x5;
-	iommu_write_regl(iommu, LA_IOMMU_VBTC, val);
-}
-
 static int iommu_flush_iotlb(struct loongarch_iommu *iommu)
 {
 	u32 retry = 0;
@@ -443,8 +443,10 @@ static int domain_id_alloc(struct loongarch_iommu *iommu)
 	if (id < MAX_DOMAIN_ID)
 		__set_bit(id, iommu->domain_bitmap);
 	spin_unlock(&iommu->domain_bitmap_lock);
-	if (id >= MAX_DOMAIN_ID)
+	if (id >= MAX_DOMAIN_ID) {
+		id = -1;
 		pr_err("LA-IOMMU: Alloc domain id over max domain id\n");
+	}
 	return id;
 }
 
@@ -595,8 +597,8 @@ static struct iommu_domain *la_iommu_domain_alloc(unsigned int type)
 	struct dom_info *info;
 
 	switch (type) {
+	case IOMMU_DOMAIN_BLOCKED:
 	case IOMMU_DOMAIN_UNMANAGED:
-	case IOMMU_DOMAIN_IDENTITY:
 		info = alloc_dom_info();
 		if (info == NULL)
 			return NULL;
@@ -833,10 +835,10 @@ static int la_iommu_attach_dev(struct iommu_domain *domain, struct device *dev)
 	struct iommu_info *info;
 	unsigned short bdf;
 
-	if (domain->type == IOMMU_DOMAIN_IDENTITY)
-		domain = NULL;
-
 	la_iommu_detach_dev(dev);
+
+	if (domain != NULL && domain->type == IOMMU_DOMAIN_BLOCKED)
+		return 0;
 
 	if (domain == NULL)
 		return 0;
@@ -920,6 +922,7 @@ static void la_iommu_detach_dev(struct device *dev)
 	spin_lock(&iommu_entry->devlock);
 	do_detach(dev_data);
 	spin_unlock(&iommu_entry->devlock);
+	dev_data->domain = NULL;
 
 	pci_info(pdev, "%s iommu devid  %x sigment %x\n", __func__,
 			iommu->devid, iommu->segment);
