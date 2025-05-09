@@ -2021,10 +2021,8 @@ int xsc_eth_query_pkt_dst_info(struct xsc_adapter *adapter, u8 mac_bitmap,
 
 	ret = xsc_cmd_exec(adapter->xdev, &in, sizeof(in), &out, sizeof(out));
 	if (ret || out.hdr.status) {
-		if (out.hdr.status == XSC_CMD_STATUS_NOT_SUPPORTED) {
-			xsc_core_info(adapter->xdev, "dpdk ovs and ncsi are incompatible\n");
-			return 0;
-		}
+		if (out.hdr.status == XSC_CMD_STATUS_NOT_SUPPORTED)
+			return -EOPNOTSUPP;
 		xsc_core_err(adapter->xdev,
 			     "failed to query pkt dst info, pkt=0x%x, mac=0x%x,err=%d\n",
 			     pkt_bitmap, mac_bitmap, out.hdr.status);
@@ -2052,10 +2050,8 @@ int xsc_eth_modify_pkt_dst_info(struct xsc_adapter *adapter, u8 mac_bitmap,
 
 	ret = xsc_cmd_exec(adapter->xdev, &in, sizeof(in), &out, sizeof(out));
 	if (ret || out.hdr.status) {
-		if (out.hdr.status == XSC_CMD_STATUS_NOT_SUPPORTED) {
-			xsc_core_info(adapter->xdev, "dpdk ovs and ncsi are incompatible\n");
-			return 0;
-		}
+		if (out.hdr.status == XSC_CMD_STATUS_NOT_SUPPORTED)
+			return -EOPNOTSUPP;
 		xsc_core_err(adapter->xdev,
 			     "failed to modify pkt dst info, pkt=0x%x, mac=0x%x, dst_info=%d, err=%d\n",
 			     pkt_bitmap, mac_bitmap, dst_info, out.hdr.status);
