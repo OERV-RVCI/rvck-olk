@@ -11,6 +11,7 @@ ccflags-y += -I$(srctree)/drivers/net/ethernet/huawei/hinic3/include/cfg_mgmt/
 ccflags-y += -I$(srctree)/drivers/net/ethernet/huawei/hinic3/include/mpu/
 ccflags-y += -I$(srctree)/drivers/net/ethernet/huawei/hinic3/include/bond/
 ccflags-y += -I$(srctree)/drivers/net/ethernet/huawei/hinic3/include/vmsec/
+ccflags-y += -I$(srctree)/drivers/net/ethernet/huawei/hinic3/bond/
 
 obj-$(CONFIG_HINIC3) += hinic3.o
 hinic3-objs := hw/hinic3_hwdev.o \

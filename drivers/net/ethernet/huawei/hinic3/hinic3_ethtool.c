@@ -56,9 +56,8 @@ static void hinic3_get_drvinfo(struct net_device *netdev,
 		return;
 	}
 
-	err = snprintf(info->fw_version, sizeof(info->fw_version), "%s", mgmt_ver);
-	if (err < 0)
-		nicif_err(nic_dev, drv, netdev, "Failed to snprintf fw version\n");
+	snprintf(info->fw_version, sizeof(info->fw_version),
+		 "%s", mgmt_ver);
 }
 
 static u32 hinic3_get_msglevel(struct net_device *netdev)
@@ -86,7 +85,8 @@ static int hinic3_nway_reset(struct net_device *netdev)
 	while (test_and_set_bit(HINIC3_AUTONEG_RESET, &nic_dev->flags))
 		msleep(100); /* sleep 100 ms, waiting for another autoneg restart progress done */
 
-	err = hinic3_get_port_info(nic_dev->hwdev, &port_info, HINIC3_CHANNEL_NIC);
+	err = hinic3_get_port_info(nic_dev->hwdev, &port_info,
+				   HINIC3_CHANNEL_NIC);
 	if (err) {
 		nicif_err(nic_dev, drv, netdev, "Get port info failed\n");
 		err = -EFAULT;
@@ -273,7 +273,7 @@ static int get_coalesce(struct net_device *netdev,
 static int set_queue_coalesce(struct hinic3_nic_dev *nic_dev, u16 q_id,
 			      struct hinic3_intr_coal_info *coal)
 {
-	struct hinic3_intr_coal_info *intr_coal;
+	struct hinic3_intr_coal_info *intr_coal = NULL;
 	struct interrupt_info info = {0};
 	struct net_device *netdev = nic_dev->netdev;
 	int err;
@@ -367,24 +367,11 @@ static int is_coalesce_exceed_limit(struct net_device *netdev,
 	return 0;
 }
 
-static int is_coalesce_legal(struct net_device *netdev,
-			     const struct ethtool_coalesce *coal)
+static int is_coalesce_allowed_change(struct net_device *netdev,
+				      const struct ethtool_coalesce *coal)
 {
 	struct hinic3_nic_dev *nic_dev = netdev_priv(netdev);
 	struct ethtool_coalesce tmp_coal = {0};
-	int err;
-
-	if (coal->rx_coalesce_usecs != coal->tx_coalesce_usecs) {
-		nicif_err(nic_dev, drv, netdev,
-			  "tx-usecs must be equal to rx-usecs\n");
-		return -EINVAL;
-	}
-
-	if (coal->rx_max_coalesced_frames != coal->tx_max_coalesced_frames) {
-		nicif_err(nic_dev, drv, netdev,
-			  "tx-frames must be equal to rx-frames\n");
-		return -EINVAL;
-	}
 
 	tmp_coal.cmd = coal->cmd;
 	tmp_coal.rx_coalesce_usecs = coal->rx_coalesce_usecs;
@@ -408,6 +395,31 @@ static int is_coalesce_legal(struct net_device *netdev,
 			  "Only support to change rx/tx-usecs and rx/tx-frames\n");
 		return -EOPNOTSUPP;
 	}
+
+	return 0;
+}
+
+static int is_coalesce_legal(struct net_device *netdev,
+			     const struct ethtool_coalesce *coal)
+{
+	struct hinic3_nic_dev *nic_dev = netdev_priv(netdev);
+	int err;
+
+	if (coal->rx_coalesce_usecs != coal->tx_coalesce_usecs) {
+		nicif_err(nic_dev, drv, netdev,
+			  "tx-usecs must be equal to rx-usecs\n");
+		return -EINVAL;
+	}
+
+	if (coal->rx_max_coalesced_frames != coal->tx_max_coalesced_frames) {
+		nicif_err(nic_dev, drv, netdev,
+			  "tx-frames must be equal to rx-frames\n");
+		return -EINVAL;
+	}
+
+	err = is_coalesce_allowed_change(netdev, coal);
+	if (err)
+		return err;
 
 	err = is_coalesce_exceed_limit(netdev, coal);
 	if (err)
@@ -444,8 +456,9 @@ static int is_coalesce_legal(struct net_device *netdev,
 	return 0;
 }
 
-static inline void check_coalesce_align(struct hinic3_nic_dev *nic_dev, struct net_device *netdev,
-					u32 item, u32 unit, char *str)
+static inline void check_coalesce_aligned(struct hinic3_nic_dev *nic_dev,
+					  struct net_device *netdev,
+					  u32 item, u32 unit, char *str)
 {
 	if (item % unit)
 		nicif_warn(nic_dev, drv, netdev, "%s in %d units, change to %u\n",
@@ -453,10 +466,12 @@ static inline void check_coalesce_align(struct hinic3_nic_dev *nic_dev, struct n
 }
 
 #define CHECK_COALESCE_ALIGN(member, unit)				\
-	check_coalesce_align(nic_dev, netdev, member, unit, #member)
+	check_coalesce_aligned(nic_dev, netdev, member, unit, #member)
 
-static inline void check_coalesce_changed(struct hinic3_nic_dev *nic_dev, struct net_device *netdev,
-					  u32 item, u32 unit, u32 ori_val, char *obj_str, char *str)
+static inline void check_coalesce_changed(struct hinic3_nic_dev *nic_dev,
+					  struct net_device *netdev,
+					  u32 item, u32 unit, u32 ori_val,
+					  char *obj_str, char *str)
 {
 	if ((item / unit) != ori_val)
 		nicif_info(nic_dev, drv, netdev, "Change %s from %d to %u %s\n",
@@ -466,8 +481,10 @@ static inline void check_coalesce_changed(struct hinic3_nic_dev *nic_dev, struct
 #define CHECK_COALESCE_CHANGED(member, unit, ori_val, obj_str)	\
 	check_coalesce_changed(nic_dev, netdev, member, unit, ori_val, obj_str, #member)
 
-static inline void check_pkt_rate_changed(struct hinic3_nic_dev *nic_dev, struct net_device *netdev,
-					  u32 item, u32 ori_val, char *obj_str, char *str)
+static inline void check_pkt_rate_changed(struct hinic3_nic_dev *nic_dev,
+					  struct net_device *netdev,
+					  u32 item, u32 ori_val, char *obj_str,
+					  char *str)
 {
 	if (item != ori_val)
 		nicif_info(nic_dev, drv, netdev, "Change %s from %d to %u %s\n",
@@ -497,19 +514,10 @@ static int set_hw_coal_param(struct hinic3_nic_dev *nic_dev,
 	return 0;
 }
 
-static int set_coalesce(struct net_device *netdev,
-			struct ethtool_coalesce *coal, u16 queue)
+static void check_coalesce_align(struct net_device *netdev,
+				 struct ethtool_coalesce *coal)
 {
 	struct hinic3_nic_dev *nic_dev = netdev_priv(netdev);
-	struct hinic3_intr_coal_info intr_coal = {0};
-	struct hinic3_intr_coal_info *ori_intr_coal = NULL;
-	u32 last_adaptive_rx;
-	char obj_str[32] = {0};
-	int err = 0;
-
-	err = is_coalesce_legal(netdev, coal);
-	if (err)
-		return err;
 
 	CHECK_COALESCE_ALIGN(coal->rx_coalesce_usecs, COALESCE_TIMER_CFG_UNIT);
 	CHECK_COALESCE_ALIGN(coal->rx_max_coalesced_frames,
@@ -522,6 +530,14 @@ static int set_coalesce(struct net_device *netdev,
 			     COALESCE_TIMER_CFG_UNIT);
 	CHECK_COALESCE_ALIGN(coal->rx_max_coalesced_frames_low,
 			     COALESCE_PENDING_LIMIT_UNIT);
+}
+
+static int check_coalesce_change(struct net_device *netdev,
+				 u16 queue, struct ethtool_coalesce *coal)
+{
+	struct hinic3_nic_dev *nic_dev = netdev_priv(netdev);
+	struct hinic3_intr_coal_info *ori_intr_coal = NULL;
+	char obj_str[32] = {0};
 
 	if (queue == COALESCE_ALL_QUEUE) {
 		ori_intr_coal = &nic_dev->intr_coalesce[0];
@@ -552,27 +568,54 @@ static int set_coalesce(struct net_device *netdev,
 			       COALESCE_PENDING_LIMIT_UNIT,
 			       ori_intr_coal->rx_pending_limt_low, obj_str);
 
-	intr_coal.coalesce_timer_cfg =
+	return 0;
+}
+
+static void init_intr_coal_params(struct hinic3_intr_coal_info *intr_coal,
+				  struct ethtool_coalesce *coal)
+{
+	intr_coal->coalesce_timer_cfg =
 		(u8)(coal->rx_coalesce_usecs / COALESCE_TIMER_CFG_UNIT);
-	intr_coal.pending_limt = (u8)(coal->rx_max_coalesced_frames /
+	intr_coal->pending_limt = (u8)(coal->rx_max_coalesced_frames /
 				      COALESCE_PENDING_LIMIT_UNIT);
 
-	last_adaptive_rx = nic_dev->adaptive_rx_coal;
-	nic_dev->adaptive_rx_coal = coal->use_adaptive_rx_coalesce;
-
-	intr_coal.pkt_rate_high = coal->pkt_rate_high;
-	intr_coal.rx_usecs_high =
+	intr_coal->pkt_rate_high = coal->pkt_rate_high;
+	intr_coal->rx_usecs_high =
 		(u8)(coal->rx_coalesce_usecs_high / COALESCE_TIMER_CFG_UNIT);
-	intr_coal.rx_pending_limt_high =
+	intr_coal->rx_pending_limt_high =
 		(u8)(coal->rx_max_coalesced_frames_high /
 		     COALESCE_PENDING_LIMIT_UNIT);
 
-	intr_coal.pkt_rate_low = coal->pkt_rate_low;
-	intr_coal.rx_usecs_low =
+	intr_coal->pkt_rate_low = coal->pkt_rate_low;
+	intr_coal->rx_usecs_low =
 		(u8)(coal->rx_coalesce_usecs_low / COALESCE_TIMER_CFG_UNIT);
-	intr_coal.rx_pending_limt_low =
+	intr_coal->rx_pending_limt_low =
 		(u8)(coal->rx_max_coalesced_frames_low /
 		     COALESCE_PENDING_LIMIT_UNIT);
+}
+
+static int set_coalesce(struct net_device *netdev,
+			struct ethtool_coalesce *coal, u16 queue)
+{
+	struct hinic3_nic_dev *nic_dev = netdev_priv(netdev);
+	struct hinic3_intr_coal_info intr_coal = {0};
+	u32 last_adaptive_rx;
+	int err = 0;
+
+	err = is_coalesce_legal(netdev, coal);
+	if (err)
+		return err;
+
+	check_coalesce_align(netdev, coal);
+
+	err = check_coalesce_change(netdev, queue, coal);
+	if (err)
+		return err;
+
+	init_intr_coal_params(&intr_coal, coal);
+
+	last_adaptive_rx = nic_dev->adaptive_rx_coal;
+	nic_dev->adaptive_rx_coal = coal->use_adaptive_rx_coalesce;
 
 	/* coalesce timer or pending set to zero will disable coalesce */
 	if (!nic_dev->adaptive_rx_coal &&
@@ -709,14 +752,16 @@ static int hinic3_set_pauseparam(struct net_device *netdev,
 		return -EFAULT;
 	}
 
-	auto_neg = port_info.autoneg_state == PORT_CFG_AN_ON ? AUTONEG_ENABLE : AUTONEG_DISABLE;
+	auto_neg = port_info.autoneg_state == PORT_CFG_AN_ON ?
+		   AUTONEG_ENABLE : AUTONEG_DISABLE;
 	if (pause->autoneg != auto_neg) {
 		nicif_err(nic_dev, drv, netdev,
 			  "To change autoneg please use: ethtool -s <dev> autoneg <on|off>\n");
 		return -EOPNOTSUPP;
 	}
 
-	nic_pause.auto_neg = pause->autoneg == AUTONEG_ENABLE ? PORT_CFG_AN_ON : PORT_CFG_AN_OFF;
+	nic_pause.auto_neg = pause->autoneg == AUTONEG_ENABLE ?
+			     PORT_CFG_AN_ON : PORT_CFG_AN_OFF;
 	nic_pause.rx_pause = (u8)pause->rx_pause;
 	nic_pause.tx_pause = (u8)pause->tx_pause;
 
@@ -768,6 +813,14 @@ static int hinic3_get_module_info(struct net_device *netdev,
 		modinfo->type = ETH_MODULE_SFF_8636;
 		modinfo->eeprom_len = ETH_MODULE_SFF_8636_MAX_LEN;
 		break;
+	case MODULE_TYPE_DSFP:
+		modinfo->type = ETH_MODULE_SFF_8636;
+		modinfo->eeprom_len = ETH_MODULE_SFF_8636_MAX_LEN;
+		break;
+	case MODULE_TYPE_QSFP_CMIS:
+		modinfo->type = ETH_MODULE_SFF_8636;
+		modinfo->eeprom_len = ETH_MODULE_SFF_8636_MAX_LEN;
+		break;
 	default:
 		nicif_warn(nic_dev, drv, netdev,
 			   "Optical module unknown: 0x%x\n", sfp_type);
@@ -790,6 +843,11 @@ static int hinic3_get_module_eeprom(struct net_device *netdev,
 	memset(data, 0, ee->len);
 
 	err = hinic3_get_sfp_eeprom(nic_dev->hwdev, (u8 *)sfp_data, ee->len);
+	if (err == HINIC3_MGMT_CMD_UNSUPPORTED)
+		err = hinic3_get_tlv_xsfp_eeprom(nic_dev->hwdev,
+						 (u8 *)sfp_data,
+						 sizeof(sfp_data));
+
 	if (err)
 		return err;
 
@@ -832,7 +890,8 @@ int hinic3_set_rxq_recovery_flag(struct net_device *netdev, u32 priv_flags)
 
 		if (test_and_set_bit(HINIC3_RXQ_RECOVERY, &nic_dev->flags))
 			return 0;
-		queue_delayed_work(nic_dev->workq, &nic_dev->rxq_check_work, HZ);
+		queue_delayed_work(nic_dev->workq,
+				   &nic_dev->rxq_check_work, HZ);
 		nicif_info(nic_dev, drv, netdev, "open rxq recovery\n");
 	} else {
 		if (!test_and_clear_bit(HINIC3_RXQ_RECOVERY, &nic_dev->flags))
@@ -888,7 +947,8 @@ static int hinic3_set_force_link_flag(struct net_device *netdev, u32 priv_flags)
 		nicif_info(nic_dev, link, netdev, "Set link up\n");
 
 		if (!HINIC3_FUNC_IS_VF(nic_dev->hwdev))
-			hinic3_notify_all_vfs_link_changed(nic_dev->hwdev, nic_dev->link_status);
+			hinic3_notify_all_vfs_link_changed(nic_dev->hwdev,
+							   nic_dev->link_status);
 	} else {
 		if (!test_and_clear_bit(HINIC3_FORCE_LINK_UP, &nic_dev->flags))
 			return 0;
@@ -919,7 +979,8 @@ static int hinic3_set_force_link_flag(struct net_device *netdev, u32 priv_flags)
 		}
 
 		if (!HINIC3_FUNC_IS_VF(nic_dev->hwdev))
-			hinic3_notify_all_vfs_link_changed(nic_dev->hwdev, nic_dev->link_status);
+			hinic3_notify_all_vfs_link_changed(nic_dev->hwdev,
+							   nic_dev->link_status);
 	}
 
 	return 0;
@@ -942,7 +1003,6 @@ static int hinic3_set_priv_flags(struct net_device *netdev, u32 priv_flags)
 
 #define PORT_DOWN_ERR_IDX  0
 #define LP_DEFAULT_TIME    5 /* seconds */
-#define LP_PKT_LEN         60
 
 #define TEST_TIME_MULTIPLE 5
 static int hinic3_run_lp_test(struct hinic3_nic_dev *nic_dev, u32 test_time)
@@ -1086,7 +1146,8 @@ static int do_lp_test(struct hinic3_nic_dev *nic_dev, u32 *flags, u32 test_time,
 	return err;
 }
 
-static void hinic3_lp_test(struct net_device *netdev, struct ethtool_test *eth_test,
+static void hinic3_lp_test(struct net_device *netdev,
+			   struct ethtool_test *eth_test,
 			   u64 *data, u32 test_time)
 {
 	struct hinic3_nic_dev *nic_dev = netdev_priv(netdev);
@@ -1109,7 +1170,8 @@ static void hinic3_lp_test(struct net_device *netdev, struct ethtool_test *eth_t
 	netif_carrier_off(netdev);
 	netif_tx_disable(netdev);
 
-	err = do_lp_test(nic_dev, &eth_test->flags, test_time_real, &test_index);
+	err = do_lp_test(nic_dev, &eth_test->flags,
+			 test_time_real, &test_index);
 	if (err) {
 		eth_test->flags |= ETH_TEST_FL_FAILED;
 		data[test_index] = 1;
@@ -1130,10 +1192,65 @@ static void hinic3_diag_test(struct net_device *netdev,
 	hinic3_lp_test(netdev, eth_test, data, 0);
 }
 
+#if defined(ETHTOOL_GFECPARAM) && defined(ETHTOOL_SFECPARAM)
+static int hinic3_get_fecparam(struct net_device *netdev,
+			       struct ethtool_fecparam *fecparam)
+{
+	struct hinic3_nic_dev *nic_dev = netdev_priv(netdev);
+	u8 advertised_fec = 0;
+	u8 supported_fec = 0;
+	int err;
+
+	if (fecparam->cmd != ETHTOOL_GFECPARAM) {
+		nicif_err(nic_dev, drv, netdev,
+			  "get fecparam cmd err.exp:0x%x,real:0x%x\n",
+			  ETHTOOL_GFECPARAM, fecparam->cmd);
+		return -EINVAL;
+	}
+
+	err = get_fecparam(nic_dev->hwdev, &advertised_fec, &supported_fec);
+	if (err) {
+		nicif_err(nic_dev, drv, netdev, "Get fec param failed\n");
+		return err;
+	}
+	fecparam->active_fec = (u32)advertised_fec;
+	fecparam->fec = (u32)supported_fec;
+
+	nicif_info(nic_dev, drv, netdev, "Get fec param success\n");
+	return 0;
+}
+
+static int hinic3_set_fecparam(struct net_device *netdev,
+			       struct ethtool_fecparam *fecparam)
+{
+	struct hinic3_nic_dev *nic_dev = netdev_priv(netdev);
+	int err;
+
+	if (fecparam->cmd != ETHTOOL_SFECPARAM) {
+		nicif_err(nic_dev, drv, netdev,
+			  "Set fecparam cmd err.exp:0x%x,real:0x%x\n",
+			  ETHTOOL_SFECPARAM, fecparam->cmd);
+	return -EINVAL;
+	}
+
+	err = set_fecparam(nic_dev->hwdev, (u8)fecparam->fec);
+	if (err) {
+		nicif_err(nic_dev, drv, netdev, "Set fec param failed\n");
+		return err;
+	}
+
+	nicif_info(nic_dev, drv, netdev, "Set fec param success\n");
+	return 0;
+}
+#endif
+
 static const struct ethtool_ops hinic3_ethtool_ops = {
 #ifdef SUPPORTED_COALESCE_PARAMS
 	.supported_coalesce_params = ETHTOOL_COALESCE_USECS |
-				     ETHTOOL_COALESCE_PKT_RATE_RX_USECS,
+			ETHTOOL_COALESCE_PKT_RATE_RX_USECS |
+			ETHTOOL_COALESCE_MAX_FRAMES |
+			ETHTOOL_COALESCE_USECS_LOW_HIGH |
+			ETHTOOL_COALESCE_MAX_FRAMES_LOW_HIGH,
 #endif
 #ifdef ETHTOOL_GLINKSETTINGS
 #ifndef XENSERVER_HAVE_NEW_ETHTOOL_OPS
@@ -1180,6 +1297,10 @@ static const struct ethtool_ops hinic3_ethtool_ops = {
 	.set_per_queue_coalesce = hinic3_set_per_queue_coalesce,
 #endif
 
+#if defined(ETHTOOL_GFECPARAM) && defined(ETHTOOL_SFECPARAM)
+	.get_fecparam = hinic3_get_fecparam,
+	.set_fecparam = hinic3_set_fecparam,
+#endif
 	.get_rxnfc = hinic3_get_rxnfc,
 	.set_rxnfc = hinic3_set_rxnfc,
 	.get_priv_flags = hinic3_get_priv_flags,
@@ -1240,7 +1361,10 @@ static const struct ethtool_ops_ext hinic3_ethtool_ops_ext = {
 static const struct ethtool_ops hinic3vf_ethtool_ops = {
 #ifdef SUPPORTED_COALESCE_PARAMS
 	.supported_coalesce_params = ETHTOOL_COALESCE_USECS |
-				     ETHTOOL_COALESCE_PKT_RATE_RX_USECS,
+			ETHTOOL_COALESCE_PKT_RATE_RX_USECS |
+			ETHTOOL_COALESCE_MAX_FRAMES |
+			ETHTOOL_COALESCE_USECS_LOW_HIGH |
+			ETHTOOL_COALESCE_MAX_FRAMES_LOW_HIGH,
 #endif
 #ifdef ETHTOOL_GLINKSETTINGS
 #ifndef XENSERVER_HAVE_NEW_ETHTOOL_OPS
@@ -1265,6 +1389,11 @@ static const struct ethtool_ops hinic3vf_ethtool_ops = {
 #if defined(ETHTOOL_PERQUEUE) && defined(ETHTOOL_GCOALESCE)
 	.get_per_queue_coalesce = hinic3_get_per_queue_coalesce,
 	.set_per_queue_coalesce = hinic3_set_per_queue_coalesce,
+#endif
+
+#if defined(ETHTOOL_GFECPARAM) && defined(ETHTOOL_SFECPARAM)
+	.get_fecparam = hinic3_get_fecparam,
+	.set_fecparam = hinic3_set_fecparam,
 #endif
 
 	.get_rxnfc = hinic3_get_rxnfc,

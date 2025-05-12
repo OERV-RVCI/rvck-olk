@@ -36,6 +36,7 @@ enum nic_rss_hash_type {
 #define NIC_RX_MODE_BC		0x04
 #define NIC_RX_MODE_MC_ALL	0x08
 #define NIC_RX_MODE_PROMISC	0x10
+#define NIC_RX_DB_COS_MAX       0x4
 
 /* IEEE 802.1Qaz std */
 #define NIC_DCB_COS_MAX		0x8
@@ -52,4 +53,7 @@ enum nic_rss_hash_type {
 #define NIC_DCB_PRIO_STRICT	0x1
 
 #define NIC_DCB_MAX_PFC_NUM	0x4
+
+#define NIC_ETS_PERCENT_WEIGHT    100
+
 #endif

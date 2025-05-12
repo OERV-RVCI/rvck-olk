@@ -801,7 +801,7 @@ static int cmdq_sync_cmd(struct hinic3_cmdq *cmdq, u8 mod, u8 cmd,
 	hinic3_cmdq_fill_completion_info(cmd_info, &cmpt_code, &done, &errcode, out_param);
 
 	cmdq_set_cmd_buf(cmd_info, cmdq->hwdev, buf_in, buf_out);
-	memcpy(&saved_cmd_info, cmd_info, sizeof(*cmd_info));
+	memcpy(&saved_cmd_info, cmd_info, sizeof(struct hinic3_cmdq_cmd_info));
 
 	cmdq_sync_wqe_prepare(cmdq, mod, cmd, buf_in, buf_out, curr_wqe, curr_pi, nic_cmd_type);
 
@@ -1075,6 +1075,7 @@ int hinic3_cmdq_async(void *hwdev, u8 mod, u8 cmd, struct hinic3_cmd_buf *buf_in
 	return cmdq_async_cmd(&cmdqs->cmdq[HINIC3_CMDQ_SYNC], mod,
 			      cmd, buf_in, channel);
 }
+EXPORT_SYMBOL(hinic3_cmdq_async);
 
 int hinic3_cmdq_async_cos(void *hwdev, u8 mod, u8 cmd,
 			  u8 cos_id, struct hinic3_cmd_buf *buf_in, u16 channel)
@@ -1320,6 +1321,7 @@ cmd_infos_err:
 static void free_cmdq(struct hinic3_cmdq *cmdq)
 {
 	kfree(cmdq->cmd_infos);
+	cmdq->cmd_infos = NULL;
 	spin_lock_deinit(&cmdq->cmdq_lock);
 }
 
@@ -1530,7 +1532,7 @@ static int create_cmdq_wq(struct hinic3_cmdqs *cmdqs)
 		type = HINIC3_CMDQ_SYNC;
 		for (; type < cmdqs->cmdq_num; type++)
 			memcpy((u8 *)cmdqs->wq_block_vaddr +
-			       CMDQ_WQ_CLA_SIZE * type,
+			       ((u64)type * CMDQ_WQ_CLA_SIZE),
 			       cmdqs->cmdq[type].wq.wq_block_vaddr,
 			       cmdqs->cmdq[type].wq.num_wq_pages * sizeof(u64));
 	}

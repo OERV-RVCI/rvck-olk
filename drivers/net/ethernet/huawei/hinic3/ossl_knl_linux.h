@@ -5,6 +5,7 @@
 #define OSSL_KNL_LINUX_H_
 
 #include <net/ipv6.h>
+#include <net/devlink.h>
 #include <linux/string.h>
 #include <linux/pci.h>
 #include <linux/device.h>
@@ -18,6 +19,12 @@
 #include <linux/list.h>
 #include <linux/bitmap.h>
 #include <linux/slab.h>
+#include <linux/proc_fs.h>
+#include <linux/skbuff.h>
+#include <linux/netdevice.h>
+#include <linux/filter.h>
+#include <linux/aer.h>
+#include <linux/socket.h>
 
 #ifndef NETIF_F_SCTP_CSUM
 #define NETIF_F_SCTP_CSUM 0
@@ -173,12 +180,10 @@ static inline void *_hinic3_dma_zalloc_coherent(struct device *dev,
 }
 #endif
 
-#ifndef DT_KNL_EMU
 struct timeval {
 	__kernel_old_time_t     tv_sec;         /* seconds */
 	__kernel_suseconds_t    tv_usec;        /* microseconds */
 };
-#endif
 
 #ifndef do_gettimeofday
 #define do_gettimeofday(time) _kc_do_gettimeofday(time)
@@ -195,6 +200,10 @@ static inline void _kc_do_gettimeofday(struct timeval *tv)
 #define HAVE_NDO_SELECT_QUEUE_SB_DEV_ONLY
 #define ETH_GET_HEADLEN_NEED_DEV
 #define HAVE_GENL_OPS_FIELD_VALIDATE
+
+#ifndef FIELD_SIZEOF
+#define FIELD_SIZEOF(t, f) (sizeof(((t *)0)->f))
+#endif
 
 #define HAVE_DEVLINK_FLASH_UPDATE_PARAMS
 
@@ -253,11 +262,11 @@ static inline void pci_free_consistent(struct pci_dev *hwdev, size_t size,
 			  size, vaddr, dma_handle);
 }
 
-#define HAVE_DEVLINK_FW_FILE_NAME_MEMBER
-
 #define HAVE_ENCAPSULATION_TSO
 
 #define HAVE_ENCAPSULATION_CSUM
+
+#define HAVE_UDP_TUNNEL_NIC_INFO
 
 #ifndef eth_zero_addr
 static inline void hinic3_eth_zero_addr(u8 *addr)
@@ -332,5 +341,16 @@ u64 ossl_get_real_time(void);
 #define rwlock_deinit(lock)
 
 #define tasklet_state(tasklet) ((tasklet)->state)
+
+dma_addr_t pci_map_single(struct pci_dev *pdev,
+			  void *ptr, size_t size, int direction);
+int pci_dma_mapping_error(struct pci_dev *pdev,
+			  dma_addr_t dma_addr);
+void pci_unmap_single(struct pci_dev *pdev,
+		      dma_addr_t dma_addr, size_t size, int direction);
+void *pci_alloc_consistent(struct pci_dev *pdev,
+			   size_t size, dma_addr_t *dma_handle);
+void pci_free_consistent(struct pci_dev *pdev,
+			 size_t size, void *vaddr, dma_addr_t dma_handle);
 
 #endif

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0
 /* Copyright(c) 2021 Huawei Technologies Co., Ltd */
 
-#include "hinic3_nic_cmd.h"
+#include "nic_mpu_cmd.h"
+#include "nic_npu_cmd.h"
 #include "hinic3_nic_cmdq.h"
 #include "sw_cmdq_ops.h"
 

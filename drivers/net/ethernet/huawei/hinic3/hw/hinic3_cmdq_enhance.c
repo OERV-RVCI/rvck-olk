@@ -16,7 +16,6 @@
 
 #include "ossl_knl.h"
 #include "npu_cmdq_base_defs.h"
-#include "comm_defs.h"
 #include "hinic3_crm.h"
 #include "hinic3_hw.h"
 #include "hinic3_hwdev.h"

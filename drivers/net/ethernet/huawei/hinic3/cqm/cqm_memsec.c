@@ -378,7 +378,7 @@ static int hinic3_secure_mem_proc_node_remove(void *hwdev)
 
 	atomic_dec(&g_memsec_proc_refcnt);
 
-	snprintf(pci_name, PCI_PROC_NAME_LEN - 1,
+	snprintf(pci_name, PCI_PROC_NAME_LEN,
 		 "%02x:%02x:%x", pdev->bus->number, pdev->slot->number,
 		 PCI_FUNC(pdev->devfn));
 
@@ -401,7 +401,7 @@ static int hinic3_secure_mem_proc_node_add(void *hwdev)
 
 	atomic_inc(&g_memsec_proc_refcnt);
 
-	snprintf(pci_name, PCI_PROC_NAME_LEN - 1,
+	snprintf(pci_name, PCI_PROC_NAME_LEN,
 		 "%02x:%02x:%x", pdev->bus->number, pdev->slot->number,
 		 PCI_FUNC(pdev->devfn));
 	/* 0400 Read by owner */

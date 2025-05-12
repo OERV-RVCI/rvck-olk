@@ -16,9 +16,10 @@
 #include "hinic3_nic_cfg.h"
 #include "hinic3_srv_nic.h"
 #include "hinic3_nic.h"
-#include "hinic3_nic_cmd.h"
-#include "hinic3_nic_io.h"
+#include "nic_mpu_cmd.h"
+#include "nic_npu_cmd.h"
 #include "hinic3_nic_cmdq.h"
+#include "hinic3_nic_io.h"
 
 #define HINIC3_DEAULT_TX_CI_PENDING_LIMIT    1
 #define HINIC3_DEAULT_TX_CI_COALESCING_TIME  1
@@ -35,7 +36,7 @@ MODULE_PARM_DESC(tx_coalescing_time, "TX CI coalescing parameter coalescing_time
 
 static unsigned char rq_wqe_type = HINIC3_NORMAL_RQ_WQE;
 module_param(rq_wqe_type, byte, 0444);
-MODULE_PARM_DESC(rq_wqe_type, "RQ WQE type 0-8Bytes, 1-16Bytes, 2-32Bytes (default=1)");
+MODULE_PARM_DESC(rq_wqe_type, "RQ WQE type 1-16Bytes, 2-32Bytes (default=2)");
 
 /*lint +e806*/
 static u32 tx_drop_thd_on = HINIC3_DEAULT_DROP_THD_ON;
@@ -46,7 +47,7 @@ static u32 tx_drop_thd_off = HINIC3_DEAULT_DROP_THD_OFF;
 module_param(tx_drop_thd_off, uint, 0644);
 MODULE_PARM_DESC(tx_drop_thd_off, "TX parameter drop_thd_off (default=0)");
 /* performance: ci addr RTE_CACHE_SIZE(64B) alignment */
-#define HINIC3_CI_Q_ADDR_SIZE			(64)
+#define HINIC3_CI_Q_ADDR_SIZE			(64U)
 
 #define CI_TABLE_SIZE(num_qps, pg_sz)	\
 			(ALIGN((num_qps) * HINIC3_CI_Q_ADDR_SIZE, pg_sz))
@@ -255,7 +256,7 @@ static int hinic3_create_sq(struct hinic3_nic_io *nic_io, struct hinic3_io_queue
 
 	err = hinic3_wq_create(nic_io->hwdev, &sq->wq, sq_depth,
 			       (u16)BIT(HINIC3_SQ_WQEBB_SHIFT));
-	if (err) {
+	if (err != 0) {
 		sdk_err(nic_io->dev_hdl, "Failed to create tx queue(%u) wq\n",
 			q_id);
 		return err;
@@ -291,13 +292,22 @@ static int hinic3_create_rq(struct hinic3_nic_io *nic_io, struct hinic3_io_queue
 {
 	int err;
 
-	rq->wqe_type = (u8)(hinic3_get_rq_wqe_type(nic_io->hwdev));
+	/* rq_wqe_type Only support type 1-16Bytes, 2-32Bytes */
+	if (rq_wqe_type != HINIC3_NORMAL_RQ_WQE &&
+	    rq_wqe_type != HINIC3_EXTEND_RQ_WQE) {
+		sdk_warn(nic_io->dev_hdl, "Module Parameter rq_wqe_type value %d is out of range: [%d, %d].",
+			 rq_wqe_type, HINIC3_NORMAL_RQ_WQE,
+			 HINIC3_EXTEND_RQ_WQE);
+		rq_wqe_type = HINIC3_NORMAL_RQ_WQE;
+	}
+
+	rq->wqe_type = rq_wqe_type;
 	rq->q_id = q_id;
 	rq->msix_entry_idx = rq_msix_idx;
 
 	err = hinic3_wq_create(nic_io->hwdev, &rq->wq, rq_depth,
 			       (u16)BIT(HINIC3_RQ_WQEBB_SHIFT + rq->wqe_type));
-	if (err) {
+	if (err != 0) {
 		sdk_err(nic_io->dev_hdl, "Failed to create rx queue(%u) wq\n",
 			q_id);
 		return err;
@@ -318,14 +328,14 @@ static int create_qp(struct hinic3_nic_io *nic_io, struct hinic3_io_queue *sq,
 	int err;
 
 	err = hinic3_create_sq(nic_io, sq, q_id, sq_depth, qp_msix_idx);
-	if (err) {
+	if (err != 0) {
 		nic_err(nic_io->dev_hdl, "Failed to create sq, qid: %u\n",
 			q_id);
 		return err;
 	}
 
 	err = hinic3_create_rq(nic_io, rq, q_id, rq_depth, qp_msix_idx);
-	if (err) {
+	if (err != 0) {
 		nic_err(nic_io->dev_hdl, "Failed to create rq, qid: %u\n",
 			q_id);
 		goto create_rq_err;
@@ -364,14 +374,14 @@ int hinic3_init_nicio_res(void *hwdev)
 	nic_io->max_qps = hinic3_func_max_qnum(hwdev);
 
 	err = hinic3_alloc_db_addr(hwdev, &db_base, NULL);
-	if (err) {
+	if (err != 0) {
 		nic_err(nic_io->dev_hdl, "Failed to allocate doorbell for sqs\n");
 		goto alloc_sq_db_fail;
 	}
 	nic_io->sqs_db_addr = (u8 *)db_base;
 
 	err = hinic3_alloc_db_addr(hwdev, &db_base, NULL);
-	if (err) {
+	if (err != 0) {
 		nic_err(nic_io->dev_hdl, "Failed to allocate doorbell for rqs\n");
 		goto alloc_rq_db_fail;
 	}
@@ -474,7 +484,7 @@ int hinic3_alloc_qps(void *hwdev, struct irq_info *qps_msix_arry,
 	for (q_id = 0; q_id < num_qps; q_id++) {
 		err = create_qp(nic_io, &sqs[q_id], &rqs[q_id], q_id, qp_params->sq_depth,
 				qp_params->rq_depth, qps_msix_arry[q_id].msix_entry_idx);
-		if (err) {
+		if (err != 0) {
 			nic_err(nic_io->dev_hdl, "Failed to allocate qp %u, err: %d\n", q_id, err);
 			goto create_qp_err;
 		}
@@ -599,14 +609,14 @@ int hinic3_create_qps(void *hwdev, u16 num_qp, u32 sq_depth, u32 rq_depth,
 	}
 
 	err = hinic3_init_nicio_res(hwdev);
-	if (err)
+	if (err != 0)
 		return err;
 
 	qp_params.num_qps = num_qp;
 	qp_params.sq_depth = sq_depth;
 	qp_params.rq_depth = rq_depth;
 	err = hinic3_alloc_qps(hwdev, qps_msix_arry, &qp_params);
-	if (err) {
+	if (err != 0) {
 		hinic3_deinit_nicio_res(hwdev);
 		nic_err(nic_io->dev_hdl,
 			"Failed to allocate qps, err: %d\n", err);
@@ -906,11 +916,11 @@ static int init_qp_ctxts(struct hinic3_nic_io *nic_io)
 	int err;
 
 	err = init_sq_ctxts(nic_io);
-	if (err)
+	if (err != 0)
 		return err;
 
 	err = init_rq_ctxts(nic_io);
-	if (err)
+	if (err != 0)
 		return err;
 
 	return 0;
@@ -1026,14 +1036,14 @@ int hinic3_init_qp_ctxts(void *hwdev)
 		return -EFAULT;
 
 	err = init_qp_ctxts(nic_io);
-	if (err) {
+	if (err != 0) {
 		nic_err(nic_io->dev_hdl, "Failed to init QP ctxts\n");
 		return err;
 	}
 
 	/* clean LRO/TSO context space */
 	err = clean_qp_offload_ctxt(nic_io);
-	if (err) {
+	if (err != 0) {
 		nic_err(nic_io->dev_hdl, "Failed to clean qp offload ctxts\n");
 		return err;
 	}
@@ -1042,13 +1052,13 @@ int hinic3_init_qp_ctxts(void *hwdev)
 
 	err = hinic3_set_root_ctxt(hwdev, rq_depth, nic_io->sq[0].wq.q_depth,
 				   nic_io->rx_buff_len, HINIC3_CHANNEL_NIC);
-	if (err) {
+	if (err != 0) {
 		nic_err(nic_io->dev_hdl, "Failed to set root context\n");
 		return err;
 	}
 
 	err = init_sq_ci_ctxts(nic_io);
-	if (err)
+	if (err != 0)
 		goto clean_root_ctxt;
 
 	if (HINIC3_SUPPORT_RX_COMPACT_CQE(hwdev)) {

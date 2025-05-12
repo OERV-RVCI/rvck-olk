@@ -101,7 +101,8 @@ static bool check_image_device_type(struct hinic3_hwdev *hwdev, u32 device_type)
 
 static void encapsulate_update_cmd(struct hinic3_cmd_update_firmware *msg,
 				   struct firmware_section *section_info,
-				   int *remain_len, u32 *send_len, u32 *send_pos)
+				   const int *remain_len, u32 *send_len,
+				   u32 *send_pos)
 {
 	memset(msg->data, 0, sizeof(msg->data));
 	msg->ctl_info.sf = (*remain_len == section_info->section_len) ? true : false;

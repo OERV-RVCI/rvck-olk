@@ -338,7 +338,8 @@ struct comm_cmd_get_fw_version {
 	struct mgmt_msg_head head;
 
 	u16 fw_type; /**< firmware type  @see enum hinic3_fw_ver_type */
-	u16 rsvd1;
+	u16 fw_dfx_vld : 1; /**< 0: release, 1: debug */
+	u16 rsvd1 : 15;
 	u8 ver[HINIC3_FW_VERSION_LEN]; /**< firmware version */
 	u8 time[HINIC3_FW_COMPILE_TIME_LEN]; /**< firmware compile time */
 };
@@ -430,6 +431,22 @@ struct comm_cmd_bdf_info {
 	u8 rsvd2[5];
 };
 
+struct mpu_pcie_pf_info {
+	u32 device_id;  /**< device id */
+	u32 vendor_id;  /**< vendor id */
+};
+
+struct mpu_pcie_device_info {
+	u8 status;
+	u8 version;
+	u8 rep_aeq_num;
+	u8 rsvd[5];
+
+	struct mpu_pcie_pf_info pf_info[32];
+	u32 bus_id; /**< bus id */
+	u32 pf_num; /**< pf index */
+};
+
 #define TABLE_INDEX_MAX 129
 struct sml_table_id_info {
 	u8 node_id;
@@ -444,6 +461,13 @@ struct comm_cmd_get_sml_tbl_data {
 struct comm_cmd_sdi_info {
 	struct mgmt_msg_head head;
 	u32 cfg_sdi_mode; /**< host mode, 0:normal 1:virtual machine 2:bare metal */
+};
+
+struct comm_cmd_root_ctx_load_req {
+	struct comm_info_head head;
+	u32 func_id;	/**< function id */
+	u32 smf_id;	/**< smf id */
+	u32 queue_id;	/**< queue id */
 };
 
 #define HINIC_OVS_BOND_DEFAULT_ID 1
@@ -685,12 +709,39 @@ struct comm_read_ucode_sm_resp {
 	u64 val2;
 };
 
+#define PER_REQ_MAX_DATA_LEN 0x600
+
+struct comm_read_ucode_sm_per_req {
+	struct mgmt_msg_head msg_head;
+
+	u32 tbl_type;
+	u32 count_id;
+};
+
+struct comm_read_ucode_sm_per_resp {
+	struct mgmt_msg_head msg_head;
+
+	u8 data[PER_REQ_MAX_DATA_LEN];
+};
+
+struct ucode_sm_counter_get_info {
+	u32 width_type;
+	u32 tbl_type;
+	unsigned int base_count;
+	unsigned int count_num;
+};
+
 enum log_type {
 	MPU_LOG_CLEAR = 0,
 	SMU_LOG_CLEAR = 1,
 	NPU_LOG_CLEAR = 2,
 	SPU_LOG_CLEAR = 3,
 	ALL_LOG_CLEAR = 4,
+};
+
+struct comm_cmd_clear_log {
+	struct comm_info_head head;
+	u32 type;	/**< log type @see enum log_type */
 };
 
 #define ABLESWITCH 1
@@ -715,6 +766,14 @@ struct comm_cmd_check_if_switch_workmode {
 	u8 rsvd1;
 	u16 rsvd2[3];
 	u32 rsvd3[3];
+};
+
+struct comm_cmd_switch_workmode {
+	struct mgmt_msg_head head;
+	u8 operation;
+	u8 work_mode;
+	u16 rsvd1[3];
+	u32 rsvd2[3];
 };
 
 #define MIG_NOR_VM_ONE_MAX_SGE_MEM (64 * 8)
@@ -754,6 +813,15 @@ struct cmd_get_bdf_info_s {
 #define CPI_TCAM_DBG_CMD_SET_TIME_INTERVAL_VALID 0x2
 #define CPI_TCAM_DBG_CMD_TYPE_SET 0
 #define CPI_TCAM_DBG_CMD_TYPE_GET 1
+
+struct comm_cmd_cpi_tcam_dbg {
+	struct comm_info_head head;
+	u8 type;
+	u8 set_bitmap;
+	u8 enable;
+	u8 rsvd;
+	u32 time_interval;
+};
 
 #define UDIE_ID_DATA_LEN 8
 #define TDIE_ID_DATA_LEN 18
@@ -806,6 +874,12 @@ struct cmd_query_fw {
 	struct comm_info_head head;
 	u32 offset;	/**< offset addr */
 	u32 len;	/**< length */
+};
+
+struct comm_cmd_get_cfg_info_t {
+	struct comm_info_head head;
+	u8 rsvd[8];
+	u8 info[64];	/**< flash config info */
 };
 
 struct nic_cmd_get_uart_log_info {
@@ -969,6 +1043,7 @@ enum comm_virtio_dev_type {
 	COMM_VIRTIO_NET_TYPE = 0,
 	COMM_VIRTIO_BLK_TYPE = 1,
 	COMM_VIRTIO_SCSI_TYPE = 4,
+	COMM_VIRTIO_FS_TYPE = 5,
 };
 
 struct comm_virtio_dev_cmd {
@@ -1030,6 +1105,13 @@ struct cmd_patch_sram_optimize {
 	u32 data[4];				/**< reserved */
 };
 
+struct comm_cmd_con_sel_sta {
+	struct comm_info_head head;
+	u8 valid;
+	u8 host_id; /**< host id, range[0,3] */
+	u8 rsvd[2];
+};
+
 /* ncsi counter */
 struct nsci_counter_in_info_s {
 	struct comm_info_head head;
@@ -1082,7 +1164,9 @@ struct comm_cmd_ncsi_settings {
 	u8 lldp_over_ncsi_enable;
 	u8 lldp_over_mctp_enable;
 	u32 magicwd;
-	u8 rsvd[8];
+	u8 lldp_tx_enable;
+	u8 rsvd[3];
+	u32 crc;
 	struct tag_ncsi_chan_info ncsi_chan_info;
 };
 

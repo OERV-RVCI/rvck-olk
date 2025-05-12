@@ -117,3 +117,4 @@ u64 ossl_get_real_time(void)
 	tv_msec = (u64)tv.tv_sec * MSEC_PER_SEC + (u64)tv.tv_usec / USEC_PER_MSEC;
 	return tv_msec;
 }
+

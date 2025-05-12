@@ -8,7 +8,7 @@
 
 #include "mpu_cmd_base_defs.h"
 
-#define HINIC3_DRV_VERSION "15.17.1.2"
+#define HINIC3_DRV_VERSION "17.7.8.1"
 #define HINIC3_DRV_DESC "Intelligent Network Interface Card Driver"
 #define HIUDK_DRV_DESC "Intelligent Network Unified Driver"
 
@@ -45,6 +45,7 @@ enum hinic3_service_type {
 	SERVICE_T_CUSTOM,
 	SERVICE_T_VROCE,
 	SERVICE_T_CRYPT,
+	SERVICE_T_VSOCK,
 	SERVICE_T_BIFUR,
 	SERVICE_T_MAX,
 
@@ -64,6 +65,9 @@ struct nic_service_cap {
 	u16 max_sqs;
 	u16 max_rqs;
 	u16 default_num_queues;
+	u16 outband_vlan_cfg_en;
+	u8 lro_enable;
+	u8 rsvd1[3];
 };
 
 struct ppa_service_cap {
@@ -910,6 +914,13 @@ int hinic3_get_fw_version(void *hwdev, struct hinic3_fw_version *fw_ver,
 			  u16 channel);
 
 /* *
+ * @brief hinic3_get_bond_create_mode - get bond create mode
+ * @param hwdev: device pointer to hwdev
+ * @retval global function id
+ */
+u8 hinic3_get_bond_create_mode(void *udkdev);
+
+/* *
  * @brief hinic3_global_func_id - get global function id
  * @param hwdev: device pointer to hwdev
  * @retval global function id
@@ -1262,5 +1273,8 @@ int hinic3_mbox_to_host_sync(void *hwdev, enum hinic3_mod_type mod,
 			     void *buf_out, u16 *out_size, u32 timeout, u16 channel);
 
 int hinic3_get_func_vroce_enable(void *hwdev, u16 glb_func_idx, u8 *en);
+
+void hinic3_module_get(void *hwdev, enum hinic3_service_type type);
+void hinic3_module_put(void *hwdev, enum hinic3_service_type type);
 
 #endif
