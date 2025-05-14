@@ -106,9 +106,9 @@ struct trace_iterator {
 	unsigned int		fmt_size;
 
 	/* Set when the file is closed to prevent new waiters */
-	bool			closed;
+	KABI_FILL_HOLE(bool closed)
 
-	atomic_t		wait_index;
+	KABI_REPLACE(long wait_index, atomic_t wait_index)
 
 	/* trace_seq for __print_flags() and __print_symbolic() etc. */
 	struct trace_seq	tmp_seq;
