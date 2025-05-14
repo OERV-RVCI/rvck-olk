@@ -708,6 +708,21 @@ void kvm_irqfd_exit(void)
 }
 #endif
 
+#define IOEVENTFD_SHADOW_FLAG_ADD 0
+#define IOEVENTFD_SHADOW_FLAG_DEL 1
+
+/**
+ * eventfd_shadow
+ * Save the eventfd pointer and operation.
+ * To protect Kabi, these members are placed here
+ */
+struct eventfd_shadow {
+	struct list_head node;
+	struct _ioeventfd *eventfd;
+	/* Indicate the operations required for this eventfd */
+	u8 flag;
+};
+
 /*
  * --------------------------------------------------------------------
  * ioeventfd: translate a PIO/MMIO memory write to an eventfd signal.
@@ -851,6 +866,8 @@ static int kvm_assign_ioeventfd_idx(struct kvm *kvm,
 {
 
 	struct eventfd_ctx *eventfd;
+	struct eventfd_shadow *es;
+	struct kvm_shadow *ks;
 	struct _ioeventfd *p;
 	int ret;
 
@@ -878,21 +895,39 @@ static int kvm_assign_ioeventfd_idx(struct kvm *kvm,
 
 	mutex_lock(&kvm->slots_lock);
 
-	/* Verify that there isn't a match already */
-	if (ioeventfd_check_collision(kvm, p)) {
-		ret = -EEXIST;
-		goto unlock_fail;
-	}
-
 	kvm_iodevice_init(&p->dev, &ioeventfd_ops);
 
-	ret = kvm_io_bus_register_dev(kvm, bus_idx, p->addr, p->length,
-				      &p->dev);
-	if (ret < 0)
-		goto unlock_fail;
+	/**
+	 * If in the eventfd batch process,
+	 * record the eventfd and operation, and process it later
+	 */
+	ks = kvm_find_shadow(kvm);
+	if (ks) {
+		es = kzalloc(sizeof(*es), GFP_KERNEL_ACCOUNT);
+		if (!es) {
+			ret = -ENOMEM;
+			goto unlock_fail;
+		}
+		es->flag = IOEVENTFD_SHADOW_FLAG_ADD;
+		es->eventfd = p;
+		INIT_LIST_HEAD(&es->node);
+		list_add_tail(&es->node, &ks->ioeventfds_shadow);
+		ret = 0;
+	} else {
+		/* Verify that there isn't a match already */
+		if (ioeventfd_check_collision(kvm, p)) {
+			ret = -EEXIST;
+			goto unlock_fail;
+		}
 
-	kvm_get_bus(kvm, bus_idx)->ioeventfd_count++;
-	list_add_tail(&p->list, &kvm->ioeventfds);
+		ret = kvm_io_bus_register_dev(kvm, bus_idx, p->addr, p->length,
+									  &p->dev);
+		if (ret < 0)
+			goto unlock_fail;
+
+		kvm_get_bus(kvm, bus_idx)->ioeventfd_count++;
+		list_add_tail(&p->list, &kvm->ioeventfds);
+	}
 
 	mutex_unlock(&kvm->slots_lock);
 
@@ -914,7 +949,9 @@ kvm_deassign_ioeventfd_idx(struct kvm *kvm, enum kvm_bus bus_idx,
 {
 	struct _ioeventfd        *p;
 	struct eventfd_ctx       *eventfd;
-	struct kvm_io_bus	 *bus;
+	struct kvm_io_bus        *bus;
+	struct kvm_shadow        *ks;
+	struct eventfd_shadow    *es;
 	int                       ret = -ENOENT;
 	bool                      wildcard;
 
@@ -928,20 +965,39 @@ kvm_deassign_ioeventfd_idx(struct kvm *kvm, enum kvm_bus bus_idx,
 
 	list_for_each_entry(p, &kvm->ioeventfds, list) {
 		if (p->bus_idx != bus_idx ||
-		    p->eventfd != eventfd  ||
-		    p->addr != args->addr  ||
-		    p->length != args->len ||
-		    p->wildcard != wildcard)
+			p->eventfd != eventfd  ||
+			p->addr != args->addr  ||
+			p->length != args->len ||
+			p->wildcard != wildcard)
 			continue;
 
 		if (!p->wildcard && p->datamatch != args->datamatch)
 			continue;
 
-		kvm_io_bus_unregister_dev(kvm, bus_idx, &p->dev);
-		bus = kvm_get_bus(kvm, bus_idx);
-		if (bus)
-			bus->ioeventfd_count--;
-		ret = 0;
+		/**
+		 * If in the eventfd batch process,
+		 * record the eventfd and operation, and process it later
+		 */
+		ks = kvm_find_shadow(kvm);
+		if (ks) {
+			es = kzalloc(sizeof(*es), GFP_KERNEL_ACCOUNT);
+			if (!es) {
+				ret = -ENOMEM;
+				break;
+			}
+			list_del_init(&p->list);
+			es->flag = IOEVENTFD_SHADOW_FLAG_DEL;
+			es->eventfd = p;
+			INIT_LIST_HEAD(&es->node);
+			list_add_tail(&es->node, &ks->ioeventfds_shadow);
+			ret = 0;
+		} else {
+			kvm_io_bus_unregister_dev(kvm, bus_idx, &p->dev);
+			bus = kvm_get_bus(kvm, bus_idx);
+			if (bus)
+				bus->ioeventfd_count--;
+			ret = 0;
+		}
 		break;
 	}
 
@@ -1015,9 +1071,181 @@ fail:
 	return ret;
 }
 
+static int kvm_ioeventfd_batch_begin(struct kvm *kvm)
+{
+	struct kvm_shadow *ks;
+	int ret = 0;
+
+	mutex_lock(&kvm->slots_lock);
+
+	if (is_kvm_in_shadow(kvm)) {
+		ret = -EBUSY;
+		goto out;
+	}
+
+	ks = kzalloc(sizeof(*ks), GFP_KERNEL_ACCOUNT);
+	if (!ks) {
+		ret = -ENOMEM;
+		goto out;
+	}
+	INIT_LIST_HEAD(&ks->list);
+	INIT_LIST_HEAD(&ks->ioeventfds_shadow);
+	ks->kvm = kvm;
+	list_add_tail(&ks->list, &kvm_shadow_list);
+
+out:
+	mutex_unlock(&kvm->slots_lock);
+	return ret;
+}
+
+/**
+ * If an exception occurs,
+ * we may need to discard all temporarily stored eventfd.
+ * At this point, attention should be paid to the release of eventfd memory,
+ * the reference count of fd,
+ * and the maintenance of each list.
+ */
+void kvm_release_ioeventfds_shadow(struct kvm *kvm)
+{
+	struct kvm_shadow *ks;
+	struct eventfd_shadow *es, *tmp;
+	struct _ioeventfd *p;
+
+	ks = kvm_find_shadow(kvm);
+	if (!ks)
+		return;
+
+	list_for_each_entry_safe(es, tmp, &ks->ioeventfds_shadow, node) {
+		p = es->eventfd;
+		list_del_init(&es->node);
+		if (es->flag == IOEVENTFD_SHADOW_FLAG_ADD)
+			ioeventfd_release(p);
+		else
+			list_add_tail(&p->list, &kvm->ioeventfds);
+
+		kfree(es);
+	}
+}
+
+/**
+ * If the temporarily stored eventfd cannot be successfully updated
+ * to the buses according to the operation, then discard the failed eventfd.
+ * Continue processing the rest and ultimately return a failure.
+ */
+static int kvm_handle_ioeventfds_shadow(struct kvm *kvm)
+{
+	struct kvm_shadow *ks;
+	struct eventfd_shadow *es, *tmp;
+	struct _ioeventfd *p;
+	struct kvm_io_bus *bus;
+	int result = 0;
+	int ret = 0;
+
+	ks = kvm_find_shadow(kvm);
+	if (!ks)
+		return 0;
+
+	list_for_each_entry_safe(es, tmp, &ks->ioeventfds_shadow, node) {
+		list_del_init(&es->node);
+		p = es->eventfd;
+		if (es->flag == IOEVENTFD_SHADOW_FLAG_ADD) {
+			ret = kvm_io_bus_register_dev(kvm, p->bus_idx, p->addr,
+										  p->length,
+										  &p->dev);
+			if (ret < 0) {
+				ioeventfd_release(p);
+				result = ret;
+			} else {
+				kvm_get_bus(kvm, p->bus_idx)->ioeventfd_count++;
+				list_add_tail(&p->list, &kvm->ioeventfds);
+			}
+		} else {
+			kvm_io_bus_unregister_dev(kvm, p->bus_idx, &p->dev);
+			bus = kvm_get_bus(kvm, p->bus_idx);
+			if (bus)
+				bus->ioeventfd_count--;
+			ioeventfd_release(p);
+		}
+		kfree(es);
+
+	}
+	return result;
+}
+
+/**
+ * Copy the current buses,
+ * and then update the modifications of eventfd in batches to buses_shadow
+ * based on the temporarily stored information.
+ * Finally, update the buses pointer through a single SRCU synchronization.
+ * The purpose of overall batch processing is to optimize the overall
+ * time consumption by reducing the number of SRCU synchronizations.
+ */
+static int kvm_ioeventfd_batch_end(struct kvm *kvm)
+{
+	struct kvm_io_bus *new_bus, *bus;
+	struct kvm_io_bus *old[KVM_NR_BUSES];
+	struct kvm_shadow *ks;
+	size_t len;
+	int ret, i;
+
+	mutex_lock(&kvm->slots_lock);
+
+	ks = kvm_find_shadow(kvm);
+	if (!ks) {
+		ret = -EINVAL;
+		goto out;
+	}
+
+	ret = -ENOMEM;
+	for (i = 0; i < KVM_NR_BUSES; i++) {
+		bus = kvm_get_real_bus(kvm, i);
+		new_bus = kmalloc(struct_size(bus, range, bus->dev_count), GFP_KERNEL_ACCOUNT);
+		if (!new_bus)
+			goto fail;
+
+		len = sizeof(*bus);
+		len += bus->dev_count * sizeof(struct kvm_io_range);
+		memcpy(new_bus, bus, len);
+		ks->buses_shadow[i] = new_bus;
+	}
+
+	ret = kvm_handle_ioeventfds_shadow(kvm);
+
+	for (i = 0; i < KVM_NR_BUSES; i++) {
+		old[i] = kvm_get_real_bus(kvm, i);
+		rcu_assign_pointer(kvm->buses[i], ks->buses_shadow[i]);
+	}
+
+	synchronize_srcu_expedited(&kvm->srcu);
+
+	for (i = 0; i < KVM_NR_BUSES; i++) {
+		ks->buses_shadow[i] = NULL;
+		kfree(old[i]);
+	}
+
+	goto out;
+
+fail:
+	kvm_release_ioeventfds_shadow(kvm);
+	for (i = 0; i < KVM_NR_BUSES; i++) {
+		kfree(ks->buses_shadow[i]);
+		ks->buses_shadow[i] = NULL;
+	}
+out:
+	if (ks)
+		list_del_init(&ks->list);
+
+	kfree(ks);
+	mutex_unlock(&kvm->slots_lock);
+	return ret;
+}
 int
 kvm_ioeventfd(struct kvm *kvm, struct kvm_ioeventfd *args)
 {
+	if (args->flags & KVM_IOEVENTFD_FLAG_BATCH_BEGIN)
+		return kvm_ioeventfd_batch_begin(kvm);
+	if (args->flags & KVM_IOEVENTFD_FLAG_BATCH_END)
+		return kvm_ioeventfd_batch_end(kvm);
 	if (args->flags & KVM_IOEVENTFD_FLAG_DEASSIGN)
 		return kvm_deassign_ioeventfd(kvm, args);
 

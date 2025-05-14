@@ -735,6 +735,24 @@ struct kvm_memslots {
 	int node_idx;
 };
 
+/**
+ * kvm_shadow
+ * Used to manage some members that should have been added in struct kvm,
+ * but due to the protection of kabi,
+ * they are placed in kvm_shadow
+ */
+struct kvm_shadow {
+	struct list_head list;
+	struct kvm *kvm;
+	/* Used for temporarily storing eventfd */
+	struct list_head ioeventfds_shadow;
+	/* Used for temporarily storing modifications to the bus */
+	struct kvm_io_bus *buses_shadow[KVM_NR_BUSES];
+};
+
+/* Global linked list, used to associate kvm with kvm_shadow */
+extern struct list_head kvm_shadow_list;
+
 struct kvm {
 #ifdef KVM_HAVE_MMU_RWLOCK
 	rwlock_t mmu_lock;
@@ -947,11 +965,33 @@ static inline bool kvm_dirty_log_manual_protect_and_init_set(struct kvm *kvm)
 	return !!(kvm->manual_dirty_log_protect & KVM_DIRTY_LOG_INITIALLY_SET);
 }
 
-static inline struct kvm_io_bus *kvm_get_bus(struct kvm *kvm, enum kvm_bus idx)
+static struct kvm_shadow *kvm_find_shadow(struct kvm *kvm)
+{
+	struct kvm_shadow *ks;
+
+	list_for_each_entry(ks, &kvm_shadow_list, list) {
+		if (ks->kvm == kvm)
+			return ks;
+	}
+	return NULL;
+}
+
+static inline bool is_kvm_in_shadow(struct kvm *kvm)
+{
+	return kvm_find_shadow(kvm) != NULL;
+}
+
+static inline struct kvm_io_bus *kvm_get_real_bus(struct kvm *kvm, enum kvm_bus idx)
 {
 	return srcu_dereference_check(kvm->buses[idx], &kvm->srcu,
 				      lockdep_is_held(&kvm->slots_lock) ||
 				      !refcount_read(&kvm->users_count));
+}
+
+static inline struct kvm_io_bus *kvm_get_bus(struct kvm *kvm, enum kvm_bus idx)
+{
+	return is_kvm_in_shadow(kvm) ?
+		kvm_find_shadow(kvm)->buses_shadow[idx] : kvm_get_real_bus(kvm, idx);
 }
 
 static inline struct kvm_vcpu *kvm_get_vcpu(struct kvm *kvm, int i)
@@ -2124,6 +2164,7 @@ int kvm_send_userspace_msi(struct kvm *kvm, struct kvm_msi *msi);
 
 #ifdef CONFIG_HAVE_KVM_EVENTFD
 
+void kvm_release_ioeventfds_shadow(struct kvm *kvm);
 void kvm_eventfd_init(struct kvm *kvm);
 int kvm_ioeventfd(struct kvm *kvm, struct kvm_ioeventfd *args);
 
