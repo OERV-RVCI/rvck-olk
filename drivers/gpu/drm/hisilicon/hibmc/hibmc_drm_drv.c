@@ -27,11 +27,11 @@
 #include "hibmc_drm_drv.h"
 #include "hibmc_drm_regs.h"
 
-#include "dp/dp_reg.h"
+#define HIBMC_DP_HOST_SERDES_CTRL		0x1f001c
+#define HIBMC_DP_HOST_SERDES_CTRL_VAL		0x8a00
+#define HIBMC_DP_HOST_SERDES_CTRL_MASK		0x7ffff
 
 DEFINE_DRM_GEM_FOPS(hibmc_fops);
-
-static const char *g_irqs_names_map[HIBMC_MAX_VECTORS] = { "hibmc-vblank", "hibmc-hpd" };
 
 static irqreturn_t hibmc_interrupt(int irq, void *arg)
 {
@@ -45,22 +45,6 @@ static irqreturn_t hibmc_interrupt(int irq, void *arg)
 		writel(HIBMC_RAW_INTERRUPT_VBLANK(1),
 		       priv->mmio + HIBMC_RAW_INTERRUPT);
 		drm_handle_vblank(dev, 0);
-	}
-
-	return IRQ_HANDLED;
-}
-
-static irqreturn_t hibmc_dp_interrupt(int irq, void *arg)
-{
-	struct drm_device *dev = (struct drm_device *)arg;
-	struct hibmc_drm_private *priv = to_hibmc_drm_private(dev);
-	u32 status;
-
-	status = readl(priv->mmio + HIBMC_DP_INTSTAT);
-	if (status) {
-		priv->dp.irq_status = status;
-		writel(status, priv->mmio + HIBMC_DP_INTCLR);
-		return IRQ_WAKE_THREAD;
 	}
 
 	return IRQ_HANDLED;
@@ -136,12 +120,9 @@ static int hibmc_kms_init(struct hibmc_drm_private *priv)
 		return ret;
 	}
 
-	/*
-	 * If the serdes reg is readable and is not equal to 0,
-	 * DP block exists and initializes it.
-	 */
-	ret = readl(priv->mmio + HIBMC_DP_HOST_SERDES_CTRL);
-	if (ret) {
+	/* if DP existed, init DP */
+	if ((readl(priv->mmio + HIBMC_DP_HOST_SERDES_CTRL) &
+	     HIBMC_DP_HOST_SERDES_CTRL_MASK) == HIBMC_DP_HOST_SERDES_CTRL_VAL) {
 		ret = hibmc_dp_init(priv);
 		if (ret)
 			drm_err(dev, "failed to init dp: %d\n", ret);
@@ -268,44 +249,15 @@ static int hibmc_hw_init(struct hibmc_drm_private *priv)
 	return 0;
 }
 
-static void hibmc_unload(struct drm_device *dev)
-{
-	drm_atomic_helper_shutdown(dev);
-}
-
-static int hibmc_msi_init(struct drm_device *dev)
+static int hibmc_unload(struct drm_device *dev)
 {
 	struct pci_dev *pdev = to_pci_dev(dev->dev);
-	int valid_irq_num;
-	int irq;
-	int ret;
 
-	ret = pci_alloc_irq_vectors(pdev, HIBMC_MIN_VECTORS,
-				    HIBMC_MAX_VECTORS, PCI_IRQ_MSI);
-	if (ret < 0) {
-		drm_err(dev, "enabling MSI failed: %d\n", ret);
-		return ret;
-	}
+	drm_atomic_helper_shutdown(dev);
 
-	valid_irq_num = ret;
+	free_irq(pdev->irq, dev);
 
-	for (int i = 0; i < valid_irq_num; i++) {
-		irq = pci_irq_vector(pdev, i);
-
-		if (i)
-			/* PCI devices require shared interrupts. */
-			ret = devm_request_threaded_irq(&pdev->dev, irq,
-							hibmc_dp_interrupt,
-							hibmc_dp_hpd_isr,
-							IRQF_SHARED, g_irqs_names_map[i], dev);
-		else
-			ret = devm_request_irq(&pdev->dev, irq, hibmc_interrupt,
-					       IRQF_SHARED, g_irqs_names_map[i], dev);
-		if (ret) {
-			drm_err(dev, "install irq failed: %d\n", ret);
-			return ret;
-		}
-	}
+	pci_disable_msi(to_pci_dev(dev->dev));
 
 	return 0;
 }
@@ -337,10 +289,15 @@ static int hibmc_load(struct drm_device *dev)
 		goto err;
 	}
 
-	ret = hibmc_msi_init(dev);
+	ret = pci_enable_msi(pdev);
 	if (ret) {
-		drm_err(dev, "hibmc msi init failed, ret:%d\n", ret);
-		goto err;
+		drm_warn(dev, "enabling MSI failed: %d\n", ret);
+	} else {
+		/* PCI devices require shared interrupts. */
+		ret = request_irq(pdev->irq, hibmc_interrupt, IRQF_SHARED,
+				  dev->driver->name, dev);
+		if (ret)
+			drm_warn(dev, "install irq failed: %d\n", ret);
 	}
 
 	/* reset all the states of crtc/plane/encoder/connector */
@@ -414,11 +371,6 @@ static void hibmc_pci_remove(struct pci_dev *pdev)
 	hibmc_unload(dev);
 }
 
-static void hibmc_pci_shutdown(struct pci_dev *pdev)
-{
-	hibmc_pci_remove(pdev);
-}
-
 static const struct pci_device_id hibmc_pci_table[] = {
 	{ PCI_VDEVICE(HUAWEI, 0x1711) },
 	{0,}
@@ -429,7 +381,6 @@ static struct pci_driver hibmc_pci_driver = {
 	.id_table =	hibmc_pci_table,
 	.probe =	hibmc_pci_probe,
 	.remove =	hibmc_pci_remove,
-	.shutdown =	hibmc_pci_shutdown,
 	.driver.pm =    &hibmc_pm_ops,
 };
 
