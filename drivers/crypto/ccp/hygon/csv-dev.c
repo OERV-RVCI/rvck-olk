@@ -29,6 +29,7 @@
  *    in AMD SEV.
  */
 u32 hygon_csv_build;
+EXPORT_SYMBOL_GPL(hygon_csv_build);
 
 int csv_comm_mode = CSV_COMM_MAILBOX_ON;
 

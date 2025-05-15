@@ -164,10 +164,10 @@ static int sev_asid_new(struct kvm_sev_info *sev)
 	int ret;
 
 	/*
-	 * No matter what the min_sev_asid is, all asids in range
+	 * When the firmware is with build ID >= 1810, all asids in range
 	 * [1, max_sev_asid] can be used for CSV2 guest on Hygon CPUs.
 	 */
-	if (is_x86_vendor_hygon())
+	if (is_x86_vendor_hygon() && hygon_csv_build >= 1810)
 		max_asid = max_sev_asid;
 
 	if (min_asid > max_asid)
@@ -2402,7 +2402,7 @@ void __init sev_hardware_setup(void)
 	if (!boot_cpu_has(X86_FEATURE_SEV_ES))
 		goto out;
 
-	if (is_x86_vendor_hygon()) {
+	if (is_x86_vendor_hygon() && hygon_csv_build >= 1810) {
 		/*
 		 * Ths ASIDs from 1 to max_sev_asid are available for hygon
 		 * CSV2 guest.
@@ -2430,8 +2430,10 @@ out:
 		pr_info("%s %s (ASIDs %u - %u)\n",
 			is_x86_vendor_hygon() ? "CSV2" : "SEV-ES",
 			sev_es_supported ? "enabled" : "disabled",
-			is_x86_vendor_hygon() ? 1 : (min_sev_asid > 1 ? 1 : 0),
-			is_x86_vendor_hygon() ? max_sev_asid : min_sev_asid - 1);
+			(is_x86_vendor_hygon() && hygon_csv_build >= 1810) ?
+			1 : (min_sev_asid > 1 ? 1 : 0),
+			(is_x86_vendor_hygon() && hygon_csv_build >= 1810) ?
+			max_sev_asid : min_sev_asid - 1);
 
 	sev_enabled = sev_supported;
 	sev_es_enabled = sev_es_supported;
