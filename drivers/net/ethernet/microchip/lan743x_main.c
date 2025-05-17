@@ -1513,8 +1513,7 @@ static int lan743x_phy_open(struct lan743x_adapter *adapter)
 		if (!phydev)	{
 			if ((adapter->csr.id_rev & ID_REV_ID_MASK_) ==
 					ID_REV_ID_LAN7431_) {
-				phydev = fixed_phy_register(PHY_POLL,
-							    &fphy_status, NULL);
+				phydev = fixed_phy_register(&fphy_status, NULL);
 				if (IS_ERR(phydev)) {
 					netdev_err(netdev, "No PHY/fixed_PHY found\n");
 					return PTR_ERR(phydev);
