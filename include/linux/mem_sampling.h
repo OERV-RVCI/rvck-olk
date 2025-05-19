@@ -97,5 +97,8 @@ static inline bool spe_user_is_mem_sampling(void)
 {
 	return __this_cpu_read(arm_spe_user) == SPE_USER_MEM_SAMPLING;
 }
+void mem_sampling_sched_in(struct task_struct *prev, struct task_struct *curr);
+#else
+static inline void mem_sampling_sched_in(struct task_struct *prev, struct task_struct *curr) { }
 #endif /* CONFIG_MEM_SAMPLING */
 #endif	/* __MEM_SAMPLING_H */

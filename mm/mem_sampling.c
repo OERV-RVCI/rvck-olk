@@ -68,6 +68,18 @@ void mem_sampling_record_cb_unregister(mem_sampling_record_cb_type cb)
 	}
 }
 
+void mem_sampling_sched_in(struct task_struct *prev, struct task_struct *curr)
+{
+
+	if (!mem_sampling_ops.sampling_start)
+		return;
+
+	if (curr->mm)
+		mem_sampling_ops.sampling_start();
+	else
+		mem_sampling_ops.sampling_stop();
+}
+
 void mem_sampling_process(void)
 {
 	int i, nr_records;
