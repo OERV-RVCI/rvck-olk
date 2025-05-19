@@ -8,6 +8,9 @@
 #include <linux/types.h>
 #include <linux/tracepoint.h>
 #include <trace/events/mmflags.h>
+#ifdef CONFIG_MEM_SAMPLING
+#include <linux/mem_sampling.h>
+#endif
 
 TRACE_EVENT(kmem_cache_alloc,
 
@@ -409,6 +412,29 @@ TRACE_EVENT(rss_stat,
 		__print_symbolic(__entry->member, TRACE_MM_PAGES),
 		__entry->size)
 	);
+#ifdef CONFIG_ARM_SPE_MEM_SAMPLING
+TRACE_EVENT(mm_spe_record,
+	TP_PROTO(struct mem_sampling_record *record),
+
+	TP_ARGS(record),
+
+	TP_STRUCT__entry(
+		__field(u64, vaddr)
+		__field(u64, paddr)
+		__field(int, pid)
+	),
+
+	TP_fast_assign(
+		__entry->vaddr = record->virt_addr;
+		__entry->paddr = record->phys_addr;
+		__entry->pid = record->context_id;
+
+	),
+
+	TP_printk("vaddr=%llu paddr=%llu pid=%d",
+		__entry->vaddr, __entry->paddr, __entry->pid)
+);
+#endif /* CONFIG_ARM_SPE_MEM_SAMPLING */
 #endif /* _TRACE_KMEM_H */
 
 /* This part must be outside protection */

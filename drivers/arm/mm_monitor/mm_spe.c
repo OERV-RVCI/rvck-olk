@@ -12,6 +12,7 @@
 #include <linux/of_device.h>
 #include <linux/perf/arm_pmu.h>
 #include <linux/mem_sampling.h>
+#include <trace/events/kmem.h>
 
 #include "spe-decoder/arm-spe-decoder.h"
 #include "spe-decoder/arm-spe-pkt-decoder.h"
@@ -385,6 +386,7 @@ void mm_spe_record_enqueue(struct arm_spe_record *record)
 		return;
 	}
 
+	trace_mm_spe_record((struct mem_sampling_record *)record);
 	record_tail = spe_buf->record_base +
 			spe_buf->nr_records * SPE_RECORD_ENTRY_SIZE;
 	*record_tail = *(struct mem_sampling_record *)record;
