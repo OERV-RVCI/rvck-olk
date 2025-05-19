@@ -50,6 +50,10 @@
  */
 #define SPE_PMU_HW_FLAGS_CX			0x00001
 
+#if IS_ENABLED(CONFIG_ARM_SPE_MEM_SAMPLING)
+static struct arm_spe_pmu *spe_pmu_local;
+#endif
+
 static_assert((PERF_EVENT_FLAG_ARCH & SPE_PMU_HW_FLAGS_CX) == SPE_PMU_HW_FLAGS_CX);
 
 static void set_spe_event_has_cx(struct perf_event *event)
@@ -1133,6 +1137,9 @@ static int arm_spe_pmu_cpu_startup(unsigned int cpu, struct hlist_node *node)
 	if (!cpumask_test_cpu(cpu, &spe_pmu->supported_cpus))
 		return 0;
 
+#if IS_ENABLED(CONFIG_ARM_SPE_MEM_SAMPLING)
+	mm_spe_percpu_buffer_alloc(cpu);
+#endif
 	__arm_spe_pmu_setup_one(spe_pmu);
 	return 0;
 }
@@ -1145,6 +1152,9 @@ static int arm_spe_pmu_cpu_teardown(unsigned int cpu, struct hlist_node *node)
 	if (!cpumask_test_cpu(cpu, &spe_pmu->supported_cpus))
 		return 0;
 
+#if IS_ENABLED(CONFIG_ARM_SPE_MEM_SAMPLING)
+	mm_spe_percpu_buffer_free(cpu);
+#endif
 	__arm_spe_pmu_stop_one(spe_pmu);
 	return 0;
 }
@@ -1180,6 +1190,9 @@ static int arm_spe_pmu_dev_init(struct arm_spe_pmu *spe_pmu)
 
 static void arm_spe_pmu_dev_teardown(struct arm_spe_pmu *spe_pmu)
 {
+#if IS_ENABLED(CONFIG_ARM_SPE_MEM_SAMPLING)
+	mm_spe_buffer_free();
+#endif
 	cpuhp_state_remove_instance(arm_spe_pmu_online, &spe_pmu->hotplug_node);
 	free_percpu_irq(spe_pmu->irq, spe_pmu->handle);
 }
@@ -1219,6 +1232,26 @@ static const struct platform_device_id arm_spe_match[] = {
 };
 MODULE_DEVICE_TABLE(platform, arm_spe_match);
 
+#if IS_ENABLED(CONFIG_ARM_SPE_MEM_SAMPLING)
+static bool arm_spe_get_attr(void)
+{
+	struct mm_spe *p;
+
+	p = mm_spe_get_desc();
+	if (!p) {
+		pr_err("get spe pmu cap from arm spe driver failed!\n");
+		return false;
+	}
+
+	p->supported_cpus = spe_pmu_local->supported_cpus;
+	p->irq = spe_pmu_local->irq;
+	p->features = spe_pmu_local->features;
+	p->min_period = spe_pmu_local->min_period;
+
+	return true;
+}
+#endif
+
 static int arm_spe_pmu_device_probe(struct platform_device *pdev)
 {
 	int ret;
@@ -1253,6 +1286,21 @@ static int arm_spe_pmu_device_probe(struct platform_device *pdev)
 	if (ret)
 		goto out_free_handle;
 
+#if IS_ENABLED(CONFIG_ARM_SPE_MEM_SAMPLING)
+	/*
+	 * Ensure that all CPUs that support SPE can apply for the cache
+	 * area, with each CPU defaulting to 4K * 2. Failure to do so will
+	 * result in the inability to collect SPE data in kernel mode.
+	 */
+	ret = mm_spe_buffer_alloc();
+	if (ret)
+		goto out_teardown_dev;
+
+	spe_pmu_local = spe_pmu;
+	if (arm_spe_get_attr())
+		mm_spe_add_probe_status();
+
+#endif
 	ret = arm_spe_pmu_perf_init(spe_pmu);
 	if (ret)
 		goto out_teardown_dev;
