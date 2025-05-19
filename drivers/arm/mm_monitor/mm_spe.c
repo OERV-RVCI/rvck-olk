@@ -159,6 +159,12 @@ static void mm_spe_disable_and_drain_local(void)
 	/* Disable the profiling buffer */
 	write_sysreg_s(0, SYS_PMBLIMITR_EL1);
 	isb();
+
+	/* Disable boost_spe profiling */
+	if (spe->support_boost_spe) {
+		write_sysreg_s(0, SYS_OMHTPG_EL1);
+		isb();
+	}
 }
 
 static u64 mm_spe_to_pmsfcr(void)
@@ -185,6 +191,39 @@ static u64 mm_spe_to_pmsfcr(void)
 
 	if (spe->min_latency)
 		reg |= PMSFCR_EL1_FL;
+
+	return reg;
+}
+
+static u64 arm_spe_to_htpg(void)
+{
+	u64 reg = 0;
+	struct boost_spe_contol *boost_spe = &spe->boost_spe;
+
+	if (boost_spe->rmt_acc_en)
+		reg |= SYS_OMHTPG_EL1_RMEN;
+
+	if (boost_spe->boost_spe_en_cfg < 0x4)
+		reg |= boost_spe->boost_spe_en_cfg;
+
+	if (boost_spe->record_sel)
+		reg |= SYS_OMHTPG_EL1_REC_SEL;
+
+	if (boost_spe->pop_uop_sel)
+		reg |= SYS_OMHTPG_EL1_POP_UOP_SEL;
+
+	if (boost_spe->sft_cfg < 0x4)
+		reg |= boost_spe->sft_cfg << SYS_OMHTPG_EL1_SFT_CFG_SHIFT;
+
+	if (boost_spe->boost_spe_pa_flt_en || boost_spe->rmt_acc_pa_flt_en) {
+		reg |= 1 < SYS_OMHTPG_EL1_PAEN_SHIFT;
+		reg |= 1 < SYS_OMHTPG_EL1_RMPAFLEN_SHIFT;
+
+		if (boost_spe->pa_flt_pt < 0x8000000 && boost_spe->pa_flt_mask < 0x8000000) {
+			reg |= boost_spe->pa_flt_pt << SYS_OMHTPG_EL1_PAFL_SHIFT;
+			reg |= boost_spe->pa_flt_mask << SYS_OMHTPG_EL1_PAFLMK_SHIFT;
+		}
+	}
 
 	return reg;
 }
@@ -291,6 +330,13 @@ int mm_spe_start(void)
 	reg = mm_spe_to_pmscr();
 	isb();
 	write_sysreg_s(reg, SYS_PMSCR_EL1);
+
+	if (spe->support_boost_spe) {
+		reg = arm_spe_to_htpg();
+		isb();
+		write_sysreg_s(reg, SYS_OMHTPG_EL1);
+	}
+
 	return 0;
 }
 
@@ -357,8 +403,30 @@ static const struct platform_device_id mm_spe_match[] = {
 };
 MODULE_DEVICE_TABLE(platform, mm_spe_match);
 
+static void arm_spe_boost_spe_para_init(void)
+{
+	struct boost_spe_contol *boost_spe = &spe->boost_spe;
+
+	boost_spe->record_sel = 1;
+	boost_spe->pop_uop_sel = 0;
+	boost_spe->rmt_acc_pa_flt_en = 0;
+	boost_spe->rmt_acc_en = 1;
+	boost_spe->boost_spe_pa_flt_en = 0;
+	boost_spe->pa_flt_pt = 0;
+	boost_spe->pa_flt_mask = 0;
+	boost_spe->sft_cfg = 0;
+	boost_spe->boost_spe_en_cfg = 0x3;
+}
+
 static void mm_spe_sample_para_init(void)
 {
+	u64 implementor = read_cpuid_implementor();
+	u64 part_num = read_cpuid_part_number();
+
+	/* Is support boost_spe sampling? */
+	if (implementor == ARM_CPU_IMP_HISI && part_num == 0xd06)
+		spe->support_boost_spe = true;
+
 	spe->sample_period = SPE_SAMPLE_PERIOD;
 	spe->jitter = 1;
 	spe->load_filter = 1;
@@ -375,6 +443,9 @@ static void mm_spe_sample_para_init(void)
 	spe->exclude_kernel = 0;
 
 	spe->min_latency = 120;
+
+	if (spe->support_boost_spe)
+		arm_spe_boost_spe_para_init();
 }
 
 void mm_spe_record_enqueue(struct arm_spe_record *record)

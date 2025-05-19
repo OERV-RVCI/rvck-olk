@@ -63,6 +63,8 @@ struct arm_spe_pkt {
 #define SPE_ADDR_PKT_HDR_INDEX_DATA_VIRT	0x2
 #define SPE_ADDR_PKT_HDR_INDEX_DATA_PHYS	0x3
 #define SPE_ADDR_PKT_HDR_INDEX_PREV_BRANCH	0x4
+#define SPE_ADDR_PKT_HDR_INDEX_BOOST_SPE_DATA_PHYS	0x6
+#define SPE_ADDR_PKT_HDR_INDEX_REMOTE_DATA_PHYS	0x7
 
 /* Address packet payload */
 #define SPE_ADDR_PKT_ADDR_BYTE7_SHIFT		56
@@ -78,6 +80,9 @@ struct arm_spe_pkt {
 #define SPE_ADDR_PKT_EL1			1
 #define SPE_ADDR_PKT_EL2			2
 #define SPE_ADDR_PKT_EL3			3
+
+/* Boost_spe address packet payload */
+#define SPE_ADDR_PKT_ADDR_GET_BYTES_BOOST_SPE(v)	((v) & GENMASK_ULL(52, 12))
 
 /* Context packet header */
 #define SPE_CTX_PKT_HDR_INDEX(h)		((h) & GENMASK_ULL(1, 0))

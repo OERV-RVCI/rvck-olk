@@ -61,6 +61,13 @@ static u64 arm_spe_calc_ip(int index, u64 payload)
 	} else if (index == SPE_ADDR_PKT_HDR_INDEX_DATA_PHYS) {
 		/* Clean highest byte */
 		payload = SPE_ADDR_PKT_ADDR_GET_BYTES_0_6(payload);
+	/* Boost_spe hot data access physical address */
+	} else if (index == SPE_ADDR_PKT_HDR_INDEX_BOOST_SPE_DATA_PHYS) {
+		payload = SPE_ADDR_PKT_ADDR_GET_BYTES_BOOST_SPE(payload);
+	/* Remote Data access physical address */
+	} else if (index == SPE_ADDR_PKT_HDR_INDEX_REMOTE_DATA_PHYS) {
+		/* Clean highest byte */
+		payload = SPE_ADDR_PKT_ADDR_GET_BYTES_0_6(payload);
 	} else {
 		seen_idx = 0;
 		if (!(seen_idx & BIT(index))) {
@@ -132,6 +139,11 @@ static int arm_spe_read_record(struct arm_spe_decoder *decoder)
 				decoder->record.virt_addr = ip;
 			else if (idx == SPE_ADDR_PKT_HDR_INDEX_DATA_PHYS)
 				decoder->record.phys_addr = ip;
+			else if (idx == SPE_ADDR_PKT_HDR_INDEX_BOOST_SPE_DATA_PHYS)
+				decoder->record.boost_spe_addr[decoder->record.boost_spe_idx++]
+											= ip;
+			else if (idx == SPE_ADDR_PKT_HDR_INDEX_REMOTE_DATA_PHYS)
+				decoder->record.remote_addr = ip;
 			break;
 		case ARM_SPE_COUNTER:
 			if (idx == SPE_CNT_PKT_HDR_INDEX_TOTAL_LAT)

@@ -49,6 +49,9 @@ struct arm_spe_record {
 	u64				virt_addr;
 	u64				phys_addr;
 	u64				context_id;
+	u64				boost_spe_addr[8];
+	u64				remote_addr;
+	u16				boost_spe_idx;
 	u16				source;
 };
 

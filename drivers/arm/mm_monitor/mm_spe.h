@@ -4,7 +4,7 @@
 #define __SPE_H
 
 #define SPE_BUFFER_MAX_SIZE		(PAGE_SIZE)
-#define SPE_BUFFER_SIZE			(PAGE_SIZE / 32)
+#define SPE_BUFFER_SIZE			(PAGE_SIZE / 16)
 
 #define SPE_SAMPLE_PERIOD		1024
 
@@ -12,11 +12,43 @@
 #define SPE_RECORD_ENTRY_SIZE		sizeof(struct mem_sampling_record)
 #define ARMV8_SPE_MEM_SAMPLING_PDEV_NAME "arm,mm_spe,spe-v1"
 
+/* boost_spe sampling controls */
+#define SYS_OMHTPG_EL1			sys_reg(3, 0, 15, 8, 2)
+#define SYS_OMHTPG_EL1_RMCF_SHIFT	0
+#define SYS_OMHTPG_EL1_RMCF_MASK	0x3UL
+#define SYS_OMHTPG_EL1_RMEN		GENMASK(2, 2)
+#define SYS_OMHTPG_EL1_RMEN_SHIFT	2
+#define SYS_OMHTPG_EL1_PAFL		GENMASK(3, 3)
+#define SYS_OMHTPG_EL1_PAFL_SHIFT	3
+#define SYS_OMHTPG_EL1_PAFL_MASK	0x7FFFFFFUL
+#define SYS_OMHTPG_EL1_PAFLMK_SHIFT	30
+#define SYS_OMHTPG_EL1_PAFLMK_MASK	0x7FFFFFFUL
+#define SYS_OMHTPG_EL1_PAEN_SHIFT	57
+
+#define SYS_OMHTPG_EL1_RMPAFLEN_SHIFT	58
+#define SYS_OMHTPG_EL1_POP_UOP_SEL	GENMASK(59, 59)
+#define SYS_OMHTPG_EL1_SFT_CFG_SHIFT	60
+#define SYS_OMHTPG_EL1_SFT_CFG_MASK	0x3UL
+#define SYS_OMHTPG_EL1_REC_SEL		GENMASK(62, 62)
+
+struct boost_spe_contol {
+	u32				boost_spe_en_cfg;
+	u32				pa_flt_pt;
+	u32				pa_flt_mask;
+	u64				sft_cfg;
+	bool				boost_spe_pa_flt_en;
+	bool				rmt_acc_en;
+	bool				rmt_acc_pa_flt_en;
+	bool				pop_uop_sel;
+	bool				record_sel;
+};
+
 struct mm_spe {
 	struct pmu			pmu;
 	struct platform_device		*pdev;
 	cpumask_t			supported_cpus;
 	struct hlist_node		hotplug_node;
+	struct boost_spe_contol		boost_spe;
 	int				irq; /* PPI */
 	u16				pmsver;
 	u16				min_period;
@@ -38,6 +70,7 @@ struct mm_spe {
 	u8				pct_enable;
 	bool				exclude_user;
 	bool				exclude_kernel;
+	bool				support_boost_spe;
 };
 
 struct mm_spe_buf {
