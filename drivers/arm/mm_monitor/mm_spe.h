@@ -9,7 +9,7 @@
 #define SPE_SAMPLE_PERIOD		1024
 
 #define SPE_RECORD_BUFFER_MAX_RECORDS	(100)
-#define SPE_RECORD_ENTRY_SIZE		sizeof(struct arm_spe_record)
+#define SPE_RECORD_ENTRY_SIZE		sizeof(struct mem_sampling_record)
 #define ARMV8_SPE_MEM_SAMPLING_PDEV_NAME "arm,mm_spe,spe-v1"
 
 struct mm_spe {

@@ -11,6 +11,7 @@
 
 #include <linux/of_device.h>
 #include <linux/perf/arm_pmu.h>
+#include <linux/mem_sampling.h>
 
 #include "spe-decoder/arm-spe-decoder.h"
 #include "spe-decoder/arm-spe-pkt-decoder.h"
@@ -377,7 +378,7 @@ static void mm_spe_sample_para_init(void)
 void mm_spe_record_enqueue(struct arm_spe_record *record)
 {
 	struct mm_spe_buf *spe_buf = this_cpu_ptr(&per_cpu_spe_buf);
-	struct arm_spe_record *record_tail;
+	struct mem_sampling_record *record_tail;
 
 	if (spe_buf->nr_records >= SPE_RECORD_BUFFER_MAX_RECORDS) {
 		pr_err("nr_records exceeded!\n");
@@ -386,7 +387,7 @@ void mm_spe_record_enqueue(struct arm_spe_record *record)
 
 	record_tail = spe_buf->record_base +
 			spe_buf->nr_records * SPE_RECORD_ENTRY_SIZE;
-	*record_tail = *(struct arm_spe_record *)record;
+	*record_tail = *(struct mem_sampling_record *)record;
 	spe_buf->nr_records++;
 }
 
