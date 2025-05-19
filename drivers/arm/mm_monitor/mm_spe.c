@@ -17,6 +17,7 @@
 #include "spe-decoder/arm-spe-decoder.h"
 #include "spe-decoder/arm-spe-pkt-decoder.h"
 #include "mm_spe.h"
+static bool mm_spe_boost_enable;
 
 static struct mm_spe *spe;
 
@@ -161,7 +162,7 @@ static void mm_spe_disable_and_drain_local(void)
 	isb();
 
 	/* Disable boost_spe profiling */
-	if (spe->support_boost_spe) {
+	if (spe->support_boost_spe && mm_spe_boost_enable) {
 		write_sysreg_s(0, SYS_OMHTPG_EL1);
 		isb();
 	}
@@ -513,6 +514,13 @@ static struct platform_driver mm_spe_driver = {
 	},
 	.probe	= mm_spe_device_probe,
 };
+
+static __init int enable_mm_spe_boost(char *str)
+{
+	mm_spe_boost_enable = true;
+	return 0;
+}
+early_param("enable_mm_spe_boost", enable_mm_spe_boost);
 
 static int __init mm_spe_init(void)
 {
