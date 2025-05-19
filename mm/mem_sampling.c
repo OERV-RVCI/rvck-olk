@@ -27,7 +27,7 @@
 #define MEM_SAMPLING_DISABLED		0x0
 #define MEM_SAMPLING_NORMAL		0x1
 #define MEM_SAMPLING_MIN_VALUE		0
-#define MEM_SAMPLING_MAX_VALUE		3
+#define MEM_SAMPLING_MAX_VALUE		5
 
 struct mem_sampling_ops_struct mem_sampling_ops;
 static int mem_sampling_override __initdata;
@@ -484,6 +484,11 @@ static int proc_mem_sampling_enable(struct ctl_table *table, int write,
 		state = 1;
 	if (static_branch_likely(&sched_numabalancing_mem_sampling))
 		state = 2;
+	if (static_branch_likely(&mm_damon_mem_sampling))
+		state = 3;
+	if (static_branch_likely(&mm_damon_mem_sampling) &&
+		static_branch_likely(&sched_numabalancing_mem_sampling))
+		state = 4;
 
 	if (write && !capable(CAP_SYS_ADMIN))
 		return -EPERM;
@@ -505,8 +510,19 @@ static int proc_mem_sampling_enable(struct ctl_table *table, int write,
 			set_mem_sampling_state(true);
 			break;
 		case 2:
+			set_mem_sampling_state(false);
 			set_mem_sampling_state(true);
 			set_numabalancing_mem_sampling_state(true);
+			break;
+		case 3:
+			set_mem_sampling_state(false);
+			set_mem_sampling_state(true);
+			set_damon_mem_sampling_state(true);
+			break;
+		case 4:
+			set_mem_sampling_state(true);
+			set_numabalancing_mem_sampling_state(true);
+			set_damon_mem_sampling_state(true);
 			break;
 		default:
 			return -EINVAL;
