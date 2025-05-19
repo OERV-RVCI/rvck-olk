@@ -14,6 +14,8 @@
 #include <linux/page_idle.h>
 #include <linux/pagewalk.h>
 #include <linux/sched/mm.h>
+#include <linux/cpuset.h>
+#include <linux/mempolicy.h>
 
 #include "ops-common.h"
 
@@ -479,6 +481,41 @@ static inline void hw_damon_va_prepare_access_checks(struct damon_ctx *ctx) { }
 static inline unsigned int hw_damon_va_check_accesses(struct damon_ctx *ctx) {return 0; }
 #endif
 
+#ifdef CONFIG_MIGRATION
+static unsigned long damon_migrate_pages(struct damon_target *t,
+			struct damon_region *r, nodemask_t task_remote_nodes)
+{
+	struct mm_struct *mm = NULL;
+	unsigned long applied;
+	struct task_struct *task;
+	nodemask_t task_nodes;
+
+	task = damon_get_task_struct(t);
+	if (!task)
+		return 0;
+	task_nodes = cpuset_mems_allowed(task);
+	put_task_struct(task);
+
+	mm = damon_get_mm(t);
+	if (!mm)
+		return 0;
+
+	applied = do_migrate_area_pages(mm, &task_nodes, &task_remote_nodes,
+				r->ar.start, r->ar.end, MPOL_MF_MOVE_ALL);
+
+	mmput(mm);
+
+	return applied;
+}
+
+#else
+static inline unsigned long damon_migrate_pages(struct damon_target *t,
+			struct damon_region *r, nodemask_t task_remote_nodes)
+{
+	return 0;
+}
+#endif /* CONFIG_MIGRATION */
+
 /*
  * Functions for the access checking of the regions
  */
@@ -757,6 +794,8 @@ static unsigned long damon_va_apply_scheme(struct damon_ctx *ctx,
 	case DAMOS_NOHUGEPAGE:
 		madv_action = MADV_NOHUGEPAGE;
 		break;
+	case DAMOS_DEMOTION:
+		return damon_migrate_pages(t, r, scheme->remote_node);
 	case DAMOS_STAT:
 		return 0;
 	default:
@@ -776,6 +815,8 @@ static int damon_va_scheme_score(struct damon_ctx *context,
 
 	switch (scheme->action) {
 	case DAMOS_PAGEOUT:
+		return damon_cold_score(context, r, scheme);
+	case DAMOS_DEMOTION:
 		return damon_cold_score(context, r, scheme);
 	default:
 		break;

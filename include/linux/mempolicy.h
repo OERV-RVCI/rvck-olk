@@ -167,6 +167,8 @@ static inline void check_highest_zone(enum zone_type k)
 int do_migrate_pages(struct mm_struct *mm, const nodemask_t *from,
 		     const nodemask_t *to, int flags);
 
+int do_migrate_area_pages(struct mm_struct *mm, const nodemask_t *from,
+		     const nodemask_t *to, unsigned long start, unsigned long end, int flags);
 
 #ifdef CONFIG_TMPFS
 extern int mpol_parse_str(char *str, struct mempolicy **mpol);
@@ -269,6 +271,13 @@ static inline bool init_nodemask_of_mempolicy(nodemask_t *m)
 
 static inline int do_migrate_pages(struct mm_struct *mm, const nodemask_t *from,
 				   const nodemask_t *to, int flags)
+{
+	return 0;
+}
+
+static inline int do_migrate_area_pages(struct mm_struct *mm, const nodemask_t *from,
+		     const nodemask_t *to, unsigned long start, unsigned long end, int flags)
+
 {
 	return 0;
 }
