@@ -13,6 +13,7 @@
 #include <linux/time64.h>
 #include <linux/types.h>
 #include <linux/random.h>
+#include <linux/mem_sampling.h>
 
 /* Minimal region size.  Every damon_region is aligned by this. */
 #define DAMON_MIN_REGION	PAGE_SIZE
@@ -73,6 +74,9 @@ struct damon_region {
  */
 struct damon_target {
 	struct pid *pid;
+#ifdef CONFIG_DAMON_MEM_SAMPLING
+	struct damon_mem_sampling_fifo damon_fifo;
+#endif
 	unsigned int nr_regions;
 	struct list_head regions_list;
 	struct list_head list;

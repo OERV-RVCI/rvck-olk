@@ -290,6 +290,75 @@ static void set_numabalancing_mem_sampling_state(bool enabled)
 static inline void set_numabalancing_mem_sampling_state(bool enabled) { }
 #endif /* CONFIG_NUMABALANCING_MEM_SAMPLING */
 
+DEFINE_STATIC_KEY_FALSE(mm_damon_mem_sampling);
+#ifdef CONFIG_DAMON_MEM_SAMPLING
+static void damon_mem_sampling_record_cb(struct mem_sampling_record *record)
+{
+	struct damon_mem_sampling_fifo *damon_fifo;
+	struct damon_mem_sampling_record domon_record;
+	struct task_struct *task = NULL;
+	struct mm_struct *mm;
+
+	/* Discard kernel address accesses */
+	if (record->virt_addr & (1UL << 63))
+		return;
+
+	task = find_get_task_by_vpid((pid_t)record->context_id);
+	if (!task)
+		return;
+
+	mm = get_task_mm(task);
+	put_task_struct(task);
+	if (!mm)
+		return;
+
+	damon_fifo = mm->damon_fifo;
+	mmput(mm);
+
+	domon_record.vaddr = record->virt_addr;
+
+	/* only the proc under monitor now has damon_fifo */
+	if (damon_fifo) {
+		if (kfifo_is_full(&damon_fifo->rx_kfifo))
+			return;
+
+		kfifo_in_locked(&damon_fifo->rx_kfifo, &domon_record,
+				sizeof(struct damon_mem_sampling_record),
+				&damon_fifo->rx_kfifo_lock);
+		return;
+	}
+}
+
+static void damon_mem_sampling_record_cb_register(void)
+{
+	mem_sampling_record_cb_register(damon_mem_sampling_record_cb);
+}
+
+static void damon_mem_sampling_record_cb_unregister(void)
+{
+	mem_sampling_record_cb_unregister(damon_mem_sampling_record_cb);
+}
+
+static void set_damon_mem_sampling_state(bool enabled)
+{
+	if (enabled) {
+		damon_mem_sampling_record_cb_register();
+		static_branch_enable(&mm_damon_mem_sampling);
+	} else {
+		damon_mem_sampling_record_cb_unregister();
+		static_branch_disable(&mm_damon_mem_sampling);
+	}
+}
+
+bool damon_use_mem_sampling(void)
+{
+	return static_branch_unlikely(&mem_sampling_access_hints) &&
+			static_branch_unlikely(&mm_damon_mem_sampling);
+}
+#else
+static inline void set_damon_mem_sampling_state(bool enabled) { }
+#endif
+
 void mem_sampling_process(void)
 {
 	int i, nr_records;
@@ -336,6 +405,7 @@ static void __set_mem_sampling_state(bool enabled)
 	else {
 		static_branch_disable(&mem_sampling_access_hints);
 		set_numabalancing_mem_sampling_state(enabled);
+		set_damon_mem_sampling_state(enabled);
 	}
 }
 

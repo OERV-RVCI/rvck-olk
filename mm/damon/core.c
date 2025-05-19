@@ -112,6 +112,32 @@ int damon_select_ops(struct damon_ctx *ctx, enum damon_ops_id id)
 	return err;
 }
 
+#if IS_ENABLED(CONFIG_DAMON_MEM_SAMPLING)
+int damon_target_init_kfifo(struct damon_target *t)
+{
+	struct damon_mem_sampling_fifo *damon_fifo;
+	int ret = 0;
+	unsigned int fifo_size = sizeof(struct damon_mem_sampling_record) * DAMOS_FIFO_MAX_RECORD;
+
+	damon_fifo = &t->damon_fifo;
+
+	ret = kfifo_alloc(&damon_fifo->rx_kfifo, fifo_size, GFP_KERNEL);
+	if (ret)
+		return -ENOMEM;
+
+	spin_lock_init(&damon_fifo->rx_kfifo_lock);
+	return 0;
+}
+
+void damon_target_deinit_kfifo(struct damon_target *t)
+{
+	kfifo_free(&t->damon_fifo.rx_kfifo);
+}
+#else
+static inline int damon_target_init_kfifo(struct damon_target *t) {return 0; }
+static inline void damon_target_deinit_kfifo(struct damon_target *t) { }
+#endif /* CONFIG_DAMON_MEM_SAMPLING */
+
 /*
  * Construct a damon_region struct
  *
@@ -388,10 +414,17 @@ void damon_destroy_scheme(struct damos *s)
 struct damon_target *damon_new_target(void)
 {
 	struct damon_target *t;
+	int ret;
 
 	t = kmalloc(sizeof(*t), GFP_KERNEL);
 	if (!t)
 		return NULL;
+
+	ret = damon_target_init_kfifo(t);
+	if (ret) {
+		kfree(t);
+		return NULL;
+	}
 
 	t->pid = NULL;
 	t->nr_regions = 0;
@@ -422,6 +455,7 @@ void damon_free_target(struct damon_target *t)
 
 	damon_for_each_region_safe(r, next, t)
 		damon_free_region(r);
+	damon_target_deinit_kfifo(t);
 	kfree(t);
 }
 

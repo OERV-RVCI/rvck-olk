@@ -12,6 +12,8 @@
 #ifndef __MEM_SAMPLING_H
 #define __MEM_SAMPLING_H
 
+#include <linux/kfifo.h>
+
 enum mem_sampling_sample_type {
 	MEM_SAMPLING_L1D_ACCESS		= 1 << 0,
 	MEM_SAMPLING_L1D_MISS		= 1 << 1,
@@ -113,4 +115,20 @@ void mem_sampling_sched_in(struct task_struct *prev, struct task_struct *curr);
 static inline void set_mem_sampling_state(bool enabled) { }
 static inline void mem_sampling_sched_in(struct task_struct *prev, struct task_struct *curr) { }
 #endif /* CONFIG_MEM_SAMPLING */
+
+#ifdef CONFIG_DAMON_MEM_SAMPLING
+#define	DAMOS_FIFO_MAX_RECORD		(1024)
+struct damon_mem_sampling_record {
+	u64 vaddr;
+};
+
+struct damon_mem_sampling_fifo {
+	struct kfifo rx_kfifo;
+	spinlock_t rx_kfifo_lock; /* protect SPE Rx data kfifo */
+};
+
+bool damon_use_mem_sampling(void);
+#else
+static inline bool damon_use_mem_sampling(void) { return false; }
+#endif /* CONFIG_DAMON_MEM_SAMPLING */
 #endif	/* __MEM_SAMPLING_H */

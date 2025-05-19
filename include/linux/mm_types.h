@@ -1011,7 +1011,11 @@ struct mm_struct {
 #endif
 	} __randomize_layout;
 
+#ifdef CONFIG_DAMON_MEM_SAMPLING
+	KABI_USE(1, struct damon_mem_sampling_fifo *damon_fifo)
+#else
 	KABI_RESERVE(1)
+#endif
 	KABI_RESERVE(2)
 	KABI_RESERVE(3)
 	KABI_RESERVE(4)
