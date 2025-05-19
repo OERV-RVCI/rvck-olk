@@ -66,6 +66,12 @@ enum mem_sampling_type_enum {
 	MEM_SAMPLING_UNSUPPORTED
 };
 
+enum user_switch_type {
+	USER_SWITCH_AWAY_FROM_MEM_SAMPLING,
+	USER_SWITCH_BACK_TO_MEM_SAMPLING,
+	USER_SWITCH_TYPE_MAX,
+};
+
 #ifdef CONFIG_ARM_SPE_MEM_SAMPLING
 int mm_spe_start(void);
 void mm_spe_stop(void);
@@ -89,6 +95,8 @@ static inline int mm_spe_enabled(void) { return 0; }
 #if IS_ENABLED(CONFIG_MEM_SAMPLING)
 void mem_sampling_process(void);
 void arm_spe_set_user(enum arm_spe_user_e user);
+void set_mem_sampling_state(bool enabled);
+void mem_sampling_user_switch_process(enum user_switch_type type);
 static inline bool spe_user_is_perf(void)
 {
 	return __this_cpu_read(arm_spe_user) == SPE_USER_PERF;
@@ -99,6 +107,7 @@ static inline bool spe_user_is_mem_sampling(void)
 }
 void mem_sampling_sched_in(struct task_struct *prev, struct task_struct *curr);
 #else
+static inline void set_mem_sampling_state(bool enabled) { }
 static inline void mem_sampling_sched_in(struct task_struct *prev, struct task_struct *curr) { }
 #endif /* CONFIG_MEM_SAMPLING */
 #endif	/* __MEM_SAMPLING_H */

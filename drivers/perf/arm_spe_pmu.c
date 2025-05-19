@@ -1364,6 +1364,10 @@ out_free_handle:
 void arm_spe_set_user(enum arm_spe_user_e user)
 {
 	__this_cpu_write(arm_spe_user, user);
+	if (user == SPE_USER_PERF)
+		mem_sampling_user_switch_process(USER_SWITCH_AWAY_FROM_MEM_SAMPLING);
+	else
+		mem_sampling_user_switch_process(USER_SWITCH_BACK_TO_MEM_SAMPLING);
 	__arm_spe_pmu_reset_local();
 }
 #endif

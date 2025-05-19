@@ -114,6 +114,7 @@ void mm_spe_buffer_free(void)
 		mm_spe_percpu_buffer_free(cpu);
 	}
 	spe_probe_status -= 1;
+	set_mem_sampling_state(false);
 }
 EXPORT_SYMBOL_GPL(mm_spe_buffer_free);
 
