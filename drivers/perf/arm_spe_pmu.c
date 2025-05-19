@@ -39,6 +39,10 @@
 #include <asm/mmu.h>
 #include <asm/sysreg.h>
 
+#if IS_ENABLED(CONFIG_ARM_SPE_MEM_SAMPLING)
+#include "../drivers/arm/mm_monitor/mm_spe.h"
+#endif
+
 /*
  * Cache if the event is allowed to trace Context information.
  * This allows us to perform the check, i.e, perf_allow_kernel(),

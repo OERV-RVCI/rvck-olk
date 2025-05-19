@@ -251,4 +251,6 @@ source "drivers/roh/Kconfig"
 
 source "drivers/coda/Kconfig"
 
+source "drivers/arm/Kconfig"
+
 endmenu
