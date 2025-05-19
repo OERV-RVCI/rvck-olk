@@ -105,6 +105,7 @@ void mem_sampling_sched_in(struct task_struct *prev, struct task_struct *curr)
 		mem_sampling_ops.sampling_stop();
 }
 
+DEFINE_STATIC_KEY_FALSE(sched_numabalancing_mem_sampling);
 #ifdef CONFIG_NUMABALANCING_MEM_SAMPLING
 static int numa_migrate_prep(struct folio *folio, struct vm_area_struct *vma,
 		      unsigned long addr, int page_nid, int *flags)
