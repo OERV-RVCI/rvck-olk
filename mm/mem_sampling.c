@@ -18,6 +18,10 @@
 #include <linux/list.h>
 #include <linux/mm.h>
 #include <linux/mem_sampling.h>
+#include <linux/mempolicy.h>
+#include <linux/task_work.h>
+#include <linux/migrate.h>
+#include <linux/sched/numa_balancing.h>
 
 #define MEM_SAMPLING_DISABLED		0x0
 #define MEM_SAMPLING_NORMAL		0x1
@@ -49,6 +53,12 @@ struct mem_sampling_record_cb_list_entry {
 	mem_sampling_record_cb_type cb;
 };
 LIST_HEAD(mem_sampling_record_cb_list);
+
+struct mem_sampling_numa_access_work {
+	struct callback_head work;
+	u64 vaddr, paddr;
+	int cpu;
+};
 
 void mem_sampling_record_cb_register(mem_sampling_record_cb_type cb)
 {
@@ -95,6 +105,178 @@ void mem_sampling_sched_in(struct task_struct *prev, struct task_struct *curr)
 		mem_sampling_ops.sampling_stop();
 }
 
+#ifdef CONFIG_NUMABALANCING_MEM_SAMPLING
+static int numa_migrate_prep(struct folio *folio, struct vm_area_struct *vma,
+		      unsigned long addr, int page_nid, int *flags)
+{
+	folio_get(folio);
+
+	/* Record the current PID acceesing VMA */
+	vma_set_access_pid_bit(vma);
+
+	count_vm_numa_event(NUMA_HINT_FAULTS);
+	if (page_nid == numa_node_id()) {
+		count_vm_numa_event(NUMA_HINT_FAULTS_LOCAL);
+		*flags |= TNF_FAULT_LOCAL;
+	}
+
+	return mpol_misplaced(folio, vma, addr);
+}
+
+/*
+ * Called from task_work context to act upon the page access.
+ *
+ * Physical address (provided by SPE) is used directly instead
+ * of walking the page tables to get to the PTE/page. Hence we
+ * don't check if PTE is writable for the TNF_NO_GROUP
+ * optimization, which means RO pages are considered for grouping.
+ */
+static void do_numa_access(struct task_struct *p, u64 laddr, u64 paddr)
+{
+	struct mm_struct *mm = p->mm;
+	struct vm_area_struct *vma;
+	struct page *page = NULL;
+	struct folio *folio;
+	int page_nid = NUMA_NO_NODE;
+	int last_cpupid;
+	int target_nid;
+	int flags = 0;
+
+	if (!mm)
+		return;
+
+	if (!mmap_read_trylock(mm))
+		return;
+
+	vma = find_vma(mm, laddr);
+	if (!vma)
+		goto out_unlock;
+
+	if (!vma_migratable(vma) || !vma_policy_mof(vma) ||
+		is_vm_hugetlb_page(vma) || (vma->vm_flags & VM_MIXEDMAP))
+		goto out_unlock;
+
+	if (!vma->vm_mm ||
+	    (vma->vm_file && (vma->vm_flags & (VM_READ|VM_WRITE)) == (VM_READ)))
+		goto out_unlock;
+
+	if (!vma_is_accessible(vma))
+		goto out_unlock;
+
+	page = pfn_to_online_page(PHYS_PFN(paddr));
+	folio = page_folio(page);
+
+	if (!folio || folio_is_zone_device(folio))
+		goto out_unlock;
+
+	if (unlikely(!PageLRU(page)))
+		goto out_unlock;
+
+	/* TODO: handle PTE-mapped THP or PMD-mapped THP*/
+	if (folio_test_large(folio))
+		goto out_unlock;
+
+	/*
+	 * Flag if the page is shared between multiple address spaces. This
+	 * is later used when determining whether to group tasks together
+	 */
+	if (folio_likely_mapped_shared(folio) && (vma->vm_flags & VM_SHARED))
+		flags |= TNF_SHARED;
+
+	page_nid = folio_nid(folio);
+
+	/*
+	 * For memory tiering mode, cpupid of slow memory page is used
+	 * to record page access time.  So use default value.
+	 */
+	if (folio_use_access_time(folio))
+		last_cpupid = (-1 & LAST_CPUPID_MASK);
+	else
+		last_cpupid = folio_last_cpupid(folio);
+	target_nid = numa_migrate_prep(folio, vma, laddr, page_nid, &flags);
+	if (target_nid == NUMA_NO_NODE) {
+		folio_put(folio);
+		goto out;
+	}
+
+	/* Migrate to the requested node */
+	if (migrate_misplaced_folio(folio, vma, target_nid)) {
+		page_nid = target_nid;
+		flags |= TNF_MIGRATED;
+	} else {
+		flags |= TNF_MIGRATE_FAIL;
+	}
+
+out:
+	if (page_nid != NUMA_NO_NODE)
+		task_numa_fault(last_cpupid, page_nid, 1, flags);
+
+out_unlock:
+	mmap_read_unlock(mm);
+}
+
+static void task_mem_sampling_access_work(struct callback_head *work)
+{
+	struct mem_sampling_numa_access_work *iwork =
+		container_of(work, struct mem_sampling_numa_access_work, work);
+
+	if (iwork->cpu == smp_processor_id())
+		do_numa_access(current, iwork->vaddr, iwork->paddr);
+	kfree(iwork);
+}
+
+static void numa_create_taskwork(u64 vaddr, u64 paddr, int cpu)
+{
+	struct mem_sampling_numa_access_work *iwork = NULL;
+
+	iwork = kzalloc(sizeof(*iwork), GFP_ATOMIC);
+	if (!iwork)
+		return;
+
+	iwork->vaddr = vaddr;
+	iwork->paddr = paddr;
+	iwork->cpu = cpu;
+
+	init_task_work(&iwork->work, task_mem_sampling_access_work);
+	task_work_add(current, &iwork->work, TWA_RESUME);
+}
+
+static void numa_balancing_mem_sampling_cb(struct mem_sampling_record *record)
+{
+	struct task_struct *p = current;
+	u64 vaddr = record->virt_addr;
+	u64 paddr = record->phys_addr;
+
+	/* Discard kernel address accesses */
+	if (vaddr & (1UL << 63))
+		return;
+
+	if (p->pid != record->context_id)
+		return;
+
+	numa_create_taskwork(vaddr, paddr, smp_processor_id());
+}
+
+static void numa_balancing_mem_sampling_cb_register(void)
+{
+	mem_sampling_record_cb_register(numa_balancing_mem_sampling_cb);
+}
+
+static void numa_balancing_mem_sampling_cb_unregister(void)
+{
+	mem_sampling_record_cb_unregister(numa_balancing_mem_sampling_cb);
+}
+static void set_numabalancing_mem_sampling_state(bool enabled)
+{
+	if (enabled)
+		numa_balancing_mem_sampling_cb_register();
+	else
+		numa_balancing_mem_sampling_cb_unregister();
+}
+#else
+static inline void set_numabalancing_mem_sampling_state(bool enabled) { }
+#endif /* CONFIG_NUMABALANCING_MEM_SAMPLING */
+
 void mem_sampling_process(void)
 {
 	int i, nr_records;
@@ -138,8 +320,10 @@ static void __set_mem_sampling_state(bool enabled)
 {
 	if (enabled)
 		static_branch_enable(&mem_sampling_access_hints);
-	else
+	else {
 		static_branch_disable(&mem_sampling_access_hints);
+		set_numabalancing_mem_sampling_state(enabled);
+	}
 }
 
 void set_mem_sampling_state(bool enabled)
