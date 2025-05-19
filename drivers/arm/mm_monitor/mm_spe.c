@@ -459,6 +459,8 @@ void mm_spe_record_enqueue(struct arm_spe_record *record)
 		return;
 	}
 
+	if (record->boost_spe_idx)
+		trace_spe_boost_spe_record((struct mem_sampling_record *)record);
 	trace_mm_spe_record((struct mem_sampling_record *)record);
 	record_tail = spe_buf->record_base +
 			spe_buf->nr_records * SPE_RECORD_ENTRY_SIZE;

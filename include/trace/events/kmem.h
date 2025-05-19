@@ -434,6 +434,40 @@ TRACE_EVENT(mm_spe_record,
 	TP_printk("vaddr=%llu paddr=%llu pid=%d",
 		__entry->vaddr, __entry->paddr, __entry->pid)
 );
+
+TRACE_EVENT(spe_boost_spe_record,
+	TP_PROTO(struct mem_sampling_record *record),
+
+	TP_ARGS(record),
+
+	TP_STRUCT__entry(
+		__field(u64, boost_spe_pa1)
+		__field(u64, boost_spe_pa2)
+		__field(u64, boost_spe_pa3)
+		__field(u64, boost_spe_pa4)
+		__field(u64, boost_spe_pa5)
+		__field(u64, boost_spe_pa6)
+		__field(u64, boost_spe_pa7)
+		__field(u64, boost_spe_pa8)
+	),
+
+	TP_fast_assign(
+		__entry->boost_spe_pa1 = record->boost_spe_addr[0];
+		__entry->boost_spe_pa2 = record->boost_spe_addr[1];
+		__entry->boost_spe_pa3 = record->boost_spe_addr[2];
+		__entry->boost_spe_pa4 = record->boost_spe_addr[3];
+		__entry->boost_spe_pa5 = record->boost_spe_addr[4];
+		__entry->boost_spe_pa6 = record->boost_spe_addr[5];
+		__entry->boost_spe_pa7 = record->boost_spe_addr[6];
+		__entry->boost_spe_pa8 = record->boost_spe_addr[7];
+	),
+
+	TP_printk("boost_spe_addr[0]=0x%llx boost_spe_addr[1]=0x%llx tlb_addr[2]=0x%llx tlb_addr[3]=0x%llx tlb_addr[4]=0x%llx tlb_addr[5]=0x%llx tlb_addr[6]=0x%llx tlb_addr[7]=0x%llx",
+		__entry->boost_spe_pa1, __entry->boost_spe_pa2,
+		__entry->boost_spe_pa3, __entry->boost_spe_pa4,
+		__entry->boost_spe_pa5, __entry->boost_spe_pa6,
+		__entry->boost_spe_pa7, __entry->boost_spe_pa8)
+);
 #endif /* CONFIG_ARM_SPE_MEM_SAMPLING */
 
 
