@@ -21,6 +21,10 @@
 
 struct mem_sampling_ops_struct mem_sampling_ops;
 
+/* keep track of who use the SPE */
+DEFINE_PER_CPU(enum arm_spe_user_e, arm_spe_user);
+EXPORT_PER_CPU_SYMBOL_GPL(arm_spe_user);
+
 /*
  * Callbacks should be registered using mem_sampling_record_cb_register()
  * by NUMA, DAMON and etc during their initialisation.
@@ -103,6 +107,7 @@ static inline enum mem_sampling_type_enum mem_sampling_get_type(void)
 static int __init mem_sampling_init(void)
 {
 	enum mem_sampling_type_enum mem_sampling_type = mem_sampling_get_type();
+	int cpu;
 
 	switch (mem_sampling_type) {
 	case MEM_SAMPLING_ARM_SPE:
@@ -120,6 +125,9 @@ static int __init mem_sampling_init(void)
 			mem_sampling_type);
 		return -ENODEV;
 	}
+
+	for_each_possible_cpu(cpu)
+		per_cpu(arm_spe_user, cpu) = SPE_USER_MEM_SAMPLING;
 
 	return 0;
 }

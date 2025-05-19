@@ -33,6 +33,9 @@
 #include <linux/slab.h>
 #include <linux/smp.h>
 #include <linux/vmalloc.h>
+#if IS_ENABLED(CONFIG_MEM_SAMPLING)
+#include <linux/mem_sampling.h>
+#endif
 
 #include <asm/barrier.h>
 #include <asm/cpufeature.h>
@@ -591,13 +594,21 @@ arm_spe_pmu_buf_get_fault_act(struct perf_output_handle *handle)
 	 * If we've lost data, disable profiling and also set the PARTIAL
 	 * flag to indicate that the last record is corrupted.
 	 */
+#if IS_ENABLED(CONFIG_MEM_SAMPLING)
+	if (spe_user_is_perf() && FIELD_GET(PMBSR_EL1_DL, pmbsr))
+#else
 	if (FIELD_GET(PMBSR_EL1_DL, pmbsr))
+#endif
 		perf_aux_output_flag(handle, PERF_AUX_FLAG_TRUNCATED |
 					     PERF_AUX_FLAG_PARTIAL);
 
 	/* Report collisions to userspace so that it can up the period */
+#if IS_ENABLED(CONFIG_MEM_SAMPLING)
+	if (spe_user_is_perf() && FIELD_GET(PMBSR_EL1_DL, pmbsr))
+#else
 	if (FIELD_GET(PMBSR_EL1_COLL, pmbsr))
 		perf_aux_output_flag(handle, PERF_AUX_FLAG_COLLISION);
+#endif
 
 	/* We only expect buffer management events */
 	switch (FIELD_GET(PMBSR_EL1_EC, pmbsr)) {
@@ -630,7 +641,12 @@ out_err:
 	ret = SPE_PMU_BUF_FAULT_ACT_FATAL;
 
 out_stop:
+#if IS_ENABLED(CONFIG_MEM_SAMPLING)
+	if (spe_user_is_perf())
+		arm_spe_perf_aux_output_end(handle);
+#else
 	arm_spe_perf_aux_output_end(handle);
+#endif
 	return ret;
 }
 
@@ -640,7 +656,11 @@ static irqreturn_t arm_spe_pmu_irq_handler(int irq, void *dev)
 	struct perf_event *event = handle->event;
 	enum arm_spe_pmu_buf_fault_action act;
 
+#if IS_ENABLED(CONFIG_MEM_SAMPLING)
+	if (spe_user_is_perf() && !perf_get_aux(handle))
+#else
 	if (!perf_get_aux(handle))
+#endif
 		return IRQ_NONE;
 
 	act = arm_spe_pmu_buf_get_fault_act(handle);
@@ -651,7 +671,12 @@ static irqreturn_t arm_spe_pmu_irq_handler(int irq, void *dev)
 	 * Ensure perf callbacks have completed, which may disable the
 	 * profiling buffer in response to a TRUNCATION flag.
 	 */
+#if IS_ENABLED(CONFIG_MEM_SAMPLING)
+	if (spe_user_is_perf())
+		irq_work_run();
+#else
 	irq_work_run();
+#endif
 
 	switch (act) {
 	case SPE_PMU_BUF_FAULT_ACT_FATAL:
@@ -671,6 +696,12 @@ static irqreturn_t arm_spe_pmu_irq_handler(int irq, void *dev)
 		 * PMBPTR might be misaligned, but we'll burn that bridge
 		 * when we get to it.
 		 */
+#if IS_ENABLED(CONFIG_MEM_SAMPLING)
+		if (spe_user_is_mem_sampling()) {
+			mem_sampling_process();
+			break;
+		}
+#endif
 		if (!(handle->aux_flags & PERF_AUX_FLAG_TRUNCATED)) {
 			arm_spe_perf_aux_output_begin(handle, event);
 			isb();
@@ -766,6 +797,10 @@ static void arm_spe_pmu_start(struct perf_event *event, int flags)
 	struct hw_perf_event *hwc = &event->hw;
 	struct perf_output_handle *handle = this_cpu_ptr(spe_pmu->handle);
 
+#if IS_ENABLED(CONFIG_MEM_SAMPLING)
+	arm_spe_set_user(SPE_USER_PERF);
+#endif
+
 	hwc->state = 0;
 	arm_spe_perf_aux_output_begin(handle, event);
 	if (hwc->state)
@@ -805,8 +840,16 @@ static void arm_spe_pmu_stop(struct perf_event *event, int flags)
 	struct perf_output_handle *handle = this_cpu_ptr(spe_pmu->handle);
 
 	/* If we're already stopped, then nothing to do */
-	if (hwc->state & PERF_HES_STOPPED)
+	if (hwc->state & PERF_HES_STOPPED) {
+#if IS_ENABLED(CONFIG_MEM_SAMPLING)
+		/*
+		 * PERF_HES_STOPPED maybe set in arm_spe_perf_aux_output_begin,
+		 * we switch user here.
+		 */
+		arm_spe_set_user(SPE_USER_MEM_SAMPLING);
+#endif
 		return;
+	}
 
 	/* Stop all trace generation */
 	arm_spe_pmu_disable_and_drain_local();
@@ -837,6 +880,9 @@ static void arm_spe_pmu_stop(struct perf_event *event, int flags)
 	}
 
 	hwc->state |= PERF_HES_STOPPED;
+#if IS_ENABLED(CONFIG_MEM_SAMPLING)
+	arm_spe_set_user(SPE_USER_MEM_SAMPLING);
+#endif
 }
 
 static int arm_spe_pmu_add(struct perf_event *event, int flags)
@@ -1313,6 +1359,14 @@ out_free_handle:
 	free_percpu(spe_pmu->handle);
 	return ret;
 }
+
+#if IS_ENABLED(CONFIG_MEM_SAMPLING)
+void arm_spe_set_user(enum arm_spe_user_e user)
+{
+	__this_cpu_write(arm_spe_user, user);
+	__arm_spe_pmu_reset_local();
+}
+#endif
 
 static int arm_spe_pmu_device_remove(struct platform_device *pdev)
 {

@@ -28,6 +28,12 @@ enum mem_sampling_op_type {
 	MEM_SAMPLING_ST	= 1 << 1,
 };
 
+enum arm_spe_user_e {
+	SPE_USER_PERF,
+	SPE_USER_MEM_SAMPLING,
+};
+DECLARE_PER_CPU(enum arm_spe_user_e, arm_spe_user);
+
 struct mem_sampling_record {
 	enum mem_sampling_sample_type	type;
 	int				err;
@@ -79,4 +85,17 @@ static inline int mm_spe_getnum_record(void) { return 0; }
 static inline struct mm_spe_buf *mm_spe_getbuf_addr(void) { return NULL; }
 static inline int mm_spe_enabled(void) { return 0; }
 #endif /* CONFIG_ARM_SPE_MEM_SAMPLING */
+
+#if IS_ENABLED(CONFIG_MEM_SAMPLING)
+void mem_sampling_process(void);
+void arm_spe_set_user(enum arm_spe_user_e user);
+static inline bool spe_user_is_perf(void)
+{
+	return __this_cpu_read(arm_spe_user) == SPE_USER_PERF;
+}
+static inline bool spe_user_is_mem_sampling(void)
+{
+	return __this_cpu_read(arm_spe_user) == SPE_USER_MEM_SAMPLING;
+}
+#endif /* CONFIG_MEM_SAMPLING */
 #endif	/* __MEM_SAMPLING_H */
