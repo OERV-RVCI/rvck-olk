@@ -25,10 +25,15 @@
 
 #define MEM_SAMPLING_DISABLED		0x0
 #define MEM_SAMPLING_NORMAL		0x1
+#define MEM_SAMPLING_MIN_VALUE		0
+#define MEM_SAMPLING_MAX_VALUE		3
 
 struct mem_sampling_ops_struct mem_sampling_ops;
 static int mem_sampling_override __initdata;
 static int sysctl_mem_sampling_mode;
+
+static const int mem_sampling_min_value = MEM_SAMPLING_MIN_VALUE;
+static const int mem_sampling_max_value = MEM_SAMPLING_MAX_VALUE;
 
 /* keep track of who use the SPE */
 DEFINE_PER_CPU(enum arm_spe_user_e, arm_spe_user);
@@ -269,10 +274,13 @@ static void numa_balancing_mem_sampling_cb_unregister(void)
 }
 static void set_numabalancing_mem_sampling_state(bool enabled)
 {
-	if (enabled)
+	if (enabled) {
 		numa_balancing_mem_sampling_cb_register();
-	else
+		static_branch_enable(&sched_numabalancing_mem_sampling);
+	} else {
 		numa_balancing_mem_sampling_cb_unregister();
+		static_branch_disable(&sched_numabalancing_mem_sampling);
+	}
 }
 #else
 static inline void set_numabalancing_mem_sampling_state(bool enabled) { }
@@ -396,18 +404,40 @@ static int proc_mem_sampling_enable(struct ctl_table *table, int write,
 {
 	struct ctl_table t;
 	int err;
-	int state = sysctl_mem_sampling_mode;
+	int state = 0;
+
+	if (static_branch_likely(&mem_sampling_access_hints))
+		state = 1;
+	if (static_branch_likely(&sched_numabalancing_mem_sampling))
+		state = 2;
 
 	if (write && !capable(CAP_SYS_ADMIN))
 		return -EPERM;
 
 	t = *table;
 	t.data = &state;
+	t.extra1 = (int *)&mem_sampling_min_value;
+	t.extra2 = (int *)&mem_sampling_max_value;
 	err = proc_dointvec_minmax(&t, write, buffer, lenp, ppos);
 	if (err < 0)
 		return err;
-	if (write)
-		set_mem_sampling_state(state);
+	if (write) {
+		switch (state) {
+		case 0:
+			set_mem_sampling_state(false);
+			break;
+		case 1:
+			set_mem_sampling_state(false);
+			set_mem_sampling_state(true);
+			break;
+		case 2:
+			set_mem_sampling_state(true);
+			set_numabalancing_mem_sampling_state(true);
+			break;
+		default:
+			return -EINVAL;
+		}
+	}
 	return err;
 }
 
@@ -419,7 +449,7 @@ static struct ctl_table mem_sampling_sysctls[] = {
 		.mode		= 0644,
 		.proc_handler   = proc_mem_sampling_enable,
 		.extra1		= SYSCTL_ZERO,
-		.extra2		= SYSCTL_ONE,
+		.extra2		= (int *)&mem_sampling_max_value,
 	},
 	{}
 };
