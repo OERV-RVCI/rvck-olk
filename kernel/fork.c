@@ -1363,6 +1363,9 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p,
 #if defined(CONFIG_TRANSPARENT_HUGEPAGE) && !USE_SPLIT_PMD_PTLOCKS
 	mm->pmd_huge_pte = NULL;
 #endif
+#if defined(CONFIG_DAMON_MEM_SAMPLING)
+	mm->damon_fifo = NULL;
+#endif
 	mm_init_uprobes_state(mm);
 	hugetlb_count_init(mm);
 

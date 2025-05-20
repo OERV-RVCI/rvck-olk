@@ -8,6 +8,9 @@
 #include <linux/types.h>
 #include <linux/tracepoint.h>
 #include <trace/events/mmflags.h>
+#ifdef CONFIG_MEM_SAMPLING
+#include <linux/mem_sampling.h>
+#endif
 
 TRACE_EVENT(kmem_cache_alloc,
 
@@ -409,6 +412,117 @@ TRACE_EVENT(rss_stat,
 		__print_symbolic(__entry->member, TRACE_MM_PAGES),
 		__entry->size)
 	);
+#ifdef CONFIG_ARM_SPE_MEM_SAMPLING
+TRACE_EVENT(mm_spe_record,
+	TP_PROTO(struct mem_sampling_record *record),
+
+	TP_ARGS(record),
+
+	TP_STRUCT__entry(
+		__field(u64, vaddr)
+		__field(u64, paddr)
+		__field(int, pid)
+	),
+
+	TP_fast_assign(
+		__entry->vaddr = record->virt_addr;
+		__entry->paddr = record->phys_addr;
+		__entry->pid = record->context_id;
+
+	),
+
+	TP_printk("vaddr=%llu paddr=%llu pid=%d",
+		__entry->vaddr, __entry->paddr, __entry->pid)
+);
+
+TRACE_EVENT(spe_boost_spe_record,
+	TP_PROTO(struct mem_sampling_record *record),
+
+	TP_ARGS(record),
+
+	TP_STRUCT__entry(
+		__field(u64, boost_spe_pa1)
+		__field(u64, boost_spe_pa2)
+		__field(u64, boost_spe_pa3)
+		__field(u64, boost_spe_pa4)
+		__field(u64, boost_spe_pa5)
+		__field(u64, boost_spe_pa6)
+		__field(u64, boost_spe_pa7)
+		__field(u64, boost_spe_pa8)
+	),
+
+	TP_fast_assign(
+		__entry->boost_spe_pa1 = record->boost_spe_addr[0];
+		__entry->boost_spe_pa2 = record->boost_spe_addr[1];
+		__entry->boost_spe_pa3 = record->boost_spe_addr[2];
+		__entry->boost_spe_pa4 = record->boost_spe_addr[3];
+		__entry->boost_spe_pa5 = record->boost_spe_addr[4];
+		__entry->boost_spe_pa6 = record->boost_spe_addr[5];
+		__entry->boost_spe_pa7 = record->boost_spe_addr[6];
+		__entry->boost_spe_pa8 = record->boost_spe_addr[7];
+	),
+
+	TP_printk("boost_spe_addr[0]=0x%llx boost_spe_addr[1]=0x%llx tlb_addr[2]=0x%llx tlb_addr[3]=0x%llx tlb_addr[4]=0x%llx tlb_addr[5]=0x%llx tlb_addr[6]=0x%llx tlb_addr[7]=0x%llx",
+		__entry->boost_spe_pa1, __entry->boost_spe_pa2,
+		__entry->boost_spe_pa3, __entry->boost_spe_pa4,
+		__entry->boost_spe_pa5, __entry->boost_spe_pa6,
+		__entry->boost_spe_pa7, __entry->boost_spe_pa8)
+);
+#endif /* CONFIG_ARM_SPE_MEM_SAMPLING */
+
+
+#ifdef CONFIG_NUMABALANCING_MEM_SAMPLING
+TRACE_EVENT(mm_numa_migrating,
+
+	TP_PROTO(u64 vaddr, int page_nid, int target_nid,
+		int migrate_success),
+
+	TP_ARGS(vaddr, page_nid, target_nid, migrate_success),
+
+	TP_STRUCT__entry(
+		__field(u64, vaddr)
+		__field(int, page_nid)
+		__field(int, target_nid)
+		__field(int, migrate_success)
+	),
+
+	TP_fast_assign(
+		__entry->vaddr = vaddr;
+		__entry->page_nid = page_nid;
+		__entry->target_nid = target_nid;
+		__entry->migrate_success = !!(migrate_success);
+	),
+
+	TP_printk("vaddr=%llu page_nid=%d target_nid=%d migrate_success=%d",
+		__entry->vaddr, __entry->page_nid,
+		__entry->target_nid, __entry->migrate_success)
+);
+
+TRACE_EVENT(mm_mem_sampling_access_record,
+
+	TP_PROTO(u64 vaddr, u64 paddr, int cpuid, int pid),
+
+	TP_ARGS(vaddr, paddr, cpuid, pid),
+
+	TP_STRUCT__entry(
+		__field(u64, vaddr)
+		__field(u64, paddr)
+		__field(int, cpuid)
+		__field(int, pid)
+	),
+
+	TP_fast_assign(
+		__entry->vaddr = vaddr;
+		__entry->paddr = paddr;
+		__entry->cpuid = cpuid;
+		__entry->pid = pid;
+	),
+
+	TP_printk("vaddr=%llu paddr=%llu cpuid=%d pid=%d",
+		__entry->vaddr, __entry->paddr,
+		__entry->cpuid, __entry->pid)
+);
+#endif /* CONFIG_NUMABALANCING_MEM_SAMPLING */
 #endif /* _TRACE_KMEM_H */
 
 /* This part must be outside protection */

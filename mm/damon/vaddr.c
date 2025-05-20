@@ -14,6 +14,8 @@
 #include <linux/page_idle.h>
 #include <linux/pagewalk.h>
 #include <linux/sched/mm.h>
+#include <linux/cpuset.h>
+#include <linux/mempolicy.h>
 
 #include "ops-common.h"
 
@@ -402,6 +404,118 @@ static void damon_va_mkold(struct mm_struct *mm, unsigned long addr)
 	mmap_read_unlock(mm);
 }
 
+#if IS_ENABLED(CONFIG_DAMON_MEM_SAMPLING)
+/*
+ * Functions for the access checking of the regions with mem sampling
+ */
+static void __hw_damon_va_prepare_access_check(struct damon_region *r)
+{
+	r->sampling_addr = 0;
+}
+
+static void hw_damon_va_prepare_access_checks(struct damon_ctx *ctx)
+{
+	struct damon_target *t;
+	struct mm_struct *mm;
+	struct damon_region *r;
+
+	damon_for_each_target(t, ctx) {
+		mm = damon_get_mm(t);
+		if (!mm)
+			continue;
+		mm->damon_fifo = &t->damon_fifo;
+		damon_for_each_region(r, t)
+			__hw_damon_va_prepare_access_check(r);
+		mmput(mm);
+	}
+}
+
+static void find_damon_region(struct damon_mem_sampling_record *damon_record,
+		  struct damon_target *t, unsigned int *max_nr_accesses)
+{
+	struct damon_region *r;
+	unsigned long addr = damon_record->vaddr;
+
+	damon_for_each_region(r, t) {
+		if (r->sampling_addr != 0)
+			return;
+		if (addr > r->ar.start && addr < r->ar.end) {
+			r->nr_accesses++;
+			r->sampling_addr = addr;
+			*max_nr_accesses = max(r->nr_accesses, *max_nr_accesses);
+			return;
+		}
+	}
+}
+
+static unsigned int hw_damon_va_check_accesses(struct damon_ctx *ctx)
+{
+	unsigned int outs;
+	struct damon_target *t;
+	struct mm_struct *mm;
+	unsigned int max_nr_accesses = 0;
+	struct damon_mem_sampling_record damon_record;
+
+	damon_for_each_target(t, ctx) {
+		mm = damon_get_mm(t);
+		if (!mm)
+			continue;
+		mm->damon_fifo = NULL;
+		mmput(mm);
+		while (!kfifo_is_empty(&t->damon_fifo.rx_kfifo)) {
+			outs = kfifo_out(&t->damon_fifo.rx_kfifo, &damon_record,
+					 sizeof(struct damon_mem_sampling_record));
+			if (outs != sizeof(struct damon_mem_sampling_record)) {
+				pr_debug("damon hw spe record corrupted header. Flush.\n");
+				continue;
+			}
+			find_damon_region(&damon_record, t, &max_nr_accesses);
+		}
+		kfifo_reset_out(&t->damon_fifo.rx_kfifo);
+	}
+
+	return max_nr_accesses;
+}
+#else
+static inline void hw_damon_va_prepare_access_checks(struct damon_ctx *ctx) { }
+static inline unsigned int hw_damon_va_check_accesses(struct damon_ctx *ctx) {return 0; }
+#endif
+
+#ifdef CONFIG_MIGRATION
+static unsigned long damon_migrate_pages(struct damon_target *t,
+			struct damon_region *r, nodemask_t task_remote_nodes)
+{
+	struct mm_struct *mm = NULL;
+	unsigned long applied;
+	struct task_struct *task;
+	nodemask_t task_nodes;
+
+	task = damon_get_task_struct(t);
+	if (!task)
+		return 0;
+	task_nodes = cpuset_mems_allowed(task);
+	put_task_struct(task);
+
+	mm = damon_get_mm(t);
+	if (!mm)
+		return 0;
+
+	applied = do_migrate_area_pages(mm, &task_nodes, &task_remote_nodes,
+				r->ar.start, r->ar.end, MPOL_MF_MOVE_ALL);
+
+	mmput(mm);
+
+	return applied;
+}
+
+#else
+static inline unsigned long damon_migrate_pages(struct damon_target *t,
+			struct damon_region *r, nodemask_t task_remote_nodes)
+{
+	return 0;
+}
+#endif /* CONFIG_MIGRATION */
+
 /*
  * Functions for the access checking of the regions
  */
@@ -419,6 +533,11 @@ static void damon_va_prepare_access_checks(struct damon_ctx *ctx)
 	struct damon_target *t;
 	struct mm_struct *mm;
 	struct damon_region *r;
+
+	if (damon_use_mem_sampling()) {
+		hw_damon_va_prepare_access_checks(ctx);
+		return;
+	}
 
 	damon_for_each_target(t, ctx) {
 		mm = damon_get_mm(t);
@@ -589,6 +708,11 @@ static unsigned int damon_va_check_accesses(struct damon_ctx *ctx)
 	unsigned int max_nr_accesses = 0;
 	bool same_target;
 
+	if (damon_use_mem_sampling()) {
+		max_nr_accesses = hw_damon_va_check_accesses(ctx);
+		return max_nr_accesses;
+	}
+
 	damon_for_each_target(t, ctx) {
 		mm = damon_get_mm(t);
 		if (!mm)
@@ -670,6 +794,8 @@ static unsigned long damon_va_apply_scheme(struct damon_ctx *ctx,
 	case DAMOS_NOHUGEPAGE:
 		madv_action = MADV_NOHUGEPAGE;
 		break;
+	case DAMOS_DEMOTION:
+		return damon_migrate_pages(t, r, scheme->remote_node);
 	case DAMOS_STAT:
 		return 0;
 	default:
@@ -689,6 +815,8 @@ static int damon_va_scheme_score(struct damon_ctx *context,
 
 	switch (scheme->action) {
 	case DAMOS_PAGEOUT:
+		return damon_cold_score(context, r, scheme);
+	case DAMOS_DEMOTION:
 		return damon_cold_score(context, r, scheme);
 	default:
 		break;

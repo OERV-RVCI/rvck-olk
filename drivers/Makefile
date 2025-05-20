@@ -205,3 +205,5 @@ obj-$(CONFIG_S390)		+= s390/
 obj-$(CONFIG_ROH)		+= roh/
 
 obj-$(CONFIG_HISI_VIRTCCA_CODA)	+= coda/
+
+obj-$(CONFIG_ARM_SPE_MEM_SAMPLING)		+= arm/mm_monitor/

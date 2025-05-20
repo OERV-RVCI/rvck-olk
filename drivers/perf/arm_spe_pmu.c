@@ -33,11 +33,18 @@
 #include <linux/slab.h>
 #include <linux/smp.h>
 #include <linux/vmalloc.h>
+#if IS_ENABLED(CONFIG_MEM_SAMPLING)
+#include <linux/mem_sampling.h>
+#endif
 
 #include <asm/barrier.h>
 #include <asm/cpufeature.h>
 #include <asm/mmu.h>
 #include <asm/sysreg.h>
+
+#if IS_ENABLED(CONFIG_ARM_SPE_MEM_SAMPLING)
+#include "../drivers/arm/mm_monitor/mm_spe.h"
+#endif
 
 /*
  * Cache if the event is allowed to trace Context information.
@@ -45,6 +52,10 @@
  * in the context of the event owner, once, during the event_init().
  */
 #define SPE_PMU_HW_FLAGS_CX			0x00001
+
+#if IS_ENABLED(CONFIG_ARM_SPE_MEM_SAMPLING)
+static struct arm_spe_pmu *spe_pmu_local;
+#endif
 
 static_assert((PERF_EVENT_FLAG_ARCH & SPE_PMU_HW_FLAGS_CX) == SPE_PMU_HW_FLAGS_CX);
 
@@ -583,13 +594,21 @@ arm_spe_pmu_buf_get_fault_act(struct perf_output_handle *handle)
 	 * If we've lost data, disable profiling and also set the PARTIAL
 	 * flag to indicate that the last record is corrupted.
 	 */
+#if IS_ENABLED(CONFIG_MEM_SAMPLING)
+	if (spe_user_is_perf() && FIELD_GET(PMBSR_EL1_DL, pmbsr))
+#else
 	if (FIELD_GET(PMBSR_EL1_DL, pmbsr))
+#endif
 		perf_aux_output_flag(handle, PERF_AUX_FLAG_TRUNCATED |
 					     PERF_AUX_FLAG_PARTIAL);
 
 	/* Report collisions to userspace so that it can up the period */
+#if IS_ENABLED(CONFIG_MEM_SAMPLING)
+	if (spe_user_is_perf() && FIELD_GET(PMBSR_EL1_DL, pmbsr))
+#else
 	if (FIELD_GET(PMBSR_EL1_COLL, pmbsr))
 		perf_aux_output_flag(handle, PERF_AUX_FLAG_COLLISION);
+#endif
 
 	/* We only expect buffer management events */
 	switch (FIELD_GET(PMBSR_EL1_EC, pmbsr)) {
@@ -622,7 +641,12 @@ out_err:
 	ret = SPE_PMU_BUF_FAULT_ACT_FATAL;
 
 out_stop:
+#if IS_ENABLED(CONFIG_MEM_SAMPLING)
+	if (spe_user_is_perf())
+		arm_spe_perf_aux_output_end(handle);
+#else
 	arm_spe_perf_aux_output_end(handle);
+#endif
 	return ret;
 }
 
@@ -632,7 +656,11 @@ static irqreturn_t arm_spe_pmu_irq_handler(int irq, void *dev)
 	struct perf_event *event = handle->event;
 	enum arm_spe_pmu_buf_fault_action act;
 
+#if IS_ENABLED(CONFIG_MEM_SAMPLING)
+	if (spe_user_is_perf() && !perf_get_aux(handle))
+#else
 	if (!perf_get_aux(handle))
+#endif
 		return IRQ_NONE;
 
 	act = arm_spe_pmu_buf_get_fault_act(handle);
@@ -643,7 +671,12 @@ static irqreturn_t arm_spe_pmu_irq_handler(int irq, void *dev)
 	 * Ensure perf callbacks have completed, which may disable the
 	 * profiling buffer in response to a TRUNCATION flag.
 	 */
+#if IS_ENABLED(CONFIG_MEM_SAMPLING)
+	if (spe_user_is_perf())
+		irq_work_run();
+#else
 	irq_work_run();
+#endif
 
 	switch (act) {
 	case SPE_PMU_BUF_FAULT_ACT_FATAL:
@@ -663,6 +696,12 @@ static irqreturn_t arm_spe_pmu_irq_handler(int irq, void *dev)
 		 * PMBPTR might be misaligned, but we'll burn that bridge
 		 * when we get to it.
 		 */
+#if IS_ENABLED(CONFIG_MEM_SAMPLING)
+		if (spe_user_is_mem_sampling()) {
+			mem_sampling_process();
+			break;
+		}
+#endif
 		if (!(handle->aux_flags & PERF_AUX_FLAG_TRUNCATED)) {
 			arm_spe_perf_aux_output_begin(handle, event);
 			isb();
@@ -758,6 +797,10 @@ static void arm_spe_pmu_start(struct perf_event *event, int flags)
 	struct hw_perf_event *hwc = &event->hw;
 	struct perf_output_handle *handle = this_cpu_ptr(spe_pmu->handle);
 
+#if IS_ENABLED(CONFIG_MEM_SAMPLING)
+	arm_spe_set_user(SPE_USER_PERF);
+#endif
+
 	hwc->state = 0;
 	arm_spe_perf_aux_output_begin(handle, event);
 	if (hwc->state)
@@ -797,8 +840,16 @@ static void arm_spe_pmu_stop(struct perf_event *event, int flags)
 	struct perf_output_handle *handle = this_cpu_ptr(spe_pmu->handle);
 
 	/* If we're already stopped, then nothing to do */
-	if (hwc->state & PERF_HES_STOPPED)
+	if (hwc->state & PERF_HES_STOPPED) {
+#if IS_ENABLED(CONFIG_MEM_SAMPLING)
+		/*
+		 * PERF_HES_STOPPED maybe set in arm_spe_perf_aux_output_begin,
+		 * we switch user here.
+		 */
+		arm_spe_set_user(SPE_USER_MEM_SAMPLING);
+#endif
 		return;
+	}
 
 	/* Stop all trace generation */
 	arm_spe_pmu_disable_and_drain_local();
@@ -829,6 +880,9 @@ static void arm_spe_pmu_stop(struct perf_event *event, int flags)
 	}
 
 	hwc->state |= PERF_HES_STOPPED;
+#if IS_ENABLED(CONFIG_MEM_SAMPLING)
+	arm_spe_set_user(SPE_USER_MEM_SAMPLING);
+#endif
 }
 
 static int arm_spe_pmu_add(struct perf_event *event, int flags)
@@ -1129,6 +1183,9 @@ static int arm_spe_pmu_cpu_startup(unsigned int cpu, struct hlist_node *node)
 	if (!cpumask_test_cpu(cpu, &spe_pmu->supported_cpus))
 		return 0;
 
+#if IS_ENABLED(CONFIG_ARM_SPE_MEM_SAMPLING)
+	mm_spe_percpu_buffer_alloc(cpu);
+#endif
 	__arm_spe_pmu_setup_one(spe_pmu);
 	return 0;
 }
@@ -1141,6 +1198,9 @@ static int arm_spe_pmu_cpu_teardown(unsigned int cpu, struct hlist_node *node)
 	if (!cpumask_test_cpu(cpu, &spe_pmu->supported_cpus))
 		return 0;
 
+#if IS_ENABLED(CONFIG_ARM_SPE_MEM_SAMPLING)
+	mm_spe_percpu_buffer_free(cpu);
+#endif
 	__arm_spe_pmu_stop_one(spe_pmu);
 	return 0;
 }
@@ -1176,6 +1236,9 @@ static int arm_spe_pmu_dev_init(struct arm_spe_pmu *spe_pmu)
 
 static void arm_spe_pmu_dev_teardown(struct arm_spe_pmu *spe_pmu)
 {
+#if IS_ENABLED(CONFIG_ARM_SPE_MEM_SAMPLING)
+	mm_spe_buffer_free();
+#endif
 	cpuhp_state_remove_instance(arm_spe_pmu_online, &spe_pmu->hotplug_node);
 	free_percpu_irq(spe_pmu->irq, spe_pmu->handle);
 }
@@ -1215,6 +1278,26 @@ static const struct platform_device_id arm_spe_match[] = {
 };
 MODULE_DEVICE_TABLE(platform, arm_spe_match);
 
+#if IS_ENABLED(CONFIG_ARM_SPE_MEM_SAMPLING)
+static bool arm_spe_get_attr(void)
+{
+	struct mm_spe *p;
+
+	p = mm_spe_get_desc();
+	if (!p) {
+		pr_err("get spe pmu cap from arm spe driver failed!\n");
+		return false;
+	}
+
+	p->supported_cpus = spe_pmu_local->supported_cpus;
+	p->irq = spe_pmu_local->irq;
+	p->features = spe_pmu_local->features;
+	p->min_period = spe_pmu_local->min_period;
+
+	return true;
+}
+#endif
+
 static int arm_spe_pmu_device_probe(struct platform_device *pdev)
 {
 	int ret;
@@ -1249,6 +1332,21 @@ static int arm_spe_pmu_device_probe(struct platform_device *pdev)
 	if (ret)
 		goto out_free_handle;
 
+#if IS_ENABLED(CONFIG_ARM_SPE_MEM_SAMPLING)
+	/*
+	 * Ensure that all CPUs that support SPE can apply for the cache
+	 * area, with each CPU defaulting to 4K * 2. Failure to do so will
+	 * result in the inability to collect SPE data in kernel mode.
+	 */
+	ret = mm_spe_buffer_alloc();
+	if (ret)
+		goto out_teardown_dev;
+
+	spe_pmu_local = spe_pmu;
+	if (arm_spe_get_attr())
+		mm_spe_add_probe_status();
+
+#endif
 	ret = arm_spe_pmu_perf_init(spe_pmu);
 	if (ret)
 		goto out_teardown_dev;
@@ -1261,6 +1359,18 @@ out_free_handle:
 	free_percpu(spe_pmu->handle);
 	return ret;
 }
+
+#if IS_ENABLED(CONFIG_MEM_SAMPLING)
+void arm_spe_set_user(enum arm_spe_user_e user)
+{
+	__this_cpu_write(arm_spe_user, user);
+	if (user == SPE_USER_PERF)
+		mem_sampling_user_switch_process(USER_SWITCH_AWAY_FROM_MEM_SAMPLING);
+	else
+		mem_sampling_user_switch_process(USER_SWITCH_BACK_TO_MEM_SAMPLING);
+	__arm_spe_pmu_reset_local();
+}
+#endif
 
 static int arm_spe_pmu_device_remove(struct platform_device *pdev)
 {

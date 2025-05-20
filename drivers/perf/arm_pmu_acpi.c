@@ -16,6 +16,10 @@
 #include <asm/cpu.h>
 #include <asm/cputype.h>
 
+#if IS_ENABLED(CONFIG_ARM_SPE_MEM_SAMPLING)
+#include "../drivers/arm/mm_monitor/mm_spe.h"
+#endif
+
 static DEFINE_PER_CPU(struct arm_pmu *, probed_pmus);
 static DEFINE_PER_CPU(int, pmu_irqs);
 
@@ -162,6 +166,32 @@ static inline void arm_spe_acpi_register_device(void)
 {
 }
 #endif /* CONFIG_ARM_SPE_PMU */
+#if IS_ENABLED(CONFIG_ARM_SPE_MEM_SAMPLING)
+static struct resource spe_mem_sampling_resources[] = {
+	{
+	}
+};
+
+static struct platform_device spe_mem_sampling_dev  = {
+	.name = ARMV8_SPE_MEM_SAMPLING_PDEV_NAME,
+	.id = -1,
+	.resource = spe_mem_sampling_resources,
+	.num_resources = ARRAY_SIZE(spe_mem_sampling_resources)
+};
+
+static void arm_spe_mem_sampling_acpi_register_device(void)
+{
+	int ret;
+
+	ret = platform_device_register(&spe_mem_sampling_dev);
+	if (ret < 0)
+		pr_warn("ACPI: SPE_MEM_SAMPLING: Unable to register device\n");
+}
+#else
+static inline void arm_spe_mem_sampling_acpi_register_device(void)
+{
+}
+#endif /* CONFIG_ARM_SPE_MEM_SAMPLING */
 
 #if IS_ENABLED(CONFIG_CORESIGHT_TRBE)
 static struct resource trbe_resources[] = {
@@ -432,6 +462,7 @@ static int arm_pmu_acpi_init(void)
 		return 0;
 
 	arm_spe_acpi_register_device();
+	arm_spe_mem_sampling_acpi_register_device();
 	arm_trbe_acpi_register_device();
 
 	return 0;

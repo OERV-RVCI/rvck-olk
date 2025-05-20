@@ -32,6 +32,20 @@ config DAMON_VADDR
 	  This builds the default data access monitoring operations for DAMON
 	  that work for virtual address spaces.
 
+config DAMON_MEM_SAMPLING
+	bool "Set DAMON to use records from hardware sample"
+	depends on MEM_SAMPLING && DAMON_VADDR
+	help
+	  This enables DAMON to utilize hardware sampling-based memory access
+	  monitoring data (e.g., ARM SPE, Intel PEBS, AMD IBS) instead of
+	  software-based sampling. When enabled, DAMON will:
+
+	  - Use CPU performance monitoring unit (PMU) samples as data source
+	  - Correlate hardware samples with process virtual address spaces
+	  - Provide lower overhead monitoring compared to pure software approaches
+
+	  If unsure, say N.
+
 config DAMON_PADDR
 	bool "Data access monitoring operations for the physical address space"
 	depends on DAMON && MMU

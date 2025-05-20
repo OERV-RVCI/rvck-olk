@@ -1123,6 +1123,7 @@ static const struct kobj_type damon_sysfs_access_pattern_ktype = {
 struct damon_sysfs_scheme {
 	struct kobject kobj;
 	enum damos_action action;
+	nodemask_t remote_node;
 	struct damon_sysfs_access_pattern *access_pattern;
 	struct damon_sysfs_quotas *quotas;
 	struct damon_sysfs_watermarks *watermarks;
@@ -1140,6 +1141,7 @@ static const char * const damon_sysfs_damos_action_strs[] = {
 	"nohugepage",
 	"lru_prio",
 	"lru_deprio",
+	"demotion",
 	"stat",
 };
 
@@ -1153,6 +1155,7 @@ static struct damon_sysfs_scheme *damon_sysfs_scheme_alloc(
 		return NULL;
 	scheme->kobj = (struct kobject){};
 	scheme->action = action;
+	scheme->remote_node = NODE_MASK_ALL;
 	return scheme;
 }
 
@@ -1356,6 +1359,36 @@ static ssize_t action_store(struct kobject *kobj, struct kobj_attribute *attr,
 	return -EINVAL;
 }
 
+static ssize_t remote_node_show(struct kobject *kobj, struct kobj_attribute *attr,
+		char *buf)
+{
+	struct damon_sysfs_scheme *scheme = container_of(kobj,
+			struct damon_sysfs_scheme, kobj);
+
+	return sysfs_emit(buf, "%*pbl\n",
+			nodemask_pr_args(&scheme->remote_node));
+}
+
+static ssize_t remote_node_store(struct kobject *kobj, struct kobj_attribute *attr,
+		const char *buf, size_t count)
+{
+	struct damon_sysfs_scheme *scheme = container_of(kobj,
+			struct damon_sysfs_scheme, kobj);
+	int ret;
+	nodemask_t new_mask;
+
+	ret = nodelist_parse(buf, new_mask);
+	if (ret < 0)
+		return -EINVAL;
+
+	if (!nodes_subset(new_mask, node_states[N_MEMORY]))
+		return -EINVAL;
+
+	nodes_and(scheme->remote_node, new_mask, node_states[N_MEMORY]);
+	return count;
+}
+
+
 static void damon_sysfs_scheme_release(struct kobject *kobj)
 {
 	kfree(container_of(kobj, struct damon_sysfs_scheme, kobj));
@@ -1364,8 +1397,12 @@ static void damon_sysfs_scheme_release(struct kobject *kobj)
 static struct kobj_attribute damon_sysfs_scheme_action_attr =
 		__ATTR_RW_MODE(action, 0600);
 
+static struct kobj_attribute damon_sysfs_scheme_remote_node_attr =
+		__ATTR_RW_MODE(remote_node, 0600);
+
 static struct attribute *damon_sysfs_scheme_attrs[] = {
 	&damon_sysfs_scheme_action_attr.attr,
+	&damon_sysfs_scheme_remote_node_attr.attr,
 	NULL,
 };
 ATTRIBUTE_GROUPS(damon_sysfs_scheme);
@@ -1644,6 +1681,7 @@ static void damon_sysfs_update_scheme(struct damos *scheme,
 	scheme->pattern.max_age_region = access_pattern->age->max;
 
 	scheme->action = sysfs_scheme->action;
+	scheme->remote_node = sysfs_scheme->remote_node;
 
 	scheme->quota.ms = sysfs_quotas->ms;
 	scheme->quota.sz = sysfs_quotas->sz;
@@ -1687,6 +1725,8 @@ int damon_sysfs_set_schemes(struct damon_ctx *ctx,
 				damon_destroy_scheme(scheme);
 			return -ENOMEM;
 		}
+
+		scheme->remote_node = sysfs_schemes->schemes_arr[i]->remote_node;
 		damon_add_scheme(ctx, scheme);
 	}
 	return 0;
