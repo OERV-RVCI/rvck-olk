@@ -1016,8 +1016,7 @@ static int hclge_tm_pg_dwrr_cfg(struct hclge_dev *hdev)
 	return 0;
 }
 
-static int hclge_vport_q_to_qs_map(struct hclge_dev *hdev,
-				   struct hclge_vport *vport)
+int hclge_vport_q_to_qs_map(struct hclge_dev *hdev, struct hclge_vport *vport)
 {
 	struct hnae3_knic_private_info *kinfo = &vport->nic.kinfo;
 	struct hnae3_tc_info *tc_info = &kinfo->tc_info;
