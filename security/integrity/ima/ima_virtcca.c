@@ -6,7 +6,7 @@
 #include <asm/virtcca_cvm_guest.h>
 #include "ima.h"
 
-#define CVM_IMA_SLOT_IDX 1
+#define DEFAULT_CCA_REM_IDX 4
 
 static enum hash_algo virtcca_algo;
 
@@ -75,9 +75,18 @@ int ima_calc_virtcca_boot_aggregate(struct ima_digest_data *hash)
 
 int ima_virtcca_extend(struct tpm_digest *digests_arg, const void *args)
 {
+	const int pcr = *(const int *)args;
 	struct virtcca_cvm_measurement_extend cme;
 
-	cme.index = CVM_IMA_SLOT_IDX;
+	if (pcr > DEFAULT_CCA_REM_IDX || pcr == 0) {
+		pr_err("IMA: Extending measurement to CCA REM register index invalid, is 0 or exceeds max limit 4\n");
+		return -EINVAL;
+	}
+
+	if (pcr < DEFAULT_CCA_REM_IDX)
+		pr_info("IMA: Extending measurement to CCA REM register 1~3 may conflict with uefi measure\n");
+
+	cme.index = pcr;
 	cme.size = hash_digest_size[virtcca_algo];
 
 	/*
