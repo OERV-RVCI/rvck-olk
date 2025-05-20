@@ -2330,17 +2330,23 @@ void hclge_reset_tc_config(struct hclge_dev *hdev)
 	hclge_comm_rss_indir_init_cfg(hdev->ae_dev, &hdev->rss_cfg);
 }
 
-static int hclge_vf_prio_tc_validate(struct hclge_dev *hdev,
-				     struct hclge_mbx_tc_info *tc_info)
+u32 hclge_tm_get_prio_tc_map(struct hclge_dev *hdev)
 {
 #define HCLGE_PRI_SHIFT		4
-
 	u32 prio_tc_map = 0;
 	u8 i;
 
 	for (i = 0; i < HNAE3_MAX_USER_PRIO; i++)
 		prio_tc_map |=
 			(u32)hdev->tm_info.prio_tc[i] << (i * HCLGE_PRI_SHIFT);
+
+	return prio_tc_map;
+}
+
+static int hclge_vf_prio_tc_validate(struct hclge_dev *hdev,
+				     struct hclge_mbx_tc_info *tc_info)
+{
+	u32 prio_tc_map = hclge_tm_get_prio_tc_map(hdev);
 
 	if (prio_tc_map != __le32_to_cpu(tc_info->prio_tc_map)) {
 		dev_err(&hdev->pdev->dev,
