@@ -294,8 +294,9 @@ struct netlink_callback {
 	u16			answer_flags;
 	u32			min_dump_alloc;
 	unsigned int		prev_seq, seq;
-	int			flags;
 	bool			strict_check;
+	KABI_FILL_HOLE(int	flags)
+
 	union {
 		u8		ctx[48];
 
