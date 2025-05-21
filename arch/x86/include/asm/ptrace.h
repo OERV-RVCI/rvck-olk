@@ -5,6 +5,7 @@
 #include <asm/segment.h>
 #include <asm/page_types.h>
 #include <uapi/asm/ptrace.h>
+#include <linux/kabi.h>
 
 #ifndef __ASSEMBLY__
 #ifdef __i386__
@@ -141,26 +142,26 @@ struct pt_regs {
 	/* The IRETQ return frame starts here */
 	unsigned long ip;
 
-	union {
+	KABI_REPLACE(unsigned long cs, union {
 		/* CS selector */
 		u16		cs;
 		/* The extended 64-bit data slot containing CS */
 		u64		csx;
 		/* The FRED CS extension */
 		struct fred_cs	fred_cs;
-	};
+	})
 
 	unsigned long flags;
 	unsigned long sp;
 
-	union {
+	KABI_REPLACE(unsigned long ss, union {
 		/* SS selector */
 		u16		ss;
 		/* The extended 64-bit data slot containing SS */
 		u64		ssx;
 		/* The FRED SS extension */
 		struct fred_ss	fred_ss;
-	};
+	})
 
 	/*
 	 * Top of stack on IDT systems, while FRED systems have extra fields
