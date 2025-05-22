@@ -406,10 +406,20 @@ static inline int ovl_do_getattr(const struct path *path, struct kstat *stat,
 }
 
 /* util.c */
+int ovl_get_write_access(struct dentry *dentry);
+void ovl_put_write_access(struct dentry *dentry);
+void ovl_start_write(struct dentry *dentry);
+void ovl_end_write(struct dentry *dentry);
 int ovl_want_write(struct dentry *dentry);
 void ovl_drop_write(struct dentry *dentry);
 struct dentry *ovl_workdir(struct dentry *dentry);
 const struct cred *ovl_override_creds(struct super_block *sb);
+
+static inline const struct cred *ovl_creds(struct super_block *sb)
+{
+	return OVL_FS(sb)->creator_cred;
+}
+
 int ovl_can_decode_fh(struct super_block *sb);
 struct dentry *ovl_indexdir(struct super_block *sb);
 bool ovl_index_all(struct super_block *sb);
@@ -632,11 +642,15 @@ struct dentry *ovl_decode_real_fh(struct ovl_fs *ofs, struct ovl_fh *fh,
 int ovl_check_origin_fh(struct ovl_fs *ofs, struct ovl_fh *fh, bool connected,
 			struct dentry *upperdentry, struct ovl_path **stackp);
 int ovl_verify_set_fh(struct ovl_fs *ofs, struct dentry *dentry,
-		      enum ovl_xattr ox, struct dentry *real, bool is_upper,
-		      bool set);
+		      enum ovl_xattr ox, const struct ovl_fh *fh,
+		      bool is_upper, bool set);
+int ovl_verify_origin_xattr(struct ovl_fs *ofs, struct dentry *dentry,
+			    enum ovl_xattr ox, struct dentry *real,
+			    bool is_upper, bool set);
 struct dentry *ovl_index_upper(struct ovl_fs *ofs, struct dentry *index,
 			       bool connected);
 int ovl_verify_index(struct ovl_fs *ofs, struct dentry *index);
+int ovl_get_index_name_fh(const struct ovl_fh *fh, struct qstr *name);
 int ovl_get_index_name(struct ovl_fs *ofs, struct dentry *origin,
 		       struct qstr *name);
 struct dentry *ovl_get_index_fh(struct ovl_fs *ofs, struct ovl_fh *fh);
@@ -648,17 +662,24 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 			  unsigned int flags);
 bool ovl_lower_positive(struct dentry *dentry);
 
+static inline int ovl_verify_origin_fh(struct ovl_fs *ofs, struct dentry *upper,
+				       const struct ovl_fh *fh, bool set)
+{
+	return ovl_verify_set_fh(ofs, upper, OVL_XATTR_ORIGIN, fh, false, set);
+}
+
 static inline int ovl_verify_origin(struct ovl_fs *ofs, struct dentry *upper,
 				    struct dentry *origin, bool set)
 {
-	return ovl_verify_set_fh(ofs, upper, OVL_XATTR_ORIGIN, origin,
-				 false, set);
+	return ovl_verify_origin_xattr(ofs, upper, OVL_XATTR_ORIGIN, origin,
+				       false, set);
 }
 
 static inline int ovl_verify_upper(struct ovl_fs *ofs, struct dentry *index,
 				   struct dentry *upper, bool set)
 {
-	return ovl_verify_set_fh(ofs, index, OVL_XATTR_UPPER, upper, true, set);
+	return ovl_verify_origin_xattr(ofs, index, OVL_XATTR_UPPER, upper,
+				       true, set);
 }
 
 /* readdir.c */
@@ -807,8 +828,6 @@ struct dentry *ovl_create_temp(struct ovl_fs *ofs, struct dentry *workdir,
 
 /* file.c */
 extern const struct file_operations ovl_file_operations;
-int __init ovl_aio_request_cache_init(void);
-void ovl_aio_request_cache_destroy(void);
 int ovl_real_fileattr_get(const struct path *realpath, struct fileattr *fa);
 int ovl_real_fileattr_set(const struct path *realpath, struct fileattr *fa);
 int ovl_fileattr_get(struct dentry *dentry, struct fileattr *fa);
@@ -823,8 +842,9 @@ int ovl_copy_xattr(struct super_block *sb, const struct path *path, struct dentr
 int ovl_set_attr(struct ovl_fs *ofs, struct dentry *upper, struct kstat *stat);
 struct ovl_fh *ovl_encode_real_fh(struct ovl_fs *ofs, struct inode *realinode,
 				  bool is_upper);
-int ovl_set_origin(struct ovl_fs *ofs, struct dentry *lower,
-		   struct dentry *upper);
+struct ovl_fh *ovl_get_origin_fh(struct ovl_fs *ofs, struct dentry *origin);
+int ovl_set_origin_fh(struct ovl_fs *ofs, const struct ovl_fh *fh,
+		      struct dentry *upper);
 
 /* export.c */
 extern const struct export_operations ovl_export_operations;

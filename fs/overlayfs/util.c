@@ -17,10 +17,36 @@
 #include <linux/ratelimit.h>
 #include "overlayfs.h"
 
+/* Get write access to upper mnt - may fail if upper sb was remounted ro */
+int ovl_get_write_access(struct dentry *dentry)
+{
+	struct ovl_fs *ofs = OVL_FS(dentry->d_sb);
+	return mnt_get_write_access(ovl_upper_mnt(ofs));
+}
+
+/* Get write access to upper sb - may block if upper sb is frozen */
+void ovl_start_write(struct dentry *dentry)
+{
+	struct ovl_fs *ofs = OVL_FS(dentry->d_sb);
+	sb_start_write(ovl_upper_mnt(ofs)->mnt_sb);
+}
+
 int ovl_want_write(struct dentry *dentry)
 {
 	struct ovl_fs *ofs = OVL_FS(dentry->d_sb);
 	return mnt_want_write(ovl_upper_mnt(ofs));
+}
+
+void ovl_put_write_access(struct dentry *dentry)
+{
+	struct ovl_fs *ofs = OVL_FS(dentry->d_sb);
+	mnt_put_write_access(ovl_upper_mnt(ofs));
+}
+
+void ovl_end_write(struct dentry *dentry)
+{
+	struct ovl_fs *ofs = OVL_FS(dentry->d_sb);
+	sb_end_write(ovl_upper_mnt(ofs)->mnt_sb);
 }
 
 void ovl_drop_write(struct dentry *dentry)
@@ -647,22 +673,36 @@ bool ovl_already_copied_up(struct dentry *dentry, int flags)
 	return false;
 }
 
+/*
+ * The copy up "transaction" keeps an elevated mnt write count on upper mnt,
+ * but leaves taking freeze protection on upper sb to lower level helpers.
+ */
 int ovl_copy_up_start(struct dentry *dentry, int flags)
 {
 	struct inode *inode = d_inode(dentry);
 	int err;
 
 	err = ovl_inode_lock_interruptible(inode);
-	if (!err && ovl_already_copied_up_locked(dentry, flags)) {
-		err = 1; /* Already copied up */
-		ovl_inode_unlock(inode);
-	}
+	if (err)
+		return err;
 
+	if (ovl_already_copied_up_locked(dentry, flags))
+		err = 1; /* Already copied up */
+	else
+		err = ovl_get_write_access(dentry);
+	if (err)
+		goto out_unlock;
+
+	return 0;
+
+out_unlock:
+	ovl_inode_unlock(inode);
 	return err;
 }
 
 void ovl_copy_up_end(struct dentry *dentry)
 {
+	ovl_put_write_access(dentry);
 	ovl_inode_unlock(d_inode(dentry));
 }
 
@@ -976,12 +1016,18 @@ static void ovl_cleanup_index(struct dentry *dentry)
 	struct dentry *index = NULL;
 	struct inode *inode;
 	struct qstr name = { };
+	bool got_write = false;
 	int err;
 
 	err = ovl_get_index_name(ofs, lowerdentry, &name);
 	if (err)
 		goto fail;
 
+	err = ovl_want_write(dentry);
+	if (err)
+		goto fail;
+
+	got_write = true;
 	inode = d_inode(upperdentry);
 	if (!S_ISDIR(inode->i_mode) && inode->i_nlink != 1) {
 		pr_warn_ratelimited("cleanup linked index (%pd2, ino=%lu, nlink=%u)\n",
@@ -1019,6 +1065,8 @@ static void ovl_cleanup_index(struct dentry *dentry)
 		goto fail;
 
 out:
+	if (got_write)
+		ovl_drop_write(dentry);
 	kfree(name.name);
 	dput(index);
 	return;
@@ -1065,8 +1113,12 @@ int ovl_nlink_start(struct dentry *dentry)
 	if (err)
 		return err;
 
+	err = ovl_want_write(dentry);
+	if (err)
+		goto out_unlock;
+
 	if (d_is_dir(dentry) || !ovl_test_flag(OVL_INDEX, inode))
-		goto out;
+		return 0;
 
 	old_cred = ovl_override_creds(dentry->d_sb);
 	/*
@@ -1077,10 +1129,15 @@ int ovl_nlink_start(struct dentry *dentry)
 	 */
 	err = ovl_set_nlink_upper(dentry);
 	revert_creds(old_cred);
-
-out:
 	if (err)
-		ovl_inode_unlock(inode);
+		goto out_drop_write;
+
+	return 0;
+
+out_drop_write:
+	ovl_drop_write(dentry);
+out_unlock:
+	ovl_inode_unlock(inode);
 
 	return err;
 }
@@ -1088,6 +1145,8 @@ out:
 void ovl_nlink_end(struct dentry *dentry)
 {
 	struct inode *inode = d_inode(dentry);
+
+	ovl_drop_write(dentry);
 
 	if (ovl_test_flag(OVL_INDEX, inode) && inode->i_nlink == 0) {
 		const struct cred *old_cred;
@@ -1406,6 +1465,7 @@ void ovl_copyattr(struct inode *inode)
 	realinode = ovl_i_path_real(inode, &realpath);
 	real_idmap = mnt_idmap(realpath.mnt);
 
+	spin_lock(&inode->i_lock);
 	vfsuid = i_uid_into_vfsuid(real_idmap, realinode);
 	vfsgid = i_gid_into_vfsgid(real_idmap, realinode);
 
@@ -1416,4 +1476,5 @@ void ovl_copyattr(struct inode *inode)
 	inode->i_mtime = realinode->i_mtime;
 	inode_set_ctime_to_ts(inode, inode_get_ctime(realinode));
 	i_size_write(inode, i_size_read(realinode));
+	spin_unlock(&inode->i_lock);
 }
