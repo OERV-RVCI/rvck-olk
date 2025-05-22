@@ -310,4 +310,5 @@ void hclgevf_update_rss_size(struct hnae3_handle *handle, u32 new_tqps_num);
 int hclgevf_init_rss_tc_mode(struct hclgevf_dev *hdev, u16 rss_size);
 void hclgevf_build_send_msg(struct hclge_vf_to_pf_msg *msg, u8 code,
 			    u8 subcode);
+int hclgevf_get_dscp_to_pri_map(struct hclgevf_dev *hdev);
 #endif

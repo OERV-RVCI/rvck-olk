@@ -308,4 +308,5 @@ void hclgevf_dcb_init(struct hclgevf_dev *hdev)
 	hdev->tc_info.tc_sch_mode = BIT(0);
 	hdev->hw_tc_map = 1;
 	kinfo->dcb_ops = &hclgevf_dcb_ops;
+	hclgevf_get_dscp_to_pri_map(hdev);
 }
