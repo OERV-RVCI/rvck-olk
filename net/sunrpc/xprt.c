@@ -51,6 +51,7 @@
 #include <linux/sunrpc/bc_xprt.h>
 #include <linux/rcupdate.h>
 #include <linux/sched/mm.h>
+#include <linux/sunrpc/sunrpc_enfs_adapter.h>
 
 #include <trace/events/sunrpc.h>
 
@@ -282,6 +283,7 @@ out_locked:
 out_unlock:
 	xprt_clear_locked(xprt);
 out_sleep:
+	rpc_multipath_ops_adjust_task_timeout(task, NULL);
 	task->tk_status = -EAGAIN;
 	if  (RPC_IS_SOFT(task))
 		rpc_sleep_on_timeout(&xprt->sending, task, NULL,
@@ -348,6 +350,8 @@ int xprt_reserve_xprt_cong(struct rpc_xprt *xprt, struct rpc_task *task)
 out_unlock:
 	xprt_clear_locked(xprt);
 out_sleep:
+	rpc_multipath_ops_adjust_task_timeout(task, NULL);
+
 	task->tk_status = -EAGAIN;
 	if (RPC_IS_SOFT(task))
 		rpc_sleep_on_timeout(&xprt->sending, task, NULL,
@@ -608,6 +612,7 @@ EXPORT_SYMBOL_GPL(xprt_wake_pending_tasks);
  */
 void xprt_wait_for_buffer_space(struct rpc_xprt *xprt)
 {
+	rpc_multipath_ops_adjust_task_timeout(xprt->snd_task, NULL);
 	set_bit(XPRT_WRITE_SPACE, &xprt->state);
 }
 EXPORT_SYMBOL_GPL(xprt_wait_for_buffer_space);
@@ -1888,6 +1893,8 @@ xprt_request_init(struct rpc_task *task)
 	req->rq_release_snd_buf = NULL;
 	xprt_init_majortimeo(task, req);
 
+	rpc_multipath_ops_init_task_req(task, req);
+
 	trace_xprt_reserve(req);
 }
 
@@ -1961,6 +1968,9 @@ void xprt_release(struct rpc_task *task)
 
 	xprt = req->rq_xprt;
 	xprt_request_dequeue_xprt(task);
+
+	rpc_multipath_ops_xprt_iostat(task);
+
 	spin_lock(&xprt->transport_lock);
 	xprt->ops->release_xprt(xprt, task);
 	if (xprt->ops->release_request)
@@ -1980,6 +1990,7 @@ void xprt_release(struct rpc_task *task)
 	else
 		xprt_free_bc_request(req);
 }
+EXPORT_SYMBOL_GPL(xprt_release);
 
 #ifdef CONFIG_SUNRPC_BACKCHANNEL
 void
@@ -2063,11 +2074,22 @@ struct rpc_xprt *xprt_create_transport(struct xprt_create *args)
 		xprt_destroy(xprt);
 		return ERR_PTR(-EINVAL);
 	}
+#if IS_ENABLED(CONFIG_SUNRPC_ENFS)
+	xprt->servername = rpc_multipath_set_servername(args->servername, GFP_KERNEL);
+#else
 	xprt->servername = kstrdup(args->servername, GFP_KERNEL);
+#endif
 	if (xprt->servername == NULL) {
 		xprt_destroy(xprt);
 		return ERR_PTR(-ENOMEM);
 	}
+
+#if IS_ENABLED(CONFIG_SUNRPC_ENFS)
+	if (!rpc_multipath_ops_create_xprt(xprt)) {
+		xprt_destroy(xprt);
+		return ERR_PTR(-ENOMEM);
+	}
+#endif
 
 	rpc_xprt_debugfs_register(xprt);
 
@@ -2088,7 +2110,11 @@ static void xprt_destroy_cb(struct work_struct *work)
 	rpc_destroy_wait_queue(&xprt->pending);
 	rpc_destroy_wait_queue(&xprt->sending);
 	rpc_destroy_wait_queue(&xprt->backlog);
+#if IS_ENABLED(CONFIG_SUNRPC_ENFS)
+	rpc_multipath_free_servername(xprt);
+#else
 	kfree(xprt->servername);
+#endif
 	/*
 	 * Destroy any existing back channel
 	 */

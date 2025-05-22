@@ -83,4 +83,9 @@ extern bool rpc_xprt_switch_has_addr(struct rpc_xprt_switch *xps,
 
 extern void xprt_multipath_cleanup_ids(void);
 
+extern void xprt_switch_add_xprt_locked(struct rpc_xprt_switch *xps,
+		struct rpc_xprt *xprt);
+
+extern void rpc_xprt_switch_set_singular(struct rpc_xprt_switch *xps);
+
 #endif

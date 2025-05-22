@@ -115,3 +115,15 @@ config SUNRPC_XPRT_RDMA
 
 	  If unsure, or you know there is no RDMA capability on your
 	  hardware platform, say N.
+
+config SUNRPC_ENFS
+	tristate "sunrpc support ENFS"
+	depends on SUNRPC
+	depends on X86 || X86_64 || ARM64
+	default n
+	help
+	 This option enables support multipath of the NFS protocol
+	 in the kernel's NFS client.
+	 This feature will improve performance and reliability.
+
+	 If sure, say Y.

@@ -29,8 +29,8 @@ static const struct rpc_xprt_iter_ops rpc_xprt_iter_roundrobin;
 static const struct rpc_xprt_iter_ops rpc_xprt_iter_listall;
 static const struct rpc_xprt_iter_ops rpc_xprt_iter_listoffline;
 
-static void xprt_switch_add_xprt_locked(struct rpc_xprt_switch *xps,
-		struct rpc_xprt *xprt)
+void xprt_switch_add_xprt_locked(struct rpc_xprt_switch *xps,
+				 struct rpc_xprt *xprt)
 {
 	if (unlikely(xprt_get(xprt) == NULL))
 		return;
@@ -41,6 +41,7 @@ static void xprt_switch_add_xprt_locked(struct rpc_xprt_switch *xps,
 	xps->xps_nxprts++;
 	xps->xps_nactive++;
 }
+EXPORT_SYMBOL(xprt_switch_add_xprt_locked);
 
 /**
  * rpc_xprt_switch_add_xprt - Add a new rpc_xprt to an rpc_xprt_switch
@@ -91,6 +92,7 @@ void rpc_xprt_switch_remove_xprt(struct rpc_xprt_switch *xps,
 	spin_unlock(&xps->xps_lock);
 	xprt_put(xprt);
 }
+EXPORT_SYMBOL(rpc_xprt_switch_remove_xprt);
 
 static DEFINE_IDA(rpc_xprtswitch_ids);
 
@@ -187,6 +189,7 @@ struct rpc_xprt_switch *xprt_switch_get(struct rpc_xprt_switch *xps)
 		return xps;
 	return NULL;
 }
+EXPORT_SYMBOL(xprt_switch_get);
 
 /**
  * xprt_switch_put - Release a reference to a rpc_xprt_switch
@@ -199,6 +202,7 @@ void xprt_switch_put(struct rpc_xprt_switch *xps)
 	if (xps != NULL)
 		kref_put(&xps->xps_kref, xprt_switch_free);
 }
+EXPORT_SYMBOL(xprt_switch_put);
 
 /**
  * rpc_xprt_switch_set_roundrobin - Set a round-robin policy on rpc_xprt_switch
@@ -211,6 +215,13 @@ void rpc_xprt_switch_set_roundrobin(struct rpc_xprt_switch *xps)
 	if (READ_ONCE(xps->xps_iter_ops) != &rpc_xprt_iter_roundrobin)
 		WRITE_ONCE(xps->xps_iter_ops, &rpc_xprt_iter_roundrobin);
 }
+
+void rpc_xprt_switch_set_singular(struct rpc_xprt_switch *xps)
+{
+	if (READ_ONCE(xps->xps_iter_ops) != &rpc_xprt_iter_singular)
+		WRITE_ONCE(xps->xps_iter_ops, &rpc_xprt_iter_singular);
+}
+EXPORT_SYMBOL(rpc_xprt_switch_set_singular);
 
 static
 const struct rpc_xprt_iter_ops *xprt_iter_ops(const struct rpc_xprt_iter *xpi)
@@ -618,6 +629,7 @@ struct rpc_xprt *xprt_iter_get_xprt(struct rpc_xprt_iter *xpi)
 	rcu_read_unlock();
 	return xprt;
 }
+EXPORT_SYMBOL(xprt_iter_get_xprt);
 
 /**
  * xprt_iter_get_next - Returns the next rpc_xprt following the cursor

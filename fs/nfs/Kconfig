@@ -212,3 +212,15 @@ config NFS_V4_2_READ_PLUS
 	default y
 	help
 	 Choose Y here to enable use of the NFS v4.2 READ_PLUS operation.
+
+config ENFS
+	tristate "NFS client support for ENFS"
+	depends on NFS_FS && SUNRPC_ENFS
+	depends on X86 || X86_64 || ARM64
+	default n
+	help
+	 This option enables support multipath of the NFS protocol
+	 in the kernel's NFS client.
+	 This feature will improve performance and reliability.
+
+	 If sure, say Y.

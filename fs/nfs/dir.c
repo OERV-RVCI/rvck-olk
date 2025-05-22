@@ -43,7 +43,7 @@
 
 #include "delegation.h"
 #include "iostat.h"
-#include "internal.h"
+#include "enfs_adapter.h"
 #include "fscache.h"
 
 #include "nfstrace.h"
@@ -1495,6 +1495,15 @@ static int nfs_dentry_verify_change(struct inode *dir, struct dentry *dentry)
 	return nfs_verify_change_attribute(dir, dentry->d_time);
 }
 
+bool nfs_check_have_lookup_cache_flag(struct nfs_server *server, int flag)
+{
+#if IS_ENABLED(CONFIG_ENFS)
+	return enfs_check_have_lookup_cache_flag(server, flag);
+#else
+	return (server->flags & NFS_MOUNT_LOOKUP_CACHE_NONE);
+#endif
+}
+
 /*
  * A check for whether or not the parent directory has changed.
  * In the case it has, we assume that the dentries are untrustworthy
@@ -1506,7 +1515,7 @@ static int nfs_check_verifier(struct inode *dir, struct dentry *dentry,
 {
 	if (IS_ROOT(dentry))
 		return 1;
-	if (NFS_SERVER(dir)->flags & NFS_MOUNT_LOOKUP_CACHE_NONE)
+	if (nfs_check_have_lookup_cache_flag(NFS_SERVER(dir), NFS_MOUNT_LOOKUP_CACHE_NONE))
 		return 0;
 	if (!nfs_dentry_verify_change(dir, dentry))
 		return 0;
@@ -1610,7 +1619,7 @@ int nfs_neg_need_reval(struct inode *dir, struct dentry *dentry,
 {
 	if (flags & (LOOKUP_CREATE | LOOKUP_RENAME_TARGET))
 		return 0;
-	if (NFS_SERVER(dir)->flags & NFS_MOUNT_LOOKUP_CACHE_NONEG)
+	if (nfs_check_have_lookup_cache_flag(NFS_SERVER(dir), NFS_MOUNT_LOOKUP_CACHE_NONEG))
 		return 1;
 	/* Case insensitive server? Revalidate negative dentries */
 	if (nfs_server_capable(dir, NFS_CAP_CASE_INSENSITIVE))

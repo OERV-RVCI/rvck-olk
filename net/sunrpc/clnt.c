@@ -38,6 +38,7 @@
 #include <linux/sunrpc/rpc_pipe_fs.h>
 #include <linux/sunrpc/metrics.h>
 #include <linux/sunrpc/bc_xprt.h>
+#include <linux/sunrpc/sunrpc_enfs_adapter.h>
 #include <trace/events/sunrpc.h>
 
 #include "sunrpc.h"
@@ -77,7 +78,7 @@ static int	rpc_decode_header(struct rpc_task *task,
 				  struct xdr_stream *xdr);
 static int	rpc_ping(struct rpc_clnt *clnt);
 static int	rpc_ping_noreply(struct rpc_clnt *clnt);
-static void	rpc_check_timeout(struct rpc_task *task);
+static void	rpc_check_timeout(struct rpc_task *task, bool failover);
 
 static void rpc_register_client(struct rpc_clnt *clnt)
 {
@@ -495,6 +496,8 @@ static struct rpc_clnt *rpc_create_xprt(struct rpc_create_args *args,
 			return ERR_PTR(err);
 		}
 	}
+
+	rpc_multipath_ops_create_clnt(args, clnt);
 
 	clnt->cl_softrtry = 1;
 	if (args->flags & (RPC_CLNT_CREATE_HARDRTRY|RPC_CLNT_CREATE_SOFTERR)) {
@@ -954,6 +957,8 @@ void rpc_shutdown_client(struct rpc_clnt *clnt)
 			list_empty(&clnt->cl_tasks), 1*HZ);
 	}
 
+	rpc_multipath_ops_releas_clnt(clnt);
+
 	rpc_release_client(clnt);
 }
 EXPORT_SYMBOL_GPL(rpc_shutdown_client);
@@ -1081,6 +1086,8 @@ rpc_task_get_xprt(struct rpc_clnt *clnt, struct rpc_xprt *xprt)
 
 	if (!xprt)
 		return NULL;
+
+	rpc_multipath_ops_inc_queuelen(xprt);
 	rcu_read_lock();
 	xps = rcu_dereference(clnt->cl_xpi.xpi_xpswitch);
 	atomic_long_inc(&xps->xps_queuelen);
@@ -1095,6 +1102,7 @@ rpc_task_release_xprt(struct rpc_clnt *clnt, struct rpc_xprt *xprt)
 {
 	struct rpc_xprt_switch *xps;
 
+	rpc_multipath_ops_dec_queuelen(xprt);
 	atomic_long_dec(&xprt->queuelen);
 	rcu_read_lock();
 	xps = rcu_dereference(clnt->cl_xpi.xpi_xpswitch);
@@ -1145,15 +1153,18 @@ rpc_task_get_first_xprt(struct rpc_clnt *clnt)
 	return rpc_task_get_xprt(clnt, xprt);
 }
 
-static struct rpc_xprt *
+struct rpc_xprt *
 rpc_task_get_next_xprt(struct rpc_clnt *clnt)
 {
 	return rpc_task_get_xprt(clnt, xprt_iter_get_next(&clnt->cl_xpi));
 }
+EXPORT_SYMBOL_GPL(rpc_task_get_next_xprt);
 
 static
 void rpc_task_set_transport(struct rpc_task *task, struct rpc_clnt *clnt)
 {
+	rpc_multipath_ops_set_transport(task, clnt);
+
 	if (task->tk_xprt) {
 		if (!(test_bit(XPRT_OFFLINE, &task->tk_xprt->state) &&
 		      (task->tk_flags & RPC_TASK_MOVEABLE)))
@@ -1564,6 +1575,33 @@ int rpc_localaddr(struct rpc_clnt *clnt, struct sockaddr *buf, size_t buflen)
 }
 EXPORT_SYMBOL_GPL(rpc_localaddr);
 
+int rpc_localalladdr(struct rpc_xprt *xprt, struct sockaddr *buf, size_t buflen)
+{
+	struct sockaddr_storage address;
+	struct sockaddr *sap = (struct sockaddr *)&address;
+	struct rpc_xprt *xpr;
+	struct net *net;
+	size_t salen;
+	int err;
+
+	rcu_read_lock();
+	xpr = rcu_dereference(xprt);
+	salen = xpr->addrlen;
+	memcpy(sap, &xpr->addr, salen);
+	net = get_net(xpr->xprt_net);
+	dprintk("NFS:net:%p\n", xpr->xprt_net);
+	rcu_read_unlock();
+
+	rpc_set_port(sap, 0);
+	err = rpc_sockname(net, sap, salen, buf);
+	put_net(net);
+	if (err != 0)
+		/* Couldn't discover local address, return ANYADDR */
+		return rpc_anyaddr(sap->sa_family, buf, buflen);
+	return 0;
+}
+EXPORT_SYMBOL_GPL(rpc_localalladdr);
+
 void
 rpc_setbufsize(struct rpc_clnt *clnt, unsigned int sndsize, unsigned int rcvsize)
 {
@@ -1789,6 +1827,14 @@ call_reserveresult(struct rpc_task *task)
 	case -EAGAIN:	/* woken up; retry */
 		task->tk_action = call_retry_reserve;
 		return;
+#if IS_ENABLED(CONFIG_SUNRPC_ENFS)
+	case -ETIMEDOUT:	/* woken up; restart */
+		if (rpc_multipath_ops_task_need_call_start_again(task)) {
+			rpc_task_release_transport(task);
+			task->tk_action = call_start;
+		}
+		return;
+#endif
 	default:
 		rpc_call_rpcerror(task, status);
 	}
@@ -2116,7 +2162,7 @@ out_next:
 retry_timeout:
 	task->tk_status = 0;
 	task->tk_action = call_bind;
-	rpc_check_timeout(task);
+	rpc_check_timeout(task, true);
 }
 
 /*
@@ -2242,7 +2288,7 @@ out_next:
 out_retry:
 	/* Check for timeouts before looping back to call_bind */
 	task->tk_action = call_bind;
-	rpc_check_timeout(task);
+	rpc_check_timeout(task, true);
 }
 
 /*
@@ -2334,7 +2380,7 @@ call_transmit_status(struct rpc_task *task)
 		task->tk_status = 0;
 		break;
 	}
-	rpc_check_timeout(task);
+	rpc_check_timeout(task, false);
 }
 
 #if defined(CONFIG_SUNRPC_BACKCHANNEL)
@@ -2484,7 +2530,7 @@ call_status(struct rpc_task *task)
 		goto out_exit;
 	}
 	task->tk_action = call_encode;
-	rpc_check_timeout(task);
+	rpc_check_timeout(task, true);
 	return;
 out_exit:
 	rpc_call_rpcerror(task, status);
@@ -2500,15 +2546,20 @@ rpc_check_connected(const struct rpc_rqst *req)
 }
 
 static void
-rpc_check_timeout(struct rpc_task *task)
+rpc_check_timeout(struct rpc_task *task, bool failover)
 {
 	struct rpc_clnt	*clnt = task->tk_client;
 
 	if (RPC_SIGNALLED(task))
 		return;
 
-	if (xprt_adjust_timeout(task->tk_rqstp) == 0)
+	if (xprt_adjust_timeout(task->tk_rqstp) == 0) {
+#if IS_ENABLED(CONFIG_SUNRPC_ENFS)
+		if (failover)
+			rpc_multipath_ops_failover_handle(task);
+#endif
 		return;
+	}
 
 	trace_rpc_timeout_status(task);
 	task->tk_timeouts++;
@@ -2619,11 +2670,11 @@ out:
 			xprt_conditional_disconnect(req->rq_xprt,
 						    req->rq_connect_cookie);
 		task->tk_action = call_encode;
-		rpc_check_timeout(task);
+		rpc_check_timeout(task, true);
 		break;
 	case -EKEYREJECTED:
 		task->tk_action = call_reserve;
-		rpc_check_timeout(task);
+		rpc_check_timeout(task, true);
 		rpcauth_invalcred(task);
 		/* Ensure we obtain a new XID if we retry! */
 		xprt_release(task);
@@ -2645,8 +2696,12 @@ rpc_encode_header(struct rpc_task *task, struct xdr_stream *xdr)
 	*p++ = req->rq_xid;
 	*p++ = rpc_call;
 	*p++ = cpu_to_be32(RPC_VERSION);
+#if IS_ENABLED(CONFIG_SUNRPC_ENFS)
+	RPC_MULTIPAHT_UPDATE_RPC_PROC(task, p, clnt);
+#else
 	*p++ = cpu_to_be32(clnt->cl_prog);
 	*p++ = cpu_to_be32(clnt->cl_vers);
+#endif
 	*p   = cpu_to_be32(task->tk_msg.rpc_proc->p_proc);
 
 	error = rpcauth_marshcred(task, xdr);
@@ -2966,6 +3021,29 @@ success:
 }
 EXPORT_SYMBOL_GPL(rpc_clnt_test_and_add_xprt);
 
+/* rpc_clnt_test_xprt - Test and add a new transport to a rpc_clnt
+ * @clnt: pointer to struct rpc_clnt
+ * @xprt: pointer struct rpc_xprt
+ * @ops: async operation
+ */
+int rpc_clnt_test_xprt(struct rpc_clnt *clnt, struct rpc_xprt *xprt,
+		       const struct rpc_call_ops *ops, void *data, int flags)
+{
+	struct rpc_cred *cred;
+	struct rpc_task *task;
+
+	cred = authnull_ops.lookup_cred(NULL, NULL, 0);
+	task = rpc_call_null_helper(clnt, xprt, cred,
+				    RPC_TASK_SOFT | RPC_TASK_SOFTCONN | flags,
+				    ops, data);
+	put_rpccred(cred);
+	if (IS_ERR(task))
+		return PTR_ERR(task);
+	rpc_put_task(task);
+	return 1;
+}
+EXPORT_SYMBOL_GPL(rpc_clnt_test_xprt);
+
 static int rpc_clnt_add_xprt_helper(struct rpc_clnt *clnt,
 				    struct rpc_xprt *xprt,
 				    struct rpc_add_xprt_test *data)
@@ -3101,7 +3179,12 @@ int rpc_clnt_add_xprt(struct rpc_clnt *clnt,
 				connect_timeout,
 				reconnect_timeout);
 
+#if IS_ENABLED(CONFIG_SUNRPC_ENFS)
+	rpc_multipath_switch_set_roundrobin(clnt, xps);
+#else
 	rpc_xprt_switch_set_roundrobin(xps);
+#endif
+
 	if (setup) {
 		ret = setup(clnt, xps, xprt, data);
 		if (ret != 0)
