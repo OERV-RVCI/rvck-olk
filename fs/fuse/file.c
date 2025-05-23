@@ -2305,6 +2305,10 @@ static bool fuse_writepage_need_send(struct fuse_conn *fc, struct page *page,
 	if (ap->num_pages == data->max_pages && !fuse_pages_realloc(data))
 		return true;
 
+	/* Reached alignment boundary */
+	if (fc->write_alignment && !(page->index % fc->write_align_pages))
+		return true;
+
 	return false;
 }
 

@@ -643,6 +643,9 @@ struct fuse_conn {
 	/** Maximum write size */
 	unsigned max_write;
 
+	/* Maxmum number of pages that write request should be aligned with */
+	unsigned int write_align_pages;
+
 	/** Maximum number of pages that can be used in a single request */
 	unsigned int max_pages;
 
@@ -888,6 +891,9 @@ struct fuse_conn {
 
 	/** Passthrough support for read/write IO */
 	unsigned int passthrough:1;
+
+	/* write reques is aligned on max_write boundary */
+	unsigned int write_alignment:1;
 
 	/** Maximum stack depth for passthrough backing files */
 	int max_stack_depth;
