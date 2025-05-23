@@ -982,6 +982,11 @@ static void fuse_send_readpages(struct fuse_io_args *ia, struct file *file)
 	if (fm->fc->async_read) {
 		ia->ff = fuse_file_get(ff);
 		ap->args.end = fuse_readpages_end;
+		/* force background request to avoid starvation from writeback */
+		if (fm->fc->separate_background) {
+			ap->args.force = true;
+			ap->args.nocreds = true;
+		}
 		err = fuse_simple_background(fm, &ap->args, GFP_KERNEL);
 		if (!err)
 			return;

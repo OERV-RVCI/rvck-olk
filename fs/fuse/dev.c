@@ -29,6 +29,8 @@ MODULE_ALIAS("devname:fuse");
 #define FUSE_INT_REQ_BIT (1ULL << 0)
 #define FUSE_REQ_ID_STEP (1ULL << 1)
 
+#define DEFAULT_BG_QUEUE	READ
+
 static struct kmem_cache *fuse_req_cachep;
 
 static void end_requests(struct list_head *head);
@@ -254,20 +256,70 @@ void fuse_queue_forget(struct fuse_conn *fc, struct fuse_forget_link *forget,
 	}
 }
 
-static void flush_bg_queue(struct fuse_conn *fc)
+static void fuse_add_bg_queue(struct fuse_conn *fc, struct fuse_req *req)
+{
+	if (fc->separate_background) {
+		if (req->args->opcode == FUSE_WRITE)
+			list_add_tail(&req->list, &fc->bg_queue[WRITE]);
+		else
+			list_add_tail(&req->list, &fc->bg_queue[READ]);
+	} else {
+		/* default to one single background queue */
+		list_add_tail(&req->list, &fc->bg_queue[DEFAULT_BG_QUEUE]);
+	}
+}
+
+static void fuse_dec_active_bg(struct fuse_conn *fc, struct fuse_req *req)
+{
+	if (fc->separate_background) {
+		if (req->args->opcode == FUSE_WRITE)
+			fc->active_background[WRITE]--;
+		else
+			fc->active_background[READ]--;
+	} else {
+		/* default to one single count */
+		fc->active_background[DEFAULT_BG_QUEUE]--;
+	}
+}
+
+/* bg_queue needs to be further flushed when true returned */
+static bool do_flush_bg_queue(struct fuse_conn *fc, unsigned int index,
+			      unsigned int batch)
 {
 	struct fuse_iqueue *fiq = &fc->iq;
+	struct fuse_req *req;
+	unsigned int count = 0;
 
-	while (fc->active_background < fc->max_background &&
-	       !list_empty(&fc->bg_queue)) {
-		struct fuse_req *req;
-
-		req = list_first_entry(&fc->bg_queue, struct fuse_req, list);
+	while (fc->active_background[index] < fc->max_background &&
+	       !list_empty(&fc->bg_queue[index])) {
+		if (batch && count++ == batch)
+			return true;
+		req = list_first_entry(&fc->bg_queue[index],
+				struct fuse_req, list);
 		list_del(&req->list);
-		fc->active_background++;
+		fc->active_background[index]++;
 		spin_lock(&fiq->lock);
 		req->in.h.unique = fuse_get_unique(fiq);
 		queue_request_and_unlock(fiq, req);
+	}
+	return false;
+}
+
+static void flush_bg_queue(struct fuse_conn *fc)
+{
+	if (!fc->separate_background) {
+		do_flush_bg_queue(fc, DEFAULT_BG_QUEUE, 0);
+	} else {
+		bool proceed_write = true, proceed_other = true;
+
+		do {
+			if (proceed_other)
+				proceed_other = do_flush_bg_queue(fc, READ,
+					FUSE_DEFAULT_MAX_BACKGROUND);
+			if (proceed_write)
+				proceed_write = do_flush_bg_queue(fc, WRITE,
+					FUSE_DEFAULT_MAX_BACKGROUND);
+		} while (proceed_other || proceed_write);
 	}
 }
 
@@ -318,7 +370,7 @@ void fuse_request_end(struct fuse_req *req)
 		}
 
 		fc->num_background--;
-		fc->active_background--;
+		fuse_dec_active_bg(fc, req);
 		flush_bg_queue(fc);
 		spin_unlock(&fc->bg_lock);
 	} else {
@@ -540,7 +592,7 @@ static bool fuse_request_queue_background(struct fuse_req *req)
 		fc->num_background++;
 		if (fc->num_background == fc->max_background)
 			fc->blocked = 1;
-		list_add_tail(&req->list, &fc->bg_queue);
+		fuse_add_bg_queue(fc, req);
 		flush_bg_queue(fc);
 		queued = true;
 	}
