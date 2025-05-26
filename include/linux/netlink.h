@@ -295,6 +295,8 @@ struct netlink_callback {
 	u32			min_dump_alloc;
 	unsigned int		prev_seq, seq;
 	bool			strict_check;
+	KABI_FILL_HOLE(int	flags)
+
 	union {
 		u8		ctx[48];
 
@@ -326,6 +328,7 @@ struct netlink_dump_control {
 	void *data;
 	struct module *module;
 	u32 min_dump_alloc;
+	KABI_FILL_HOLE(int flags)
 };
 
 int __netlink_dump_start(struct sock *ssk, struct sk_buff *skb,
