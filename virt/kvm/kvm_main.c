@@ -104,6 +104,7 @@ EXPORT_SYMBOL_GPL(halt_poll_ns_shrink);
 
 DEFINE_MUTEX(kvm_lock);
 LIST_HEAD(vm_list);
+LIST_HEAD(kvm_shadow_list);
 
 static struct kmem_cache *kvm_vcpu_cache;
 
@@ -1314,6 +1315,7 @@ static void kvm_destroy_vm(struct kvm *kvm)
 {
 	int i;
 	struct mm_struct *mm = kvm->mm;
+	struct kvm_shadow *ks;
 
 	kvm_destroy_pm_notifier(kvm);
 	kvm_uevent_notify_change(KVM_EVENT_DESTROY_VM, kvm);
@@ -1329,6 +1331,17 @@ static void kvm_destroy_vm(struct kvm *kvm)
 	kvm_arch_pre_destroy_vm(kvm);
 
 	kvm_free_irq_routing(kvm);
+
+	/**
+	 * Release the temporarily stored eventfd information,
+	 * if it is currently in the eventfd batch process
+	 */
+	ks = kvm_find_shadow(kvm);
+	if (ks) {
+		kvm_release_ioeventfds_shadow(kvm);
+		list_del_init(&ks->list);
+		kfree(ks);
+	}
 	for (i = 0; i < KVM_NR_BUSES; i++) {
 		struct kvm_io_bus *bus = kvm_get_bus(kvm, i);
 
@@ -5595,6 +5608,7 @@ int kvm_io_bus_register_dev(struct kvm *kvm, enum kvm_bus bus_idx, gpa_t addr,
 	int i;
 	struct kvm_io_bus *new_bus, *bus;
 	struct kvm_io_range range;
+	struct kvm_shadow *ks;
 
 	bus = kvm_get_bus(kvm, bus_idx);
 	if (!bus)
@@ -5624,8 +5638,13 @@ int kvm_io_bus_register_dev(struct kvm *kvm, enum kvm_bus bus_idx, gpa_t addr,
 	new_bus->range[i] = range;
 	memcpy(new_bus->range + i + 1, bus->range + i,
 		(bus->dev_count - i) * sizeof(struct kvm_io_range));
-	rcu_assign_pointer(kvm->buses[bus_idx], new_bus);
-	synchronize_srcu_expedited(&kvm->srcu);
+	ks = kvm_find_shadow(kvm);
+	if (ks) {
+		ks->buses_shadow[bus_idx] = new_bus;
+	} else {
+		rcu_assign_pointer(kvm->buses[bus_idx], new_bus);
+		synchronize_srcu_expedited(&kvm->srcu);
+	}
 	kfree(bus);
 
 	return 0;
@@ -5636,6 +5655,7 @@ int kvm_io_bus_unregister_dev(struct kvm *kvm, enum kvm_bus bus_idx,
 {
 	int i;
 	struct kvm_io_bus *new_bus, *bus;
+	struct kvm_shadow *ks;
 
 	lockdep_assert_held(&kvm->slots_lock);
 
@@ -5659,6 +5679,13 @@ int kvm_io_bus_unregister_dev(struct kvm *kvm, enum kvm_bus bus_idx,
 		new_bus->dev_count--;
 		memcpy(new_bus->range + i, bus->range + i + 1,
 				flex_array_size(new_bus, range, new_bus->dev_count - i));
+	}
+
+	ks = kvm_find_shadow(kvm);
+	if (ks) {
+		ks->buses_shadow[bus_idx] = new_bus;
+		kfree(bus);
+		return 0;
 	}
 
 	rcu_assign_pointer(kvm->buses[bus_idx], new_bus);
