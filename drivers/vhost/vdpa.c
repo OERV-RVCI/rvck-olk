@@ -574,6 +574,7 @@ static long vhost_vdpa_resume(struct vhost_vdpa *v)
 	return ops->resume(vdpa);
 }
 
+#if IS_ENABLED(CONFIG_IOMMUFD)
 static long vhost_vdpa_bind_iommufd(struct vhost_vdpa *v, int __user *argp)
 {
 	struct vhost_vdpa_bind_iommufd bind;
@@ -678,6 +679,7 @@ static void vhost_vdpa_unbind_iommufd(struct vhost_vdpa *v)
 	if (dma_dev->bus && dma_dev->bus->dma_configure)
 		dma_dev->bus->dma_configure(dma_dev);
 }
+#endif /* CONFIG_IOMMUFD */
 
 #ifdef CONFIG_VHOST_VDPA_MIGRATION
 static int vhost_vdpa_get_dev_buffer_size(struct vhost_vdpa *v,
@@ -1026,6 +1028,7 @@ static long vhost_vdpa_unlocked_ioctl(struct file *filep,
 	case VHOST_VDPA_RESUME:
 		r = vhost_vdpa_resume(v);
 		break;
+#if IS_ENABLED(CONFIG_IOMMUFD)
 	case VHOST_VDPA_BIND_IOMMUFD:
 		r = vhost_vdpa_bind_iommufd(v, argp);
 		break;
@@ -1038,6 +1041,7 @@ static long vhost_vdpa_unlocked_ioctl(struct file *filep,
 	case VHOST_VDPA_DETACH_IOMMUFD_PT:
 		vhost_vdpa_detach_iommufd_pt(v);
 		break;
+#endif /* CONFIG_IOMMUFD*/
 #ifdef CONFIG_VHOST_VDPA_MIGRATION
 	case VHOST_GET_DEV_BUFFER_SIZE:
 		r = vhost_vdpa_get_dev_buffer_size(v, argp);
@@ -1679,7 +1683,9 @@ static int vhost_vdpa_release(struct inode *inode, struct file *filep)
 	struct vhost_dev *d = &v->vdev;
 
 	mutex_lock(&d->mutex);
+#if IS_ENABLED(CONFIG_IOMMUFD)
 	vhost_vdpa_unbind_iommufd(v);
+#endif
 	filep->private_data = NULL;
 	vhost_vdpa_clean_irq(v);
 	vhost_vdpa_reset(v, VDPA_DEV_RESET_CLOSE);
