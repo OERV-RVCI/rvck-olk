@@ -40,7 +40,7 @@ const char *perf_reg_name(int id, const char *arch)
 	else if (!strcmp(arch, "s390"))
 		reg_name = __perf_reg_name_s390(id);
 	else if (!strcmp(arch, "sw_64"))
-		reg_name = __perf_reg_name_sw_64(id);
+		reg_name = __perf_reg_name_sw64(id);
 	else if (!strcmp(arch, "x86"))
 		reg_name = __perf_reg_name_x86(id);
 	else if (!strcmp(arch, "arm"))
@@ -96,6 +96,8 @@ uint64_t perf_arch_reg_ip(const char *arch)
 		return __perf_reg_ip_riscv();
 	else if (!strcmp(arch, "s390"))
 		return __perf_reg_ip_s390();
+	else if (!strcmp(arch, "sw_64"))
+		return __perf_reg_ip_sw64();
 	else if (!strcmp(arch, "x86"))
 		return __perf_reg_ip_x86();
 
@@ -121,6 +123,8 @@ uint64_t perf_arch_reg_sp(const char *arch)
 		return __perf_reg_sp_riscv();
 	else if (!strcmp(arch, "s390"))
 		return __perf_reg_sp_s390();
+	else if (!strcmp(arch, "sw_64"))
+		return __perf_reg_sp_sw64();
 	else if (!strcmp(arch, "x86"))
 		return __perf_reg_sp_x86();
 
