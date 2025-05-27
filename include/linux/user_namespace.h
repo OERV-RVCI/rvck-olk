@@ -13,6 +13,9 @@
 #include <linux/sysctl.h>
 #include <linux/err.h>
 #include <linux/kabi.h>
+#ifdef CONFIG_UCOUNTS_PERCPU_COUNTER
+#include <linux/percpu_counter.h>
+#endif
 
 #define UID_GID_MAP_MAX_BASE_EXTENTS 5
 #define UID_GID_MAP_MAX_EXTENTS 340
@@ -120,7 +123,12 @@ struct ucounts {
 	struct rcu_head rcu;
 	rcuref_t count;
 	atomic_long_t ucount[UCOUNT_COUNTS];
+#ifndef CONFIG_UCOUNTS_PERCPU_COUNTER
 	atomic_long_t rlimit[UCOUNT_RLIMIT_COUNTS];
+#else
+	struct percpu_counter rlimit[UCOUNT_RLIMIT_COUNTS];
+	atomic_long_t freed;
+#endif
 };
 
 extern struct user_namespace init_user_ns;
@@ -132,6 +140,11 @@ struct ucounts *inc_ucount(struct user_namespace *ns, kuid_t uid, enum ucount_ty
 void dec_ucount(struct ucounts *ucounts, enum ucount_type type);
 struct ucounts *alloc_ucounts(struct user_namespace *ns, kuid_t uid);
 void put_ucounts(struct ucounts *ucounts);
+#ifdef CONFIG_UCOUNTS_PERCPU_COUNTER
+void __init ucounts_init(void);
+#else
+static inline void __init ucounts_init(void) { }
+#endif
 
 static inline struct ucounts * __must_check get_ucounts(struct ucounts *ucounts)
 {
@@ -142,7 +155,11 @@ static inline struct ucounts * __must_check get_ucounts(struct ucounts *ucounts)
 
 static inline long get_rlimit_value(struct ucounts *ucounts, enum rlimit_type type)
 {
+#ifdef CONFIG_UCOUNTS_PERCPU_COUNTER
+	return percpu_counter_sum(&ucounts->rlimit[type]);
+#else
 	return atomic_long_read(&ucounts->rlimit[type]);
+#endif
 }
 
 long inc_rlimit_ucounts_limit(struct ucounts *ucounts, enum rlimit_type type, long v, long limit);

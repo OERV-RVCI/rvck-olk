@@ -171,7 +171,13 @@ struct ucounts *alloc_ucounts(struct user_namespace *ns, kuid_t uid)
 	new = kzalloc(sizeof(*new), GFP_KERNEL);
 	if (!new)
 		return NULL;
-
+#ifdef CONFIG_UCOUNTS_PERCPU_COUNTER
+	if (percpu_counter_init_many(&new->rlimit[0], 0, GFP_KERNEL_ACCOUNT,
+		UCOUNT_RLIMIT_COUNTS)) {
+		kfree(new);
+		return NULL;
+	}
+#endif
 	new->ns = ns;
 	new->uid = uid;
 	rcuref_init(&new->count, 1);
@@ -180,6 +186,9 @@ struct ucounts *alloc_ucounts(struct user_namespace *ns, kuid_t uid)
 	ucounts = find_ucounts(ns, uid, hashent);
 	if (ucounts) {
 		spin_unlock_irq(&ucounts_lock);
+#ifdef CONFIG_UCOUNTS_PERCPU_COUNTER
+		percpu_counter_destroy_many(&new->rlimit[0], UCOUNT_RLIMIT_COUNTS);
+#endif
 		kfree(new);
 		return ucounts;
 	}
@@ -189,6 +198,65 @@ struct ucounts *alloc_ucounts(struct user_namespace *ns, kuid_t uid)
 	spin_unlock_irq(&ucounts_lock);
 	return new;
 }
+
+#ifdef CONFIG_UCOUNTS_PERCPU_COUNTER
+/*
+ * Whether all the rlimits are zero.
+ * For now, only UCOUNT_RLIMIT_SIGPENDING is considered.
+ * Other rlimit can be added.
+ */
+static bool rlimits_are_zero(struct ucounts *ucounts)
+{
+	int rtypes[] = { UCOUNT_RLIMIT_SIGPENDING };
+	int rtype;
+
+	for (int i = 0; i < sizeof(rtypes) / sizeof(int); ++i) {
+		rtype = rtypes[i];
+		if (get_rlimit_value(ucounts, rtype) > 0)
+			return false;
+	}
+	return true;
+}
+
+/*
+ * Ucounts can be freed only when the ucount->count is released
+ * and the rlimits are zero.
+ * The caller should hold rcu_read_lock();
+ */
+static bool ucounts_can_be_freed(struct ucounts *ucounts)
+{
+	if (rcuref_read(&ucounts->count) > 0)
+		return false;
+	if (!rlimits_are_zero(ucounts))
+		return false;
+	/* Prevent double free */
+	return atomic_long_cmpxchg(&ucounts->freed, 0, 1) == 0;
+}
+
+static void free_ucounts(struct ucounts *ucounts)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&ucounts_lock, flags);
+	hlist_nulls_del_rcu(&ucounts->node);
+	spin_unlock_irqrestore(&ucounts_lock, flags);
+	percpu_counter_destroy_many(&ucounts->rlimit[0], UCOUNT_RLIMIT_COUNTS);
+	put_user_ns(ucounts->ns);
+	kfree_rcu(ucounts, rcu);
+}
+
+void put_ucounts(struct ucounts *ucounts)
+{
+	rcu_read_lock();
+	if (rcuref_put(&ucounts->count) &&
+	    ucounts_can_be_freed(ucounts)) {
+		rcu_read_unlock();
+		free_ucounts(ucounts);
+		return;
+	}
+	rcu_read_unlock();
+}
+#else
 
 void put_ucounts(struct ucounts *ucounts)
 {
@@ -203,6 +271,7 @@ void put_ucounts(struct ucounts *ucounts)
 		kfree_rcu(ucounts, rcu);
 	}
 }
+#endif // CONFIG_UCOUNTS_PERCPU_COUNTER
 
 static inline bool atomic_long_inc_below(atomic_long_t *v, int u)
 {
@@ -250,6 +319,105 @@ void dec_ucount(struct ucounts *ucounts, enum ucount_type type)
 	}
 	put_ucounts(ucounts);
 }
+
+#ifdef CONFIG_UCOUNTS_PERCPU_COUNTER
+/* Return 1 if increments successful, otherwise return LONG_MAX. */
+long inc_rlimit_ucounts_limit(struct ucounts *ucounts, enum rlimit_type type,
+					long v, long limit)
+{
+	struct ucounts *iter;
+	long max = LONG_MAX;
+	bool over_limit = false;
+
+	for (iter = ucounts; iter; iter = iter->ns->ucounts) {
+		max = min(limit, max);
+		if (!percpu_counter_limited_add(&iter->rlimit[type], max, v))
+			over_limit = true;
+
+		max = get_userns_rlimit_max(iter->ns, type);
+	}
+
+	if (over_limit)
+		return LONG_MAX;
+	return 1;
+}
+
+bool dec_rlimit_ucounts(struct ucounts *ucounts, enum rlimit_type type, long v)
+{
+	struct ucounts *iter;
+
+	for (iter = ucounts; iter; iter = iter->ns->ucounts)
+		percpu_counter_sub(&iter->rlimit[type], v);
+	return false;
+}
+
+/*
+ * The inc_rlimit_get_ucounts does not grab the refcount.
+ * The rlimit_release should be called very time the rlimit is decremented.
+ */
+static void do_dec_rlimit_put_ucounts(struct ucounts *ucounts,
+				struct ucounts *last, enum rlimit_type type)
+{
+	struct ucounts *iter, *next;
+
+	for (iter = ucounts; iter != last; iter = next) {
+		bool to_free;
+
+		rcu_read_lock();
+		percpu_counter_sub(&iter->rlimit[type], 1);
+		next = iter->ns->ucounts;
+		to_free = ucounts_can_be_freed(iter);
+		rcu_read_unlock();
+		/* If ucounts->count is zero and the rlimits are zero, free ucounts */
+		if (to_free)
+			free_ucounts(iter);
+	}
+}
+
+void dec_rlimit_put_ucounts(struct ucounts *ucounts, enum rlimit_type type)
+{
+	do_dec_rlimit_put_ucounts(ucounts, NULL, type);
+}
+
+/*
+ * Though this function does not grab the refcount, it is promised that the
+ * ucounts will not be freed as long as there have any rlimit pins to it.
+ * Caller must hold a reference to ucounts or under rcu_read_lock().
+ *
+ * Return 1 if increments successful, otherwise return 0.
+ */
+long inc_rlimit_get_ucounts(struct ucounts *ucounts, enum rlimit_type type,
+			    bool override_rlimit, long limit)
+{
+	struct ucounts *iter;
+	long max = LONG_MAX;
+	long in_limit = limit;
+
+	if (override_rlimit)
+		in_limit = LONG_MAX;
+
+	for (iter = ucounts; iter; iter = iter->ns->ucounts) {
+		/* Can not exceed the limit(inputed) or the ns->rlimit_max */
+		max = min(in_limit, max);
+		if (!percpu_counter_limited_add(&iter->rlimit[type], max, 1))
+			goto dec_unwind;
+
+		if (!override_rlimit)
+			max = get_userns_rlimit_max(iter->ns, type);
+	}
+	return 1;
+dec_unwind:
+	do_dec_rlimit_put_ucounts(ucounts, iter, type);
+	return 0;
+}
+
+void __init ucounts_init(void)
+{
+	if (percpu_counter_init_many(&init_ucounts.rlimit[0], 0, GFP_KERNEL,
+				       UCOUNT_RLIMIT_COUNTS))
+		panic("Cannot create init_ucounts rlimit counters");
+}
+#else
 
 long inc_rlimit_ucounts_limit(struct ucounts *ucounts, enum rlimit_type type,
 					long v, long limit)
@@ -332,7 +500,7 @@ dec_unwind:
 	do_dec_rlimit_put_ucounts(ucounts, iter, type);
 	return 0;
 }
-
+#endif
 bool is_rlimit_overlimit(struct ucounts *ucounts, enum rlimit_type type, unsigned long rlimit)
 {
 	struct ucounts *iter;
