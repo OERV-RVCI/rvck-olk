@@ -222,6 +222,7 @@ nlmclnt_recovery(struct nlm_host *host)
 				"(%ld)\n", host->h_name, PTR_ERR(task));
 	}
 }
+EXPORT_SYMBOL_GPL(nlmclnt_recovery);
 
 static int
 reclaimer(void *ptr)

@@ -44,7 +44,7 @@
 #include "callback.h"
 #include "delegation.h"
 #include "iostat.h"
-#include "internal.h"
+#include "enfs_adapter.h"
 #include "fscache.h"
 #include "pnfs.h"
 #include "nfs.h"
@@ -241,6 +241,7 @@ void nfs_free_client(struct nfs_client *clp)
 	put_nfs_version(clp->cl_nfs_mod);
 	kfree(clp->cl_hostname);
 	kfree(clp->cl_acceptor);
+	nfs_free_multi_path_client(clp);
 	kfree(clp);
 }
 EXPORT_SYMBOL_GPL(nfs_free_client);
@@ -315,12 +316,21 @@ again:
 			continue;
 
 		/* Match the full socket address */
-		if (!rpc_cmp_addr_port(sap, clap))
+		if (!rpc_cmp_addr_port(sap, clap)) {
+#if IS_ENABLED(CONFIG_ENFS)
+			if (data->enfs_option != NULL)
+				continue;
+#endif
 			/* Match all xprt_switch full socket addresses */
 			if (IS_ERR(clp->cl_rpcclient) ||
                             !rpc_clnt_xprt_switch_has_addr(clp->cl_rpcclient,
 							   sap))
 				continue;
+		}
+#if IS_ENABLED(CONFIG_ENFS)
+		if (!nfs_multipath_client_match(clp->cl_multipath_data, data->enfs_option))
+			continue;
+#endif
 
 		/* Match the xprt security policy */
 		if (clp->cl_xprtsec.policy != data->xprtsec.policy)
@@ -516,6 +526,9 @@ int nfs_create_rpc_client(struct nfs_client *clp,
 		.xprtsec	= cl_init->xprtsec,
 		.connect_timeout = cl_init->connect_timeout,
 		.reconnect_timeout = cl_init->reconnect_timeout,
+#if IS_ENABLED(CONFIG_ENFS)
+		.multipath_option = cl_init->enfs_option,
+#endif
 	};
 
 	if (test_bit(NFS_CS_DISCRTRY, &clp->cl_flags))
@@ -650,6 +663,14 @@ struct nfs_client *nfs_init_client(struct nfs_client *clp,
 	if (clp->cl_cons_state == NFS_CS_READY)
 		return clp;
 
+	error = nfs_create_multi_path_client(clp, cl_init);
+	if (error < 0) {
+		dprintk("%s: create failed.%d!\n", __func__, error);
+		nfs_put_client(clp);
+		clp = ERR_PTR(error);
+		return clp;
+	}
+
 	/*
 	 * Create a client RPC handle for doing FSSTAT with UNIX auth only
 	 * - RFC 2623, sec 2.3.2
@@ -684,6 +705,9 @@ static int nfs_init_server(struct nfs_server *server,
 		.nconnect = ctx->nfs_server.nconnect,
 		.init_flags = (1UL << NFS_CS_REUSEPORT),
 		.xprtsec = ctx->xprtsec,
+#if IS_ENABLED(CONFIG_ENFS)
+		.enfs_option = ctx->enfs_option
+#endif
 	};
 	struct nfs_client *clp;
 	int error;

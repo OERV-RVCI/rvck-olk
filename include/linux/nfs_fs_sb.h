@@ -124,6 +124,9 @@ struct nfs_client {
 	char			cl_ipaddr[48];
 	struct net		*cl_net;
 	struct list_head	pending_cb_stateids;
+#if IS_ENABLED(CONFIG_ENFS)
+	void *cl_multipath_data; /* multi path private structure (struct multipath_client_info *) */
+#endif
 };
 
 /*
@@ -265,6 +268,9 @@ struct nfs_server {
 	const struct cred	*cred;
 	bool			has_sec_mnt_opts;
 	struct kobject		kobj;
+#if IS_ENABLED(CONFIG_ENFS)
+	int  enfs_flags;  /* ENFS_SERVER_FLAG_xx */
+#endif
 };
 
 /* Server capabilities */
@@ -294,4 +300,18 @@ struct nfs_server {
 #define NFS_CAP_READ_PLUS	(1U << 29)
 #define NFS_CAP_FS_LOCATIONS	(1U << 30)
 #define NFS_CAP_MOVEABLE	(1U << 31)
+
+#if IS_ENABLED(CONFIG_ENFS)
+/* use for kernel's nfsclient structure for refcount_t clp_count */
+static inline void nfsclient_refinc(refcount_t *ref_count)
+{
+	refcount_inc(ref_count);
+}
+
+static inline void nfsclient_refdec(refcount_t *ref_count)
+{
+	refcount_dec(ref_count);
+}
+#endif
+
 #endif

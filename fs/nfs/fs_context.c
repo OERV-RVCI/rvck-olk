@@ -22,7 +22,7 @@
 #include <net/handshake.h>
 
 #include "nfs.h"
-#include "internal.h"
+#include "enfs_adapter.h"
 
 #include "nfstrace.h"
 
@@ -92,6 +92,13 @@ enum nfs_param {
 	Opt_wsize,
 	Opt_write,
 	Opt_xprtsec,
+#if IS_ENABLED(CONFIG_ENFS)
+	Opt_remote_addrs,
+	Opt_local_iplist,
+	Opt_enfs_info,
+	Opt_slookupcache,
+	Opt_alookupcache,
+#endif
 };
 
 enum {
@@ -199,6 +206,13 @@ static const struct fs_parameter_spec nfs_fs_parameters[] = {
 	fsparam_enum  ("write",		Opt_write, nfs_param_enums_write),
 	fsparam_u32   ("wsize",		Opt_wsize),
 	fsparam_string("xprtsec",	Opt_xprtsec),
+#if IS_ENABLED(CONFIG_ENFS)
+	fsparam_string("localaddrs",	Opt_local_iplist),
+	fsparam_string("remoteaddrs",	Opt_remote_addrs),
+	fsparam_string("enfs_info",	Opt_enfs_info),
+	fsparam_string("slookupcache",	Opt_slookupcache),
+	fsparam_string("alookupcache",	Opt_alookupcache),
+#endif
 	{}
 };
 
@@ -356,6 +370,20 @@ out_invalid_xprtsec_policy:
 	return nfs_invalf(fc, "NFS: Transport does not support xprtsec");
 }
 
+#if IS_ENABLED(CONFIG_ENFS)
+enum nfsmultipathoptions getNfsMultiPathOpt(int token)
+{
+	switch (token) {
+	case Opt_remote_addrs: {
+		return REMOTEADDR;
+	}
+	case Opt_local_iplist: {
+		return LOCALADDR;
+	}
+	}
+	return INVALID_OPTION;
+}
+#endif
 /*
  * For text based NFSv2/v3 mounts, the mount protocol transport default
  * settings should depend upon the specified NFS transport.
@@ -925,6 +953,28 @@ static int nfs_fs_context_parse_param(struct fs_context *fc,
 	case Opt_sloppy:
 		ctx->sloppy = true;
 		break;
+#if IS_ENABLED(CONFIG_ENFS)
+	case Opt_local_iplist:
+	case Opt_remote_addrs:
+		switch (enfs_parse_mount_options(getNfsMultiPathOpt(opt),
+						 param->string, ctx, fc)) {
+		case 0:
+			break;
+		case -ENOMEM:
+			goto out_nomem;
+		case -ENOSPC:
+			goto out_limit;
+		case -EINVAL:
+			goto out_invalid_address;
+		case -EOPNOTSUPP:
+			goto out_invalid_address;
+		}
+		break;
+	case Opt_enfs_info:
+	case Opt_slookupcache:
+	case Opt_alookupcache:
+		break;
+#endif
 	}
 
 	return 0;
@@ -937,6 +987,12 @@ out_of_bounds:
 	return nfs_invalf(fc, "NFS: Value for '%s' out of range", param->key);
 out_bad_transport:
 	return nfs_invalf(fc, "NFS: Unrecognized transport protocol");
+#if IS_ENABLED(CONFIG_ENFS)
+out_limit:
+	return nfs_invalf(fc, "NFS: param is more than supported limit");
+out_nomem:
+	return nfs_invalf(fc, "NFS: not enough memory to parse option");
+#endif
 }
 
 /*
@@ -1453,7 +1509,9 @@ static int nfs_fs_context_validate(struct fs_context *fc)
 	ret = nfs_parse_source(fc, max_namelen, max_pathlen);
 	if (ret < 0)
 		return ret;
-
+#if IS_ENABLED(CONFIG_ENFS)
+	nfs_multipath_set_mount_data(&ctx->enfs_option, ctx->nfs_server.hostname);
+#endif
 	/* Load the NFS protocol module if we haven't done so yet */
 	if (!ctx->nfs_mod) {
 		nfs_mod = get_nfs_version(ctx->version);
@@ -1537,6 +1595,9 @@ static int nfs_fs_context_dup(struct fs_context *fc, struct fs_context *src_fc)
 	ctx->nfs_server.hostname	= NULL;
 	ctx->fscache_uniq		= NULL;
 	ctx->clone_data.fattr		= NULL;
+#if IS_ENABLED(CONFIG_ENFS)
+	ctx->enfs_option = NULL;
+#endif
 	fc->fs_private = ctx;
 	return 0;
 }
@@ -1555,6 +1616,7 @@ static void nfs_fs_context_free(struct fs_context *fc)
 		kfree(ctx->nfs_server.export_path);
 		kfree(ctx->nfs_server.hostname);
 		kfree(ctx->fscache_uniq);
+		enfs_free_mount_options(ctx);
 		nfs_free_fhandle(ctx->mntfh);
 		nfs_free_fattr(ctx->clone_data.fattr);
 		kfree(ctx);
