@@ -594,7 +594,7 @@ success:
 fail_unlock:
 	if (ret) {
 		if (bhash_created)
-			inet_bind_bucket_destroy(hinfo->bind_bucket_cachep, tb);
+			inet_bind_bucket_destroy(tb);
 		if (bhash2_created)
 			inet_bind2_bucket_destroy(hinfo->bind2_bucket_cachep,
 						  tb2);
