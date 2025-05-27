@@ -525,7 +525,7 @@ static int uacce_alloc_dma_buffers(struct uacce_queue *q,
 			size = vma->vm_end - start;
 		else
 			size = max_size;
-		dev_dbg(pdev, "allocate dma %ld pages\n",
+		dev_dbg(pdev, "allocate dma %lu pages\n",
 			(size + PAGE_SIZE - 1) >> PAGE_SHIFT);
 		slice[i].kaddr = dma_alloc_coherent(pdev, (size +
 						    PAGE_SIZE - 1) & PAGE_MASK,
