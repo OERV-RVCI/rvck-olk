@@ -2362,6 +2362,32 @@ __bpf_kfunc struct task_struct *bpf_task_from_pid(s32 pid)
 	return p;
 }
 
+#ifdef CONFIG_BPF_RVI
+/**
+ * bpf_current_level1_reaper - Find the reaper task in the level-1 parent of
+ * current pid namespace. If a task is returned, it must either be stored in
+ * a map, or released with bpf_task_release().
+ */
+__bpf_kfunc struct task_struct *bpf_current_level1_reaper(void)
+{
+	struct task_struct *p;
+	struct pid_namespace *ns;
+
+	ns = task_active_pid_ns(current);
+	while (ns->level > 1) { // not !=, as ns could be init_pid_ns
+		ns = ns->parent;
+	}
+
+	read_lock(&tasklist_lock);
+	p = ns->child_reaper;
+	if (p)
+		p = bpf_task_acquire(p);
+	read_unlock(&tasklist_lock);
+
+	return p;
+}
+#endif
+
 /**
  * bpf_dynptr_slice() - Obtain a read-only pointer to the dynptr data.
  * @ptr: The dynptr whose data slice to retrieve
@@ -2604,6 +2630,9 @@ BTF_ID_FLAGS(func, bpf_cgroup_from_id, KF_ACQUIRE | KF_RET_NULL)
 BTF_ID_FLAGS(func, bpf_task_under_cgroup, KF_RCU)
 #endif
 BTF_ID_FLAGS(func, bpf_task_from_pid, KF_ACQUIRE | KF_RET_NULL)
+#ifdef CONFIG_BPF_RVI
+BTF_ID_FLAGS(func, bpf_current_level1_reaper, KF_ACQUIRE | KF_RET_NULL)
+#endif
 BTF_SET8_END(generic_btf_ids)
 
 static const struct btf_kfunc_id_set generic_kfunc_set = {

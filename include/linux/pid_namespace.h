@@ -130,4 +130,8 @@ static inline bool task_is_in_init_pid_ns(struct task_struct *tsk)
 	return task_active_pid_ns(tsk) == &init_pid_ns;
 }
 
+#ifdef CONFIG_BPF_RVI
+extern struct task_struct *get_current_level1_reaper(void);
+#endif
+
 #endif /* _LINUX_PID_NS_H */
