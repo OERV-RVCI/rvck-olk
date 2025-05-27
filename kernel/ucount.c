@@ -11,11 +11,14 @@
 struct ucounts init_ucounts = {
 	.ns    = &init_user_ns,
 	.uid   = GLOBAL_ROOT_UID,
-	.count = ATOMIC_INIT(1),
+	.count = RCUREF_INIT(1),
 };
 
 #define UCOUNTS_HASHTABLE_BITS 10
-static struct hlist_head ucounts_hashtable[(1 << UCOUNTS_HASHTABLE_BITS)];
+#define UCOUNTS_HASHTABLE_ENTRIES (1 << UCOUNTS_HASHTABLE_BITS)
+static struct hlist_nulls_head ucounts_hashtable[UCOUNTS_HASHTABLE_ENTRIES] = {
+	[0 ... UCOUNTS_HASHTABLE_ENTRIES - 1] = HLIST_NULLS_HEAD_INIT(0)
+};
 static DEFINE_SPINLOCK(ucounts_lock);
 
 #define ucounts_hashfn(ns, uid)						\
@@ -23,7 +26,6 @@ static DEFINE_SPINLOCK(ucounts_lock);
 		  UCOUNTS_HASHTABLE_BITS)
 #define ucounts_hashentry(ns, uid)	\
 	(ucounts_hashtable + ucounts_hashfn(ns, uid))
-
 
 #ifdef CONFIG_SYSCTL
 static struct ctl_table_set *
@@ -132,90 +134,144 @@ void retire_userns_sysctls(struct user_namespace *ns)
 #endif
 }
 
-static struct ucounts *find_ucounts(struct user_namespace *ns, kuid_t uid, struct hlist_head *hashent)
+static struct ucounts *find_ucounts(struct user_namespace *ns, kuid_t uid,
+				    struct hlist_nulls_head *hashent)
 {
 	struct ucounts *ucounts;
+	struct hlist_nulls_node *pos;
 
-	hlist_for_each_entry(ucounts, hashent, node) {
-		if (uid_eq(ucounts->uid, uid) && (ucounts->ns == ns))
-			return ucounts;
+	guard(rcu)();
+	hlist_nulls_for_each_entry_rcu(ucounts, pos, hashent, node) {
+		if (uid_eq(ucounts->uid, uid) && (ucounts->ns == ns)) {
+			if (rcuref_get(&ucounts->count))
+				return ucounts;
+		}
 	}
 	return NULL;
 }
 
 static void hlist_add_ucounts(struct ucounts *ucounts)
 {
-	struct hlist_head *hashent = ucounts_hashentry(ucounts->ns, ucounts->uid);
+	struct hlist_nulls_head *hashent = ucounts_hashentry(ucounts->ns, ucounts->uid);
+
 	spin_lock_irq(&ucounts_lock);
-	hlist_add_head(&ucounts->node, hashent);
+	hlist_nulls_add_head_rcu(&ucounts->node, hashent);
 	spin_unlock_irq(&ucounts_lock);
-}
-
-static inline bool get_ucounts_or_wrap(struct ucounts *ucounts)
-{
-	/* Returns true on a successful get, false if the count wraps. */
-	return !atomic_add_negative(1, &ucounts->count);
-}
-
-struct ucounts *get_ucounts(struct ucounts *ucounts)
-{
-	if (!get_ucounts_or_wrap(ucounts)) {
-		put_ucounts(ucounts);
-		ucounts = NULL;
-	}
-	return ucounts;
 }
 
 struct ucounts *alloc_ucounts(struct user_namespace *ns, kuid_t uid)
 {
-	struct hlist_head *hashent = ucounts_hashentry(ns, uid);
+	struct hlist_nulls_head *hashent = ucounts_hashentry(ns, uid);
 	struct ucounts *ucounts, *new;
-	bool wrapped;
+
+	ucounts = find_ucounts(ns, uid, hashent);
+	if (ucounts)
+		return ucounts;
+
+	new = kzalloc(sizeof(*new), GFP_KERNEL);
+	if (!new)
+		return NULL;
+#ifdef CONFIG_UCOUNTS_PERCPU_COUNTER
+	if (percpu_counter_init_many(&new->rlimit[0], 0, GFP_KERNEL_ACCOUNT,
+		UCOUNT_RLIMIT_COUNTS)) {
+		kfree(new);
+		return NULL;
+	}
+#endif
+	new->ns = ns;
+	new->uid = uid;
+	rcuref_init(&new->count, 1);
 
 	spin_lock_irq(&ucounts_lock);
 	ucounts = find_ucounts(ns, uid, hashent);
-	if (!ucounts) {
+	if (ucounts) {
 		spin_unlock_irq(&ucounts_lock);
-
-		new = kzalloc(sizeof(*new), GFP_KERNEL);
-		if (!new)
-			return NULL;
-
-		new->ns = ns;
-		new->uid = uid;
-		atomic_set(&new->count, 1);
-
-		spin_lock_irq(&ucounts_lock);
-		ucounts = find_ucounts(ns, uid, hashent);
-		if (ucounts) {
-			kfree(new);
-		} else {
-			hlist_add_head(&new->node, hashent);
-			get_user_ns(new->ns);
-			spin_unlock_irq(&ucounts_lock);
-			return new;
-		}
+#ifdef CONFIG_UCOUNTS_PERCPU_COUNTER
+		percpu_counter_destroy_many(&new->rlimit[0], UCOUNT_RLIMIT_COUNTS);
+#endif
+		kfree(new);
+		return ucounts;
 	}
-	wrapped = !get_ucounts_or_wrap(ucounts);
+
+	hlist_nulls_add_head_rcu(&new->node, hashent);
+	get_user_ns(new->ns);
 	spin_unlock_irq(&ucounts_lock);
-	if (wrapped) {
-		put_ucounts(ucounts);
-		return NULL;
-	}
-	return ucounts;
+	return new;
 }
+
+#ifdef CONFIG_UCOUNTS_PERCPU_COUNTER
+/*
+ * Whether all the rlimits are zero.
+ * For now, only UCOUNT_RLIMIT_SIGPENDING is considered.
+ * Other rlimit can be added.
+ */
+static bool rlimits_are_zero(struct ucounts *ucounts)
+{
+	int rtypes[] = { UCOUNT_RLIMIT_SIGPENDING };
+	int rtype;
+
+	for (int i = 0; i < sizeof(rtypes) / sizeof(int); ++i) {
+		rtype = rtypes[i];
+		if (get_rlimit_value(ucounts, rtype) > 0)
+			return false;
+	}
+	return true;
+}
+
+/*
+ * Ucounts can be freed only when the ucount->count is released
+ * and the rlimits are zero.
+ * The caller should hold rcu_read_lock();
+ */
+static bool ucounts_can_be_freed(struct ucounts *ucounts)
+{
+	if (rcuref_read(&ucounts->count) > 0)
+		return false;
+	if (!rlimits_are_zero(ucounts))
+		return false;
+	/* Prevent double free */
+	return atomic_long_cmpxchg(&ucounts->freed, 0, 1) == 0;
+}
+
+static void free_ucounts(struct ucounts *ucounts)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&ucounts_lock, flags);
+	hlist_nulls_del_rcu(&ucounts->node);
+	spin_unlock_irqrestore(&ucounts_lock, flags);
+	percpu_counter_destroy_many(&ucounts->rlimit[0], UCOUNT_RLIMIT_COUNTS);
+	put_user_ns(ucounts->ns);
+	kfree_rcu(ucounts, rcu);
+}
+
+void put_ucounts(struct ucounts *ucounts)
+{
+	rcu_read_lock();
+	if (rcuref_put(&ucounts->count) &&
+	    ucounts_can_be_freed(ucounts)) {
+		rcu_read_unlock();
+		free_ucounts(ucounts);
+		return;
+	}
+	rcu_read_unlock();
+}
+#else
 
 void put_ucounts(struct ucounts *ucounts)
 {
 	unsigned long flags;
 
-	if (atomic_dec_and_lock_irqsave(&ucounts->count, &ucounts_lock, flags)) {
-		hlist_del_init(&ucounts->node);
+	if (rcuref_put(&ucounts->count)) {
+		spin_lock_irqsave(&ucounts_lock, flags);
+		hlist_nulls_del_rcu(&ucounts->node);
 		spin_unlock_irqrestore(&ucounts_lock, flags);
+
 		put_user_ns(ucounts->ns);
-		kfree(ucounts);
+		kfree_rcu(ucounts, rcu);
 	}
 }
+#endif // CONFIG_UCOUNTS_PERCPU_COUNTER
 
 static inline bool atomic_long_inc_below(atomic_long_t *v, int u)
 {
@@ -264,7 +320,107 @@ void dec_ucount(struct ucounts *ucounts, enum ucount_type type)
 	put_ucounts(ucounts);
 }
 
-long inc_rlimit_ucounts(struct ucounts *ucounts, enum rlimit_type type, long v)
+#ifdef CONFIG_UCOUNTS_PERCPU_COUNTER
+/* Return 1 if increments successful, otherwise return LONG_MAX. */
+long inc_rlimit_ucounts_limit(struct ucounts *ucounts, enum rlimit_type type,
+					long v, long limit)
+{
+	struct ucounts *iter;
+	long max = LONG_MAX;
+	bool over_limit = false;
+
+	for (iter = ucounts; iter; iter = iter->ns->ucounts) {
+		max = min(limit, max);
+		if (!percpu_counter_limited_add(&iter->rlimit[type], max, v))
+			over_limit = true;
+
+		max = get_userns_rlimit_max(iter->ns, type);
+	}
+
+	if (over_limit)
+		return LONG_MAX;
+	return 1;
+}
+
+bool dec_rlimit_ucounts(struct ucounts *ucounts, enum rlimit_type type, long v)
+{
+	struct ucounts *iter;
+
+	for (iter = ucounts; iter; iter = iter->ns->ucounts)
+		percpu_counter_sub(&iter->rlimit[type], v);
+	return false;
+}
+
+/*
+ * The inc_rlimit_get_ucounts does not grab the refcount.
+ * The rlimit_release should be called very time the rlimit is decremented.
+ */
+static void do_dec_rlimit_put_ucounts(struct ucounts *ucounts,
+				struct ucounts *last, enum rlimit_type type)
+{
+	struct ucounts *iter, *next;
+
+	for (iter = ucounts; iter != last; iter = next) {
+		bool to_free;
+
+		rcu_read_lock();
+		percpu_counter_sub(&iter->rlimit[type], 1);
+		next = iter->ns->ucounts;
+		to_free = ucounts_can_be_freed(iter);
+		rcu_read_unlock();
+		/* If ucounts->count is zero and the rlimits are zero, free ucounts */
+		if (to_free)
+			free_ucounts(iter);
+	}
+}
+
+void dec_rlimit_put_ucounts(struct ucounts *ucounts, enum rlimit_type type)
+{
+	do_dec_rlimit_put_ucounts(ucounts, NULL, type);
+}
+
+/*
+ * Though this function does not grab the refcount, it is promised that the
+ * ucounts will not be freed as long as there have any rlimit pins to it.
+ * Caller must hold a reference to ucounts or under rcu_read_lock().
+ *
+ * Return 1 if increments successful, otherwise return 0.
+ */
+long inc_rlimit_get_ucounts(struct ucounts *ucounts, enum rlimit_type type,
+			    bool override_rlimit, long limit)
+{
+	struct ucounts *iter;
+	long max = LONG_MAX;
+	long in_limit = limit;
+
+	if (override_rlimit)
+		in_limit = LONG_MAX;
+
+	for (iter = ucounts; iter; iter = iter->ns->ucounts) {
+		/* Can not exceed the limit(inputed) or the ns->rlimit_max */
+		max = min(in_limit, max);
+		if (!percpu_counter_limited_add(&iter->rlimit[type], max, 1))
+			goto dec_unwind;
+
+		if (!override_rlimit)
+			max = get_userns_rlimit_max(iter->ns, type);
+	}
+	return 1;
+dec_unwind:
+	do_dec_rlimit_put_ucounts(ucounts, iter, type);
+	return 0;
+}
+
+void __init ucounts_init(void)
+{
+	if (percpu_counter_init_many(&init_ucounts.rlimit[0], 0, GFP_KERNEL,
+				       UCOUNT_RLIMIT_COUNTS))
+		panic("Cannot create init_ucounts rlimit counters");
+}
+#else
+
+long inc_rlimit_ucounts_limit(struct ucounts *ucounts, enum rlimit_type type,
+					long v, long limit)
 {
 	struct ucounts *iter;
 	long max = LONG_MAX;
@@ -313,7 +469,7 @@ void dec_rlimit_put_ucounts(struct ucounts *ucounts, enum rlimit_type type)
 }
 
 long inc_rlimit_get_ucounts(struct ucounts *ucounts, enum rlimit_type type,
-			    bool override_rlimit)
+			    bool override_rlimit, long limit)
 {
 	/* Caller must hold a reference to ucounts */
 	struct ucounts *iter;
@@ -344,7 +500,7 @@ dec_unwind:
 	do_dec_rlimit_put_ucounts(ucounts, iter, type);
 	return 0;
 }
-
+#endif
 bool is_rlimit_overlimit(struct ucounts *ucounts, enum rlimit_type type, unsigned long rlimit)
 {
 	struct ucounts *iter;

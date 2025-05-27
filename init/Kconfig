@@ -1343,6 +1343,15 @@ config CGROUP_FILES
 
 endif # CGROUPS
 
+config UCOUNTS_PERCPU_COUNTER
+	bool "Ucount percpu counter for rlimit"
+	default n
+	help
+	  Provide percpu_counter for ucounts, which can improve scalability
+	  for rlimit counting. Opening this config will re-inplement rlimit
+	  charging or uncharging using percpu_counter, avoiding atomic
+	  operations on the common parents.
+
 menuconfig NAMESPACES
 	bool "Namespaces support" if EXPERT
 	depends on MULTIUSER

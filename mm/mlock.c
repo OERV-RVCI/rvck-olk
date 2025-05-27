@@ -833,7 +833,7 @@ int user_shm_lock(size_t size, struct ucounts *ucounts)
 	if (lock_limit != RLIM_INFINITY)
 		lock_limit >>= PAGE_SHIFT;
 	spin_lock(&shmlock_user_lock);
-	memlock = inc_rlimit_ucounts(ucounts, UCOUNT_RLIMIT_MEMLOCK, locked);
+	memlock = inc_rlimit_ucounts_limit(ucounts, UCOUNT_RLIMIT_MEMLOCK, locked, lock_limit);
 
 	if ((memlock == LONG_MAX || memlock > lock_limit) && !capable(CAP_IPC_LOCK)) {
 		dec_rlimit_ucounts(ucounts, UCOUNT_RLIMIT_MEMLOCK, locked);

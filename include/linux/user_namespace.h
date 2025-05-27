@@ -5,12 +5,17 @@
 #include <linux/kref.h>
 #include <linux/nsproxy.h>
 #include <linux/ns_common.h>
+#include <linux/rculist_nulls.h>
 #include <linux/sched.h>
 #include <linux/workqueue.h>
+#include <linux/rcuref.h>
 #include <linux/rwsem.h>
 #include <linux/sysctl.h>
 #include <linux/err.h>
 #include <linux/kabi.h>
+#ifdef CONFIG_UCOUNTS_PERCPU_COUNTER
+#include <linux/percpu_counter.h>
+#endif
 
 #define UID_GID_MAP_MAX_BASE_EXTENTS 5
 #define UID_GID_MAP_MAX_EXTENTS 340
@@ -112,12 +117,21 @@ struct user_namespace {
 } __randomize_layout;
 
 struct ucounts {
-	struct hlist_node node;
+	KABI_DEPRECATE(struct hlist_node, node)
 	struct user_namespace *ns;
 	kuid_t uid;
-	atomic_t count;
+	KABI_DEPRECATE(atomic_t, count)
 	atomic_long_t ucount[UCOUNT_COUNTS];
+#ifndef CONFIG_UCOUNTS_PERCPU_COUNTER
 	atomic_long_t rlimit[UCOUNT_RLIMIT_COUNTS];
+#else
+	KABI_DEPRECATE(atomic_long_t, rlimit[UCOUNT_RLIMIT_COUNTS])
+	KABI_EXTEND(struct percpu_counter rlimit[UCOUNT_RLIMIT_COUNTS])
+	KABI_EXTEND(atomic_long_t freed)
+#endif
+	KABI_EXTEND(struct hlist_nulls_node node)
+	KABI_EXTEND(struct rcu_head rcu)
+	KABI_EXTEND(rcuref_t count)
 };
 
 extern struct user_namespace init_user_ns;
@@ -128,18 +142,38 @@ void retire_userns_sysctls(struct user_namespace *ns);
 struct ucounts *inc_ucount(struct user_namespace *ns, kuid_t uid, enum ucount_type type);
 void dec_ucount(struct ucounts *ucounts, enum ucount_type type);
 struct ucounts *alloc_ucounts(struct user_namespace *ns, kuid_t uid);
-struct ucounts * __must_check get_ucounts(struct ucounts *ucounts);
 void put_ucounts(struct ucounts *ucounts);
+#ifdef CONFIG_UCOUNTS_PERCPU_COUNTER
+void __init ucounts_init(void);
+#else
+static inline void __init ucounts_init(void) { }
+#endif
+
+static inline struct ucounts * __must_check get_ucounts(struct ucounts *ucounts)
+{
+	if (rcuref_get(&ucounts->count))
+		return ucounts;
+	return NULL;
+}
 
 static inline long get_rlimit_value(struct ucounts *ucounts, enum rlimit_type type)
 {
+#ifdef CONFIG_UCOUNTS_PERCPU_COUNTER
+	return percpu_counter_sum(&ucounts->rlimit[type]);
+#else
 	return atomic_long_read(&ucounts->rlimit[type]);
+#endif
 }
 
-long inc_rlimit_ucounts(struct ucounts *ucounts, enum rlimit_type type, long v);
+long inc_rlimit_ucounts_limit(struct ucounts *ucounts, enum rlimit_type type, long v, long limit);
+static inline long inc_rlimit_ucounts(struct ucounts *ucounts, enum rlimit_type type, long v)
+{
+	return inc_rlimit_ucounts_limit(ucounts, type, v, LONG_MAX);
+}
+
 bool dec_rlimit_ucounts(struct ucounts *ucounts, enum rlimit_type type, long v);
 long inc_rlimit_get_ucounts(struct ucounts *ucounts, enum rlimit_type type,
-			    bool override_rlimit);
+			    bool override_rlimit, long limit);
 void dec_rlimit_put_ucounts(struct ucounts *ucounts, enum rlimit_type type);
 bool is_rlimit_overlimit(struct ucounts *ucounts, enum rlimit_type type, unsigned long max);
 
