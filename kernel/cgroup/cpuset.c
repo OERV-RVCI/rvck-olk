@@ -5208,6 +5208,19 @@ void cpuset_task_status_allowed(struct seq_file *m, struct task_struct *task)
 }
 
 #ifdef CONFIG_BPF_RVI
+void task_effective_cpumask(struct task_struct *tsk, struct cpumask *pmask)
+{
+	struct cpuset *cs;
+
+	if (!tsk)
+		cpumask_clear(pmask);
+
+	rcu_read_lock();
+	cs = task_cs(tsk);
+	cpumask_copy(pmask, cs->effective_cpus);
+	rcu_read_unlock();
+}
+
 __bpf_kfunc struct cpuset *bpf_cpuset_from_task(struct task_struct *task)
 {
 	if (!task)
