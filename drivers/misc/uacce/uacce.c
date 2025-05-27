@@ -955,18 +955,14 @@ static void uacce_disable_sva(struct uacce_device *uacce)
 struct uacce_device *uacce_alloc(struct device *parent,
 				 struct uacce_interface *interface)
 {
+	unsigned int flags = interface->flags;
 	struct uacce_device *uacce;
-	unsigned int flags;
 	int ret;
-
-	if (!parent || !interface)
-		return ERR_PTR(-EINVAL);
 
 	uacce = kzalloc(sizeof(struct uacce_device), GFP_KERNEL);
 	if (!uacce)
 		return ERR_PTR(-ENOMEM);
 
-	flags = interface->flags;
 	flags = uacce_enable_sva(parent, flags);
 
 	uacce->parent = parent;
