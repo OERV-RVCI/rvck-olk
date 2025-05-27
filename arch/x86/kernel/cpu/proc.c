@@ -60,7 +60,7 @@ static void show_cpuinfo_misc(struct seq_file *m, struct cpuinfo_x86 *c)
 }
 #endif
 
-static int show_cpuinfo(struct seq_file *m, void *v)
+int show_cpuinfo(struct seq_file *m, void *v)
 {
 	struct cpuinfo_x86 *c = v;
 	unsigned int cpu;
