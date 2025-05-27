@@ -251,7 +251,8 @@ void dec_ucount(struct ucounts *ucounts, enum ucount_type type)
 	put_ucounts(ucounts);
 }
 
-long inc_rlimit_ucounts(struct ucounts *ucounts, enum rlimit_type type, long v)
+long inc_rlimit_ucounts_limit(struct ucounts *ucounts, enum rlimit_type type,
+					long v, long limit)
 {
 	struct ucounts *iter;
 	long max = LONG_MAX;
@@ -300,7 +301,7 @@ void dec_rlimit_put_ucounts(struct ucounts *ucounts, enum rlimit_type type)
 }
 
 long inc_rlimit_get_ucounts(struct ucounts *ucounts, enum rlimit_type type,
-			    bool override_rlimit)
+			    bool override_rlimit, long limit)
 {
 	/* Caller must hold a reference to ucounts */
 	struct ucounts *iter;
