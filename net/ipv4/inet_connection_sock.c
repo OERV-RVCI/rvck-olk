@@ -155,10 +155,11 @@ static bool inet_use_bhash2_on_bind(const struct sock *sk)
 {
 #if IS_ENABLED(CONFIG_IPV6)
 	if (sk->sk_family == AF_INET6) {
-		int addr_type = ipv6_addr_type(&sk->sk_v6_rcv_saddr);
+		if (ipv6_addr_any(&sk->sk_v6_rcv_saddr))
+			return false;
 
-		return addr_type != IPV6_ADDR_ANY &&
-			addr_type != IPV6_ADDR_MAPPED;
+		if (!ipv6_addr_v4mapped(&sk->sk_v6_rcv_saddr))
+			return true;
 	}
 #endif
 	return sk->sk_rcv_saddr != htonl(INADDR_ANY);
@@ -198,8 +199,15 @@ static bool __inet_bhash2_conflict(const struct sock *sk, struct sock *sk2,
 				   kuid_t sk_uid, bool relax,
 				   bool reuseport_cb_ok, bool reuseport_ok)
 {
-	if (sk->sk_family == AF_INET && ipv6_only_sock(sk2))
-		return false;
+	if (ipv6_only_sock(sk2)) {
+		if (sk->sk_family == AF_INET)
+			return false;
+
+#if IS_ENABLED(CONFIG_IPV6)
+		if (ipv6_addr_v4mapped(&sk->sk_v6_rcv_saddr))
+			return false;
+#endif
+	}
 
 	return inet_bind_conflict(sk, sk2, sk_uid, relax,
 				  reuseport_cb_ok, reuseport_ok);
@@ -593,7 +601,7 @@ success:
 fail_unlock:
 	if (ret) {
 		if (bhash_created)
-			inet_bind_bucket_destroy(hinfo->bind_bucket_cachep, tb);
+			inet_bind_bucket_destroy(tb);
 		if (bhash2_created)
 			inet_bind2_bucket_destroy(hinfo->bind2_bucket_cachep,
 						  tb2);
