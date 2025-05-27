@@ -831,6 +831,14 @@ static inline bool system_has_full_ptr_auth(void)
 	return system_supports_address_auth() && system_supports_generic_auth();
 }
 
+#ifdef CONFIG_ACTLR_XCALL_XINT
+static __always_inline bool system_uses_xcall_xint(void)
+{
+	return IS_ENABLED(CONFIG_ACTLR_XCALL_XINT) &&
+	       cpus_have_const_cap(ARM64_HAS_HW_XCALL_XINT);
+}
+#endif
+
 static __always_inline bool system_uses_irq_prio_masking(void)
 {
 	return IS_ENABLED(CONFIG_ARM64_PSEUDO_NMI) &&

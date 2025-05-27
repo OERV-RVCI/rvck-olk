@@ -76,6 +76,7 @@
 #include <linux/kasan.h>
 #include <linux/percpu.h>
 
+#include <asm/actlr.h>
 #include <asm/cpu.h>
 #include <asm/cpufeature.h>
 #include <asm/cpu_ops.h>
@@ -2466,6 +2467,77 @@ static bool has_xint_support(const struct arm64_cpu_capabilities *entry, int __u
 }
 #endif
 
+#ifdef CONFIG_ACTLR_XCALL_XINT
+static bool has_arch_xcall_xint_support(const struct arm64_cpu_capabilities *entry, int scope)
+{
+	/* List of CPUs that support Xcall/Xint */
+	static const struct midr_range xcall_xint_cpus[] = {
+		MIDR_ALL_VERSIONS(MIDR_HISI_HIP12),
+		{ /* sentinel */ }
+	};
+
+	return is_midr_in_range_list(read_cpuid_id(), xcall_xint_cpus);
+}
+
+static void enable_xcall_xint_vectors(void)
+{
+	/*
+	 * Upon CONFIG_MITIGATE_SPECTRE_BRANCH_HISTORY is enabled,
+	 * the vbar_el1 is set to the vectors starts from __bp_harden_el1_vectors.
+	 * Kernel will jump to the xcall/xint vectors from the trampoline vector
+	 * defined in the macro tramp_ventry.
+	 */
+	if (__this_cpu_read(this_cpu_vector) != vectors)
+		return;
+
+	/*
+	 * Upon KAISER is enabled, the vbar_el1 is set to the vectors starts
+	 * from tramp_vectors. Kernel will jump to the vectors_xcall_xint from
+	 * the trampoline vector defined in the macro tramp_ventry.
+	 */
+	if (arm64_kernel_unmapped_at_el0())
+		return;
+
+	/*
+	 * If neither KAISER or BHB_MITIGATION is enabled, then we switch
+	 * the vbar_el1 from the default vectors to the xcall/xint vectors
+	 * at once.
+	 */
+	write_sysreg(vectors_xcall_xint, vbar_el1);
+	isb();
+}
+
+static void cpu_enable_arch_xcall_xint(const struct arm64_cpu_capabilities *__unused)
+{
+	int cpu = smp_processor_id();
+	u64 actlr_el1, actlr_el2;
+	u64 el;
+
+	el = read_sysreg(CurrentEL);
+	if (el == CurrentEL_EL2) {
+		/*
+		 * Enable EL2 trap when access ACTLR_EL1 in guest kernel.
+		 */
+		write_sysreg_s(read_sysreg_s(SYS_HCR_EL2) | HCR_TACR, SYS_HCR_EL2);
+		actlr_el2 = read_sysreg(actlr_el2);
+		actlr_el2 |= (ACTLR_ELx_XINT | ACTLR_ELx_XCALL);
+		write_sysreg(actlr_el2, actlr_el2);
+		isb();
+		actlr_el2 = read_sysreg(actlr_el2);
+		pr_info("actlr_el2: %llx, cpu:%d\n", actlr_el2, cpu);
+	} else {
+		actlr_el1 = read_sysreg(actlr_el1);
+		actlr_el1 |= (ACTLR_ELx_XINT | ACTLR_ELx_XCALL);
+		write_sysreg(actlr_el1, actlr_el1);
+		isb();
+		actlr_el1 = read_sysreg(actlr_el1);
+		pr_info("actlr_el1: %llx, cpu:%d\n", actlr_el1, cpu);
+	}
+
+	enable_xcall_xint_vectors();
+}
+#endif
+
 static const struct arm64_cpu_capabilities arm64_features[] = {
 	{
 		.capability = ARM64_ALWAYS_BOOT,
@@ -3030,6 +3102,15 @@ static const struct arm64_cpu_capabilities arm64_features[] = {
 		.matches = has_ls64,
 		.cpu_enable = cpu_enable_ls64_v,
 		ARM64_CPUID_FIELDS(ID_AA64ISAR1_EL1, LS64, LS64_V)
+	},
+#endif
+#ifdef CONFIG_ACTLR_XCALL_XINT
+	{
+		.desc = "Hardware Xcall and Xint Support",
+		.capability = ARM64_HAS_HW_XCALL_XINT,
+		.type = ARM64_CPUCAP_SYSTEM_FEATURE,
+		.matches = has_arch_xcall_xint_support,
+		.cpu_enable = cpu_enable_arch_xcall_xint,
 	},
 #endif
 	{},
