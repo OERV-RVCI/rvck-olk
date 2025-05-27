@@ -36,8 +36,8 @@
 /** Default max number of pages that can be used in a single read request */
 #define FUSE_DEFAULT_MAX_PAGES_PER_REQ 32
 
-/** Maximum of max_pages received in init_out */
-#define FUSE_MAX_MAX_PAGES 256
+/** Maximum number of outstanding background requests */
+#define FUSE_DEFAULT_MAX_BACKGROUND 12
 
 /** Bias for fi->writectr, meaning new writepages must not be sent */
 #define FUSE_NOWRITE INT_MIN
@@ -47,6 +47,9 @@
 
 /** Number of dentries for each connection in the control filesystem */
 #define FUSE_CTL_NUM_DENTRIES 5
+
+/** Maximum of max_pages received in init_out */
+extern unsigned int fuse_max_pages_limit;
 
 /** List of active connections */
 extern struct list_head fuse_conn_list;
@@ -460,22 +463,19 @@ struct fuse_iqueue;
  */
 struct fuse_iqueue_ops {
 	/**
-	 * Signal that a forget has been queued
+	 * Send one forget
 	 */
-	void (*wake_forget_and_unlock)(struct fuse_iqueue *fiq)
-		__releases(fiq->lock);
+	void (*send_forget)(struct fuse_iqueue *fiq, struct fuse_forget_link *link);
 
 	/**
-	 * Signal that an INTERRUPT request has been queued
+	 * Send interrupt for request
 	 */
-	void (*wake_interrupt_and_unlock)(struct fuse_iqueue *fiq)
-		__releases(fiq->lock);
+	void (*send_interrupt)(struct fuse_iqueue *fiq, struct fuse_req *req);
 
 	/**
-	 * Signal that a request has been queued
+	 * Send one request
 	 */
-	void (*wake_pending_and_unlock)(struct fuse_iqueue *fiq)
-		__releases(fiq->lock);
+	void (*send_req)(struct fuse_iqueue *fiq, struct fuse_req *req);
 
 	/**
 	 * Clean up when fuse_iqueue is destroyed
@@ -640,6 +640,9 @@ struct fuse_conn {
 	/** Maximum write size */
 	unsigned max_write;
 
+	/* Maxmum number of pages that write request should be aligned with */
+	unsigned int write_align_pages;
+
 	/** Maximum number of pages that can be used in a single request */
 	unsigned int max_pages;
 
@@ -664,11 +667,18 @@ struct fuse_conn {
 	/** Number of requests currently in the background */
 	unsigned num_background;
 
-	/** Number of background requests currently queued for userspace */
-	unsigned active_background;
+	/*
+	 * Number of background requests currently queued for userspace.
+	 * active_background[WRITE] for WRITE requests, and
+	 * active_background[READ] for others.
+	 */
+	unsigned active_background[2];
 
-	/** The list of background requests set aside for later queuing */
-	struct list_head bg_queue;
+	/*
+	 * The list of background requests set aside for later queuing.
+	 * bg_queue[WRITE] for WRITE requests, bg_queue[READ] for others.
+	 */
+	struct list_head bg_queue[2];
 
 	/** Protects: max_background, congestion_threshold, num_background,
 	 * active_background, bg_queue, blocked */
@@ -867,6 +877,9 @@ struct fuse_conn {
 	/* Relax restrictions to allow shared mmap in FOPEN_DIRECT_IO mode */
 	unsigned int direct_io_allow_mmap:1;
 
+	/* separate background queue for WRITE requests and the others */
+	unsigned int separate_background:1;
+
 	/* Is statx not implemented by fs? */
 	unsigned int no_statx:1;
 
@@ -875,6 +888,9 @@ struct fuse_conn {
 
 	/** Passthrough support for read/write IO */
 	unsigned int passthrough:1;
+
+	/* write reques is aligned on max_write boundary */
+	unsigned int write_alignment:1;
 
 	/** Maximum stack depth for passthrough backing files */
 	int max_stack_depth;
@@ -1073,10 +1089,6 @@ void fuse_queue_forget(struct fuse_conn *fc, struct fuse_forget_link *forget,
 		       u64 nodeid, u64 nlookup);
 
 struct fuse_forget_link *fuse_alloc_forget(void);
-
-struct fuse_forget_link *fuse_dequeue_forget(struct fuse_iqueue *fiq,
-					     unsigned int max,
-					     unsigned int *countp);
 
 /*
  * Initialize READ or READDIR request
@@ -1492,5 +1504,13 @@ ssize_t fuse_passthrough_splice_write(struct pipe_inode_info *pipe,
 				      struct file *out, loff_t *ppos,
 				      size_t len, unsigned int flags);
 ssize_t fuse_passthrough_mmap(struct file *file, struct vm_area_struct *vma);
+
+#ifdef CONFIG_SYSCTL
+extern int fuse_sysctl_register(void);
+extern void fuse_sysctl_unregister(void);
+#else
+#define fuse_sysctl_register()		(0)
+#define fuse_sysctl_unregister()	do { } while (0)
+#endif /* CONFIG_SYSCTL */
 
 #endif /* _FS_FUSE_I_H */
