@@ -21,6 +21,7 @@ enum hmcall_cpuid_cmd {
 #define CPU_FEAT_FPU	0x1
 #define CPU_FEAT_SIMD	0x2
 #define CPU_FEAT_UNA	0x4
+#define CPU_FEAT_VINT	0x8
 
 enum sunway_cpu_model {
 	CPU_SW3231 = 0x31,
@@ -30,7 +31,7 @@ enum sunway_cpu_model {
 
 struct cpuinfo_sw64 {
 	__u8 model;
-	__u8 family;
+	__u16 family;
 	__u8 chip_var;
 	__u8 arch_var;
 	__u8 arch_rev;

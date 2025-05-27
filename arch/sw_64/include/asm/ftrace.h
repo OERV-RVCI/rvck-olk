@@ -12,10 +12,16 @@
 #define _ASM_SW64_FTRACE_H
 
 #define MCOUNT_ADDR		((unsigned long)_mcount)
-#define MCOUNT_INSN_SIZE	20	/* 5 * SW64_INSN_SIZE */
+#ifdef CONFIG_DYNAMIC_FTRACE
+#define MCOUNT_INSN_SIZE	16	/* 4 * SW64_INSN_SIZE */
+#else
+#define MCOUNT_INSN_SIZE        20      /* 5 * SW64_INSN_SIZE */
+#endif
 #define MCOUNT_LDGP_SIZE	8	/* 2 * SW64_INSN_SIZE */
 
+#ifdef CONFIG_DYNAMIC_FTRACE_WITH_REGS
 #define ARCH_SUPPORTS_FTRACE_OPS 1
+#endif
 
 #ifndef __ASSEMBLY__
 #include <linux/compat.h>

@@ -33,6 +33,7 @@
 #include <asm/sw64io.h>
 
 #include "iommu.h"
+#include "../dma-iommu.h"
 
 #define SW64_BAR_ADDRESS (IO_BASE | PCI_BASE)
 
@@ -52,6 +53,8 @@ enum exceptype {
 	PTE_LEVEL2,
 	UNAUTHORIZED_ACCESS,
 	ILLEGAL_RESPONSE,
+	SEGMENT_TRANSLATION_MISS,
+	SEGMENT_TRANSLATION_UNAUTHORIZED_ACCESS,
 	DTE_LEVEL1_VAL,
 	DTE_LEVEL2_VAL,
 	PTE_LEVEL1_VAL,
@@ -71,11 +74,8 @@ LIST_HEAD(sunway_domain_list);
 
 struct dma_domain {
 	struct sunway_iommu_domain sdomain;
-	struct iova_domain iovad;
 };
 const struct iommu_ops sunway_iommu_ops;
-
-static int iommu_identity_mapping;
 
 static int __last_alias(struct pci_dev *pdev, u16 alias, void *data)
 {
@@ -245,7 +245,6 @@ static void dma_domain_free(struct dma_domain *dma_dom)
 		return;
 
 	del_domain_from_list(&dma_dom->sdomain);
-	put_iova_domain(&dma_dom->iovad);
 	free_pagetable(&dma_dom->sdomain);
 	if (dma_dom->sdomain.id)
 		domain_id_free(dma_dom->sdomain.id);
@@ -643,6 +642,7 @@ irqreturn_t iommu_interrupt(int irq, void *dev)
 	}
 
 	sdomain = sdev->domain;
+	pr_info("iommu exception type:%#lx\n", type);
 
 	switch (type) {
 	case DTE_LEVEL1:
@@ -664,21 +664,27 @@ irqreturn_t iommu_interrupt(int irq, void *dev)
 		pr_info("invalid level2 pte, addr: %#lx, val: %#lx\n",
 			fetch_pte(sdomain, dva, PTE_LEVEL2),
 			fetch_pte(sdomain, dva, PTE_LEVEL2_VAL));
-
-		iommu_status &= ~(1UL << 62);
-		writeq(iommu_status, iommu->reg_base_addr + IOMMUEXCPT_STATUS);
 		break;
-
 	case UNAUTHORIZED_ACCESS:
-		pr_info("unauthorized access\n");
+		pr_info("page translation unauthorized access\n");
 		break;
 	case ILLEGAL_RESPONSE:
-		pr_info("illegal response\n");
+		pr_info("accessing the device table or page table \
+				return an illegal response\n");
+		break;
+	case SEGMENT_TRANSLATION_MISS:
+		pr_info("segment translation miss\n");
+		break;
+	case SEGMENT_TRANSLATION_UNAUTHORIZED_ACCESS:
+		pr_info("segment translation unauthorized access\n");
 		break;
 	default:
 		pr_info("unknown error\n");
 		break;
 	}
+
+	iommu_status &= ~(1UL << 62);
+	writeq(iommu_status, iommu->reg_base_addr + IOMMUEXCPT_STATUS);
 
 	return IRQ_HANDLED;
 }
@@ -806,12 +812,12 @@ static int sunway_iommu_init(void)
 			continue;
 		}
 
+		sunway_enable_iommu_func(hose);
+		hose->iommu_enable = true;
 		iommu_device_sysfs_add(&iommu->iommu, NULL, NULL, "%d",
 					iommu_index);
 		iommu_device_register(&iommu->iommu, &sunway_iommu_ops, NULL);
 
-		sunway_enable_iommu_func(hose);
-		hose->iommu_enable = true;
 		piu_flush_all(iommu);
 
 		iommu_index++;
@@ -1020,6 +1026,9 @@ static struct iommu_domain *sunway_iommu_domain_alloc(unsigned int type)
 		}
 
 		sdomain = &dma_dom->sdomain;
+		sdomain->domain.geometry.aperture_start = 0ULL;
+		sdomain->domain.geometry.aperture_end	= DMA_BIT_MASK(32);
+		sdomain->domain.geometry.force_aperture	= true;
 		break;
 
 	case IOMMU_DOMAIN_IDENTITY:
@@ -1035,7 +1044,6 @@ static struct iommu_domain *sunway_iommu_domain_alloc(unsigned int type)
 		}
 
 		sdomain->type = IOMMU_DOMAIN_IDENTITY;
-		iommu_identity_mapping = 1;
 		break;
 
 	default:
@@ -1155,12 +1163,10 @@ sunway_iommu_iova_to_phys(struct iommu_domain *dom, dma_addr_t iova)
 }
 
 static int
-sunway_iommu_map_pages(struct iommu_domain *dom, unsigned long iova,
-		 phys_addr_t paddr, size_t page_size, size_t pgcount,
-		 int iommu_prot, gfp_t gfp, size_t *mapped)
+sunway_iommu_map(struct iommu_domain *dom, unsigned long iova,
+		 phys_addr_t paddr, size_t page_size, int iommu_prot, gfp_t gfp)
 {
 	struct sunway_iommu_domain *sdomain = to_sunway_domain(dom);
-	size_t size = pgcount << PAGE_SHIFT;
 	int ret;
 
 	/*
@@ -1171,45 +1177,24 @@ sunway_iommu_map_pages(struct iommu_domain *dom, unsigned long iova,
 	if (iova >= SW64_BAR_ADDRESS)
 		return 0;
 
-	mutex_lock(&sdomain->api_lock);
-	while (pgcount--) {
-		ret = sunway_iommu_map_page(sdomain, iova, paddr, page_size, iommu_prot);
-		if (ret) {
-			pr_info("Failed to map page from IOVA %lx.\n", iova);
-			return ret;
-		}
-		iova += page_size;
-		paddr += page_size;
-	}
-	mutex_unlock(&sdomain->api_lock);
-
-	if (!ret && mapped)
-		*mapped = size;
+	ret = sunway_iommu_map_page(sdomain, iova, paddr, page_size, iommu_prot);
 
 	return ret;
 }
 
 static size_t
-sunway_iommu_unmap_pages(struct iommu_domain *dom, unsigned long iova,
-			size_t page_size, size_t pgcount,
-			struct iommu_iotlb_gather *gather)
+sunway_iommu_unmap(struct iommu_domain *dom, unsigned long iova,
+		   size_t page_size, struct iommu_iotlb_gather *gather)
 {
 	struct sunway_iommu_domain *sdomain = to_sunway_domain(dom);
 	size_t unmap_size;
-	size_t total_unmap = 0;
 
 	if (iova >= SW64_BAR_ADDRESS)
 		return page_size;
 
-	mutex_lock(&sdomain->api_lock);
-	while (pgcount--) {
-		unmap_size = sunway_iommu_unmap_page(sdomain, iova, page_size);
-		iova += page_size;
-		total_unmap += page_size;
-	}
-	mutex_unlock(&sdomain->api_lock);
+	unmap_size = sunway_iommu_unmap_page(sdomain, iova, page_size);
 
-	return total_unmap;
+	return unmap_size;
 }
 
 static struct iommu_group *sunway_iommu_device_group(struct device *dev)
@@ -1297,8 +1282,10 @@ static struct iommu_device *sunway_iommu_probe_device(struct device *dev)
 	if (!hose->iommu_enable)
 		return ERR_PTR(-ENODEV);
 
-	if (dev_iommu_priv_get(dev))
+	if (dev_iommu_priv_get(dev)) {
+		iommu = hose->pci_iommu;
 		return &iommu->iommu;
+	}
 
 	ret = iommu_init_device(dev);
 	if (ret)
@@ -1311,16 +1298,19 @@ static struct iommu_device *sunway_iommu_probe_device(struct device *dev)
 
 static int sunway_iommu_def_domain_type(struct device *dev)
 {
-	if (dev_is_pci(dev))
-		if (iommu_identity_mapping)
-			return IOMMU_DOMAIN_IDENTITY;
-
 	return 0;
 }
 
 static bool sunway_iommu_capable(struct device *dev, enum iommu_cap cap)
 {
-	return false;
+	switch (cap) {
+	case IOMMU_CAP_CACHE_COHERENCY:
+		return true;
+	case IOMMU_CAP_NOEXEC:
+		return true;
+	default:
+		return false;
+	}
 }
 
 static void sunway_iommu_probe_finalize(struct device *dev)
@@ -1328,10 +1318,38 @@ static void sunway_iommu_probe_finalize(struct device *dev)
 	struct iommu_domain *domain;
 
 	domain = iommu_get_domain_for_dev(dev);
-	if (domain->type == IOMMU_DOMAIN_DMA) {
-		iommu_setup_dma_ops(dev, 0, SW64_32BIT_DMA_LIMIT);
-	} else
+	if (domain->type & __IOMMU_DOMAIN_DMA_API)
+		iommu_setup_dma_ops(dev, SW64_DMA_START, SW64_32BIT_DMA_LIMIT);
+	else
 		set_dma_ops(dev, get_arch_dma_ops());
+}
+
+static void sunway_iommu_get_resv_regions(struct device *dev,
+					  struct list_head *head)
+{
+	struct iommu_resv_region *region;
+
+	region = iommu_alloc_resv_region(SW64_32BIT_DMA_LIMIT,
+					 (DMA_BIT_MASK(32) - SW64_32BIT_DMA_LIMIT),
+					 IOMMU_NOEXEC | IOMMU_MMIO,
+					 IOMMU_RESV_RESERVED, GFP_KERNEL);
+	if (!region)
+		return;
+
+	list_add_tail(&region->list, head);
+
+	if (dev_is_pci(dev)) {
+		struct pci_dev *pdev = to_pci_dev(dev);
+
+		if ((pdev->class >> 8) == PCI_CLASS_BRIDGE_ISA) {
+			region = iommu_alloc_resv_region(0, 1UL << 24,
+					IOMMU_READ | IOMMU_WRITE,
+					IOMMU_RESV_DIRECT_RELAXABLE,
+					GFP_KERNEL);
+			if (region)
+				list_add_tail(&region->list, head);
+		}
+	}
 }
 
 const struct iommu_ops sunway_iommu_ops = {
@@ -1341,12 +1359,13 @@ const struct iommu_ops sunway_iommu_ops = {
 	.probe_finalize = sunway_iommu_probe_finalize,
 	.release_device = sunway_iommu_release_device,
 	.device_group = sunway_iommu_device_group,
+	.get_resv_regions = sunway_iommu_get_resv_regions,
 	.pgsize_bitmap = SW64_IOMMU_PGSIZES,
 	.def_domain_type = sunway_iommu_def_domain_type,
 	.default_domain_ops = &(const struct iommu_domain_ops) {
 		.attach_dev = sunway_iommu_attach_device,
-		.map_pages = sunway_iommu_map_pages,
-		.unmap_pages = sunway_iommu_unmap_pages,
+		.map = sunway_iommu_map,
+		.unmap = sunway_iommu_unmap,
 		.iova_to_phys = sunway_iommu_iova_to_phys,
 		.free = sunway_iommu_domain_free,
 	}
@@ -1368,16 +1387,16 @@ static int __init sunway_iommu_setup(char *str)
 	if (!str)
 		return -EINVAL;
 
-	bitmap_zero(iommu_bitmap, 64);
+	bitmap_zero(iommu_bitmap, 32);
 
 	if (!strncmp(str, "on", 2)) {
-		bitmap_fill(iommu_bitmap, 64);
+		bitmap_fill(iommu_bitmap, 32);
 	} else if (!strncmp(str, "off", 3)) {
-		bitmap_zero(iommu_bitmap, 64);
+		bitmap_zero(iommu_bitmap, 32);
 	} else {
 		ret = kstrtoul(str, 16, &rc_val);
-		if (!ret)
-			return -EINVAL;
+		if (ret)
+			return ret;
 
 		bitmap_from_u64(iommu_bitmap, rc_val);
 	}
@@ -1395,11 +1414,11 @@ static int __init iommu_enable_setup(char *str)
 		return -EINVAL;
 
 	pr_info("iommu_enable= deprecated; use sunway_iommu=on/off instead.\n");
-	bitmap_zero(iommu_bitmap, 64);
+	bitmap_zero(iommu_bitmap, 32);
 
 	ret = kstrtoul(str, 16, &rc_val);
-	if (!ret)
-		return -EINVAL;
+	if (ret)
+		return ret;
 
 	bitmap_from_u64(iommu_bitmap, rc_val);
 

@@ -897,7 +897,7 @@ int smu_cmn_update_table(struct smu_context *smu,
 		return ret;
 
 	if (!drv2smu) {
-		amdgpu_asic_flush_hdp(adev, NULL);
+		amdgpu_asic_invalidate_hdp(adev, NULL);
 #if IS_ENABLED(CONFIG_SW64)
 		memcpy_fromio(table_data, table->cpu_addr, table_size);
 #else

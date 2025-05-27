@@ -16,6 +16,7 @@
 #include <linux/irq.h>
 #include <linux/irqchip.h>
 #include <linux/seq_file.h>
+#include <linux/delay.h>
 
 #include <asm/cpu.h>
 #include <asm/irq_impl.h>
@@ -106,7 +107,58 @@ handle_irq(int irq)
 void fixup_irqs(void)
 {
 	irq_migrate_all_off_this_cpu();
+
+	mdelay(1);
 }
+
+#ifdef CONFIG_SW64_IRQ_MSI
+static int cpu_vector_available(int cpu)
+{
+	int vector, max_vector = 256;
+	int avl_vector = 0;
+
+	for (vector = 0; vector < max_vector; vector++)
+		if (per_cpu(vector_irq, cpu)[vector] == 0)
+			avl_vector++;
+
+	return avl_vector;
+}
+
+static int cpu_vector_tomove(int cpu)
+{
+	int max_vector = 256;
+
+	return max_vector - cpu_vector_available(cpu);
+}
+
+static int vector_available(void)
+{
+	int cpu, avl_vector = 0;
+
+	for_each_online_cpu(cpu)
+		avl_vector += cpu_vector_available(cpu);
+
+	return avl_vector;
+}
+
+int can_unplug_cpu(void)
+{
+	unsigned int free, tomove;
+	unsigned int cpu = smp_processor_id();
+
+	tomove = cpu_vector_tomove(cpu);
+	free = vector_available();
+	if (free < tomove) {
+		pr_info("CPU %u has %u vectors, %u available, Cannot disable CPU\n",
+				cpu, tomove, free);
+		return -ENOSPC;
+	}
+
+	return 0;
+}
+#else
+int can_unplug_cpu(void) { return 0; }
+#endif
 #endif
 
 void __init init_IRQ(void)

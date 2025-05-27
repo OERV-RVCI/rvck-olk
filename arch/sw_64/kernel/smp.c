@@ -215,8 +215,10 @@ static int secondary_cpu_start(int cpuid, struct task_struct *idle)
 
 	set_secondary_ready(cpuid);
 
+#ifdef CONFIG_SUBARCH_C4
 	/* send reset signal */
 	reset_cpu(cpuid);
+#endif
 
 	/* Wait 10 seconds for secondary cpu.  */
 	timeout = jiffies + 10*HZ;
@@ -500,6 +502,9 @@ void __init smp_prepare_cpus(unsigned int max_cpus)
 	for_each_possible_cpu(cpu) {
 		numa_store_cpu_info(cpu);
 	}
+#ifdef CONFIG_NUMA_AWARE_SPINLOCKS
+	cna_configure_spin_lock_slowpath();
+#endif
 
 	/* Nothing to do on a UP box, or when told not to.  */
 	if (nr_cpu_ids == 1 || max_cpus == 0) {
@@ -543,9 +548,12 @@ int __cpu_up(unsigned int cpu, struct task_struct *tidle)
 	wmb();
 	smp_rcb->ready = 0;
 
-	if (!is_junzhang_v1()) {
+	if (!is_junzhang_v1() && is_in_host()) {
 		/* send wake up signal */
 		send_wakeup_interrupt(cpu);
+#ifdef CONFIG_SUBARCH_C3B
+		reset_cpu(cpu);
+#endif
 	}
 
 	smp_boot_one_cpu(cpu, tidle);
@@ -797,9 +805,15 @@ void flush_tlb_kernel_range(unsigned long start, unsigned long end)
 EXPORT_SYMBOL(flush_tlb_kernel_range);
 
 #ifdef CONFIG_HOTPLUG_CPU
+extern int can_unplug_cpu(void);
 int __cpu_disable(void)
 {
 	int cpu = smp_processor_id();
+	int ret;
+
+	ret = can_unplug_cpu();
+	if (ret)
+		return ret;
 
 	set_cpu_online(cpu, false);
 	remove_cpu_topology(cpu);
@@ -843,7 +857,7 @@ void arch_cpu_idle_dead(void)
 	}
 
 #ifdef CONFIG_SUSPEND
-	if (!is_junzhang_v1()) {
+	if (is_in_host() && !is_junzhang_v1()) {
 		sleepen();
 		send_sleep_interrupt(smp_processor_id());
 		while (1)
@@ -853,7 +867,6 @@ void arch_cpu_idle_dead(void)
 		while (1)
 			asm("nop");
 	}
-
 #else
 	asm volatile("memb");
 	asm volatile("halt");

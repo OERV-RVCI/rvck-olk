@@ -102,7 +102,7 @@ static int __init vm_power_init(void)
 {
 	struct sys_off_handler *handler;
 
-	if (is_in_host())
+	if (is_in_host() || is_in_emul())
 		return 0;
 
 	handler = register_sys_off_handler(SYS_OFF_MODE_RESTART,

@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
+
+#define pr_fmt(fmt) "MSIC: " fmt
+
 #include <linux/pci.h>
 #include <linux/msi.h>
 #include <linux/irqdomain.h>
@@ -6,8 +9,6 @@
 
 #include <asm/irq_impl.h>
 #include <asm/kvm_emulate.h>
-
-#define PREFIX "MSIC: "
 
 static struct irq_domain *msi_default_domain;
 static DEFINE_RAW_SPINLOCK(vector_lock);
@@ -113,22 +114,24 @@ static int sw64_set_affinity(struct irq_data *d, const struct cpumask *cpumask, 
 
 	irqd = irq_domain_get_irq_data(msi_default_domain->parent, d->irq);
 	/* Don't do anything if the interrupt isn't started */
-	if (!irqd_is_started(irqd))
+	if (!irqd_is_started(irqd) && !irqd_affinity_is_managed(irqd))
 		return IRQ_SET_MASK_OK;
 
 	cdata = irqd->chip_data;
 	if (!cdata)
 		return -ENOMEM;
 
-	if (cdata->move_in_progress)
-		return -EBUSY;
-
 	/*
 	 * If existing target cpu is already in the new mask and is online
 	 * then do nothing.
 	 */
-	if (cpu_online(cdata->dst_cpu) && cpumask_test_cpu(cdata->dst_cpu, cpumask))
-		return IRQ_SET_MASK_OK;
+	if (cpu_online(cdata->dst_cpu)) {
+		if (cpumask_test_cpu(cdata->dst_cpu, cpumask))
+			return IRQ_SET_MASK_OK;
+
+		if (cdata->move_in_progress)
+			return -EBUSY;
+	}
 
 	raw_spin_lock_irqsave(&vector_lock, flags);
 
@@ -158,7 +161,7 @@ static int sw64_set_affinity(struct irq_data *d, const struct cpumask *cpumask, 
 	msi_config = set_piu_msi_config(hose, cpu, cdata->msi_config_index, vector);
 	cdata->msi_config = msi_config;
 	spin_unlock(&cdata->cdata_lock);
-	irq_data_update_effective_affinity(irqd, &searchmask);
+	irq_data_update_effective_affinity(d, cpumask_of(cpu));
 
 	raw_spin_unlock_irqrestore(&vector_lock, flags);
 
@@ -248,6 +251,7 @@ static int __assign_irq_vector(int virq, unsigned int nr_irqs,
 		cdata->prev_cpu = cpu;
 		cdata->prev_vector = vector;
 		cdata->move_in_progress = false;
+		irq_data_update_effective_affinity(irq_data, cpumask_of(cpu));
 	}
 	return 0;
 }
@@ -289,6 +293,8 @@ static void sw64_vector_free_irqs(struct irq_domain *domain,
 			}
 			irq_domain_reset_irq_data(irq_data);
 			per_cpu(vector_irq, cdata->dst_cpu)[cdata->vector] = 0;
+			if (cdata->move_in_progress)
+				per_cpu(vector_irq, cdata->prev_cpu)[cdata->prev_vector] = 0;
 			kfree(cdata);
 			raw_spin_unlock_irqrestore(&vector_lock, flags);
 		}
@@ -492,7 +498,7 @@ int __init msic_acpi_init(struct irq_domain *parent,
 	enabled = is_msic_enabled(msic->flags);
 	virtual = is_msic_virtual(msic->flags);
 
-	pr_info(PREFIX "version [%u] on node [%u] Root Complex [%u] (%s) %s\n",
+	pr_info("version [%u] on node [%u] Root Complex [%u] (%s) %s\n",
 			msic->version, msic->node, msic->rc,
 			virtual ? "virtual" : "physical",
 			enabled ? "found" : "disabled");

@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 
+#define pr_fmt(fmt) "CINTC: " fmt
+
 #include <linux/kconfig.h>
 #include <linux/pci.h>
 #include <linux/irqchip.h>
@@ -34,8 +36,6 @@
  * |                                                           |
  * +-----------------------------------------------------------+
  */
-
-#define PREFIX "CINTC: "
 
 struct fwnode_handle *cintc_handle;
 
@@ -76,23 +76,25 @@ static void handle_nmi_int(void)
 
 int pme_state;
 
-asmlinkage void do_entInt(unsigned long type, unsigned long vector,
-			  unsigned long irq_arg, struct pt_regs *regs)
+asmlinkage void noinstr do_entInt(struct pt_regs *regs)
 {
 	struct pt_regs *old_regs;
 	extern char __idle_start[], __idle_end[];
+	unsigned long type = regs->earg0;
+	unsigned long vector = regs->earg1;
+	unsigned long irq_arg = regs->earg2;
 
 	/* restart idle routine if it is interrupted */
 	if (regs->pc > (u64)__idle_start && regs->pc < (u64)__idle_end)
 		regs->pc = (u64)__idle_start;
-	if (regs->cause != -2)
-		irq_enter();
-	else
+	if (unlikely(regs->cause == -2 && IS_ENABLED(CONFIG_SUBARCH_C4)))
 		nmi_enter();
+	else
+		irq_enter();
 	old_regs = set_irq_regs(regs);
 
 #ifdef CONFIG_PM
-	if (is_junzhang_v1()) {
+	if (is_in_host() && is_junzhang_v1()) {
 		if (pme_state == PME_WFW) {
 			pme_state = PME_PENDING;
 			goto out;
@@ -174,10 +176,10 @@ asmlinkage void do_entInt(unsigned long type, unsigned long vector,
 
 out:
 	set_irq_regs(old_regs);
-	if (regs->cause != -2)
-		irq_exit();
-	else
+	if (unlikely(regs->cause == -2 && IS_ENABLED(CONFIG_SUBARCH_C4)))
 		nmi_exit();
+	else
+		irq_exit();
 }
 EXPORT_SYMBOL(do_entInt);
 
@@ -249,7 +251,7 @@ static int __init pintc_parse_madt(union acpi_subtable_headers *header,
 
 	if ((pintc->version == ACPI_MADT_SW_PINTC_VERSION_NONE) ||
 		(pintc->version >= ACPI_MADT_SW_PINTC_VERSION_RESERVED)) {
-		pr_err(PREFIX "invalid PINTC version\n");
+		pr_err("invalid PINTC version\n");
 		return -EINVAL;
 	}
 
@@ -265,7 +267,7 @@ static int __init msic_parse_madt(union acpi_subtable_headers *header,
 	msic = (struct acpi_madt_sw_msic *)header;
 	if ((msic->version == ACPI_MADT_SW_MSIC_VERSION_NONE) ||
 			(msic->version >= ACPI_MADT_SW_MSIC_VERSION_RESERVED)) {
-		pr_err(PREFIX "invalid MSIC version\n");
+		pr_err("invalid MSIC version\n");
 		return -EINVAL;
 	}
 
@@ -302,7 +304,7 @@ static __init int cintc_acpi_init(union acpi_subtable_headers *header,
 
 	cintc = (struct acpi_madt_sw_cintc *)header;
 	virtual = is_core_virtual(cintc->flags);
-	pr_info(PREFIX "version [%u] (%s) found\n", cintc->version,
+	pr_info("version [%u] (%s) found\n", cintc->version,
 			virtual ? "virtual" : "physical");
 
 	/**
@@ -315,7 +317,7 @@ static __init int cintc_acpi_init(union acpi_subtable_headers *header,
 	 */
 	cintc_handle = irq_domain_alloc_named_fwnode("CINTC");
 	if (!cintc_handle) {
-		pr_err(PREFIX "failed to alloc fwnode\n");
+		pr_err("failed to alloc fwnode\n");
 		return -ENOMEM;
 	}
 
