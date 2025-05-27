@@ -16,4 +16,3 @@ config BPF_RVI
 	  be a substitute for LXCFS with better performance and scalability.
 
 	  If you are unsure how to answer this question, answer N.
-
