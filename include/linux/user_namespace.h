@@ -117,18 +117,21 @@ struct user_namespace {
 } __randomize_layout;
 
 struct ucounts {
-	struct hlist_nulls_node node;
+	KABI_DEPRECATE(struct hlist_node, node)
 	struct user_namespace *ns;
 	kuid_t uid;
-	struct rcu_head rcu;
-	rcuref_t count;
+	KABI_DEPRECATE(atomic_t, count)
 	atomic_long_t ucount[UCOUNT_COUNTS];
 #ifndef CONFIG_UCOUNTS_PERCPU_COUNTER
 	atomic_long_t rlimit[UCOUNT_RLIMIT_COUNTS];
 #else
-	struct percpu_counter rlimit[UCOUNT_RLIMIT_COUNTS];
-	atomic_long_t freed;
+	KABI_DEPRECATE(atomic_long_t, rlimit[UCOUNT_RLIMIT_COUNTS])
+	KABI_EXTEND(struct percpu_counter rlimit[UCOUNT_RLIMIT_COUNTS])
+	KABI_EXTEND(atomic_long_t freed)
 #endif
+	KABI_EXTEND(struct hlist_nulls_node node)
+	KABI_EXTEND(struct rcu_head rcu)
+	KABI_EXTEND(rcuref_t count)
 };
 
 extern struct user_namespace init_user_ns;
