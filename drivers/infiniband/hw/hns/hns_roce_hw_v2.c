@@ -43,7 +43,6 @@
 #include <rdma/ib_verbs.h>
 #include <rdma/ib_mad.h>
 
-#include "hnae3.h"
 #include "hclge_main.h"
 #include "hns_roce_common.h"
 #include "hns_roce_device.h"
@@ -51,6 +50,9 @@
 #include "hns_roce_hem.h"
 #include "hns_roce_dca.h"
 #include "hns_roce_hw_v2.h"
+
+#define CREATE_TRACE_POINTS
+#include "hns_roce_trace.h"
 
 enum {
 	CMD_RST_PRC_OTHERS,
@@ -835,6 +837,8 @@ static int hns_roce_v2_post_send(struct ib_qp *ibqp,
 		else
 			ret = set_ud_wqe(qp, wr, wqe, &sge_idx, owner_bit);
 
+		trace_hns_sq_wqe(qp->qpn, wqe_idx, wqe, 1 << qp->sq.wqe_shift,
+				 wr->wr_id, TRACE_SQ);
 		if (unlikely(ret)) {
 			*bad_wr = wr;
 			goto out;
@@ -915,6 +919,9 @@ static void fill_rq_wqe(struct hns_roce_qp *hr_qp, const struct ib_recv_wr *wr,
 
 	wqe = hns_roce_get_recv_wqe(hr_qp, wqe_idx);
 	fill_recv_sge_to_wqe(wr, wqe, max_sge, hr_qp->rq.rsv_sge);
+
+	trace_hns_rq_wqe(hr_qp->qpn, wqe_idx, wqe, 1 << hr_qp->rq.wqe_shift,
+			 wr->wr_id, TRACE_RQ);
 }
 
 static int hns_roce_v2_post_recv(struct ib_qp *ibqp,
@@ -1092,6 +1099,9 @@ static int hns_roce_v2_post_srq_recv(struct ib_srq *ibsrq,
 		fill_recv_sge_to_wqe(wr, wqe, max_sge, srq->rsv_sge);
 		fill_wqe_idx(srq, wqe_idx);
 		srq->wrid[wqe_idx] = wr->wr_id;
+
+		trace_hns_srq_wqe(srq->srqn, wqe_idx, wqe, 1 << srq->wqe_shift,
+				  wr->wr_id, TRACE_SRQ);
 	}
 
 	if (likely(nreq)) {
@@ -1411,6 +1421,8 @@ static int __hns_roce_cmq_send_one(struct hns_roce_dev *hr_dev,
 	tail = csq->head;
 
 	for (i = 0; i < num; i++) {
+		trace_hns_cmdq_req(hr_dev, &desc[i]);
+
 		csq->desc[csq->head++] = desc[i];
 		if (csq->head == csq->desc_num)
 			csq->head = 0;
@@ -1425,6 +1437,8 @@ static int __hns_roce_cmq_send_one(struct hns_roce_dev *hr_dev,
 	if (hns_roce_cmq_csq_done(hr_dev)) {
 		ret = 0;
 		for (i = 0; i < num; i++) {
+			trace_hns_cmdq_resp(hr_dev, &csq->desc[tail]);
+
 			/* check the result of hardware write back */
 			desc_ret = le16_to_cpu(csq->desc[tail++].retval);
 			if (tail == csq->desc_num)
@@ -4874,6 +4888,7 @@ static int modify_qp_init_to_rtr(struct ib_qp *ibqp,
 	dma_addr_t trrl_ba;
 	dma_addr_t irrl_ba;
 	enum ib_mtu ib_mtu;
+	u8 ack_req_freq;
 	const u8 *smac;
 	u8 lp_pktn_ini;
 	u64 *mtts;
@@ -4978,8 +4993,24 @@ static int modify_qp_init_to_rtr(struct ib_qp *ibqp,
 	hr_reg_write(context, QPC_LP_PKTN_INI, lp_pktn_ini);
 	hr_reg_clear(qpc_mask, QPC_LP_PKTN_INI);
 
-	/* ACK_REQ_FREQ should be larger than or equal to LP_PKTN_INI */
-	hr_reg_write(context, QPC_ACK_REQ_FREQ, lp_pktn_ini);
+#define MAX_ACK_REQ_MSG_LEN 65536
+	/*
+	 * There are several constraints for ACK_REQ_FREQ:
+	 * 1. mtu * (2 ^ ACK_REQ_FREQ) should not be too large, otherwise
+	 *    it may cause some unexpected retries when sending large
+	 *    payload. 64K is a recommended value.
+	 * 2. ACK_REQ_FREQ should be larger than or equal to LP_PKTN_INI.
+	 *    But we don't need to add a check since the calculation here
+	 *    already guarantees this.
+	 * 3. ACK_REQ_FREQ must be equal to LP_PKTN_INI when using LDCP
+	 *    or HC3 congestion control algorithm.
+	 */
+	if (hr_qp->cong_type == CONG_TYPE_LDCP ||
+	    hr_qp->cong_type == CONG_TYPE_HC3)
+		ack_req_freq = lp_pktn_ini;
+	else
+		ack_req_freq = ilog2(MAX_ACK_REQ_MSG_LEN / mtu);
+	hr_reg_write(context, QPC_ACK_REQ_FREQ, ack_req_freq);
 	hr_reg_clear(qpc_mask, QPC_ACK_REQ_FREQ);
 
 	hr_reg_clear(qpc_mask, QPC_RX_REQ_PSN_ERR);
@@ -5639,6 +5670,7 @@ static void v2_set_flushed_fields(struct ib_qp *ibqp,
 		return;
 
 	spin_lock_irqsave(&hr_qp->sq.lock, sq_flag);
+	trace_hns_sq_flush_cqe(hr_qp->qpn, hr_qp->sq.head, TRACE_SQ);
 	hr_reg_write(context, QPC_SQ_PRODUCER_IDX, hr_qp->sq.head);
 	hr_reg_clear(qpc_mask, QPC_SQ_PRODUCER_IDX);
 	hr_qp->state = IB_QPS_ERR;
@@ -5648,6 +5680,7 @@ static void v2_set_flushed_fields(struct ib_qp *ibqp,
 		return;
 
 	spin_lock_irqsave(&hr_qp->rq.lock, rq_flag);
+	trace_hns_rq_flush_cqe(hr_qp->qpn, hr_qp->rq.head, TRACE_RQ);
 	hr_reg_write(context, QPC_RQ_PRODUCER_IDX, hr_qp->rq.head);
 	hr_reg_clear(qpc_mask, QPC_RQ_PRODUCER_IDX);
 	spin_unlock_irqrestore(&hr_qp->rq.lock, rq_flag);
@@ -6658,6 +6691,7 @@ static irqreturn_t hns_roce_v2_aeq_int(struct hns_roce_dev *hr_dev,
 		eq->sub_type = sub_type;
 		++eq->cons_index;
 		aeqe_found = IRQ_HANDLED;
+		trace_hns_ae_info(event_type, aeqe, eq->eqe_size);
 
 		atomic64_inc(&hr_dev->dfx_cnt[HNS_ROCE_DFX_AEQE_CNT]);
 
@@ -7342,6 +7376,8 @@ static int hns_roce_v2_config_scc_param(struct hns_roce_dev *hr_dev,
 		ibdev_err_ratelimited(&hr_dev->ib_dev,
 			"failed to configure scc param, opcode: 0x%x, ret = %d.\n",
 			le16_to_cpu(desc.opcode), ret);
+		memcpy(scc_param->param, scc_param->latest_param,
+		       sizeof(scc_param->param));
 		mutex_unlock(&scc_param->scc_mutex);
 		return ret;
 	}
