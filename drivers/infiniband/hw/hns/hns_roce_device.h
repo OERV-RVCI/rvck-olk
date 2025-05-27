@@ -34,6 +34,7 @@
 #define _HNS_ROCE_DEVICE_H
 
 #include <linux/pci.h>
+#include <linux/siphash.h>
 #include <rdma/ib_verbs.h>
 #include <rdma/hns-abi.h>
 #include "hns_roce_debugfs.h"
@@ -1161,6 +1162,7 @@ struct hns_roce_dev {
 
 	void *dca_safe_buf;
 	dma_addr_t dca_safe_page;
+	siphash_key_t dca_safe_hash_key;
 };
 
 enum hns_roce_trace_type {
