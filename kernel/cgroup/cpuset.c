@@ -5228,8 +5228,14 @@ __bpf_kfunc struct cpuset *bpf_cpuset_from_task(struct task_struct *task)
 	return task_cs(task);
 }
 
+__bpf_kfunc unsigned int bpf_cpumask_weight(struct cpumask *pmask)
+{
+	return cpumask_weight(pmask);
+}
+
 BTF_SET8_START(bpf_cpuset_kfunc_ids)
 BTF_ID_FLAGS(func, bpf_cpuset_from_task, KF_RET_NULL | KF_RCU)
+BTF_ID_FLAGS(func, bpf_cpumask_weight)
 BTF_SET8_END(bpf_cpuset_kfunc_ids)
 
 static const struct btf_kfunc_id_set bpf_cpuset_kfunc_set = {
