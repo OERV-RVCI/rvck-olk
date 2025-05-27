@@ -118,3 +118,42 @@ static int __init cpuinfo_iter_init(void)
 	return bpf_iter_reg_target(&cpuinfo_x86_reg_info);
 }
 late_initcall(cpuinfo_iter_init);
+
+enum arch_flags_type {
+	X86_CAP,
+	X86_BUG,
+	X86_POWER,
+	X86_POWER_SIZE,
+};
+
+__bpf_kfunc const char *bpf_arch_flags(enum arch_flags_type t, int i)
+{
+	switch (t) {
+	case X86_CAP:
+		return x86_cap_flags[i];
+	case X86_BUG:
+		return x86_bug_flags[i];
+	case X86_POWER:
+		return x86_power_flags[i];
+	case X86_POWER_SIZE:
+		return (void *)ARRAY_SIZE(x86_power_flags);
+	default:
+		return NULL;
+	}
+}
+
+BTF_SET8_START(bpf_arch_flags_kfunc_ids)
+BTF_ID_FLAGS(func, bpf_arch_flags)
+BTF_SET8_END(bpf_arch_flags_kfunc_ids)
+
+static const struct btf_kfunc_id_set bpf_arch_flags_kfunc_set = {
+	.owner		= THIS_MODULE,
+	.set		= &bpf_arch_flags_kfunc_ids,
+};
+
+static int __init bpf_arch_flags_kfunc_init(void)
+{
+	return register_btf_kfunc_id_set(BPF_PROG_TYPE_TRACING,
+					 &bpf_arch_flags_kfunc_set);
+}
+late_initcall(bpf_arch_flags_kfunc_init);
