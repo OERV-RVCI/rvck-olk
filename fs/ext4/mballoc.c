@@ -899,7 +899,8 @@ static void ext4_mb_choose_next_group_p2_aligned(struct ext4_allocation_context 
 				    bb_largest_free_order_node) {
 			if (sbi->s_mb_stats)
 				atomic64_inc(&sbi->s_bal_cX_groups_considered[CR_POWER2_ALIGNED]);
-			if (likely(ext4_mb_good_group(ac, iter->bb_group, CR_POWER2_ALIGNED))) {
+			if (likely(ext4_mb_good_group(ac, iter->bb_group, CR_POWER2_ALIGNED)) &&
+			    !spin_is_locked(ext4_group_lock_ptr(ac->ac_sb, iter->bb_group))) {
 				*group = iter->bb_group;
 				ac->ac_flags |= EXT4_MB_CR_POWER2_ALIGNED_OPTIMIZED;
 				read_unlock(&sbi->s_mb_largest_free_orders_locks[i]);
@@ -935,7 +936,8 @@ ext4_mb_find_good_group_avg_frag_lists(struct ext4_allocation_context *ac, int o
 	list_for_each_entry(iter, frag_list, bb_avg_fragment_size_node) {
 		if (sbi->s_mb_stats)
 			atomic64_inc(&sbi->s_bal_cX_groups_considered[cr]);
-		if (likely(ext4_mb_good_group(ac, iter->bb_group, cr))) {
+		if (likely(ext4_mb_good_group(ac, iter->bb_group, cr)) &&
+		    !spin_is_locked(ext4_group_lock_ptr(ac->ac_sb, iter->bb_group))) {
 			grp = iter;
 			break;
 		}
@@ -2137,7 +2139,6 @@ static int mb_mark_used(struct ext4_buddy *e4b, struct ext4_free_extent *ex)
 static void ext4_mb_use_best_found(struct ext4_allocation_context *ac,
 					struct ext4_buddy *e4b)
 {
-	struct ext4_sb_info *sbi = EXT4_SB(ac->ac_sb);
 	int ret;
 
 	BUG_ON(ac->ac_b_ex.fe_group != e4b->bd_group);
@@ -2168,10 +2169,8 @@ static void ext4_mb_use_best_found(struct ext4_allocation_context *ac,
 	get_page(ac->ac_buddy_page);
 	/* store last allocated for subsequent stream allocation */
 	if (ac->ac_flags & EXT4_MB_STREAM_ALLOC) {
-		spin_lock(&sbi->s_md_lock);
-		sbi->s_mb_last_group = ac->ac_f_ex.fe_group;
-		sbi->s_mb_last_start = ac->ac_f_ex.fe_start;
-		spin_unlock(&sbi->s_md_lock);
+		EXT4_I(ac->ac_inode)->i_mb_last_group = ac->ac_f_ex.fe_group;
+		EXT4_I(ac->ac_inode)->i_mb_last_start = ac->ac_f_ex.fe_start;
 	}
 	/*
 	 * As we've just preallocated more space than
@@ -2843,13 +2842,14 @@ ext4_mb_regular_allocator(struct ext4_allocation_context *ac)
 							   MB_NUM_ORDERS(sb));
 	}
 
-	/* if stream allocation is enabled, use global goal */
+	/* if stream allocation is enabled, use last goal */
 	if (ac->ac_flags & EXT4_MB_STREAM_ALLOC) {
-		/* TBD: may be hot point */
-		spin_lock(&sbi->s_md_lock);
-		ac->ac_g_ex.fe_group = sbi->s_mb_last_group;
-		ac->ac_g_ex.fe_start = sbi->s_mb_last_start;
-		spin_unlock(&sbi->s_md_lock);
+		struct ext4_inode_info *ei = EXT4_I(ac->ac_inode);
+
+		if (ei->i_mb_last_group || ei->i_mb_last_start) {
+			ac->ac_g_ex.fe_group = ei->i_mb_last_group;
+			ac->ac_g_ex.fe_start = ei->i_mb_last_start;
+		}
 	}
 
 	/*
@@ -2911,7 +2911,13 @@ repeat:
 			if (err)
 				goto out;
 
-			ext4_lock_group(sb, group);
+			/* skip busy group */
+			if (cr >= CR_ANY_FREE) {
+				ext4_lock_group(sb, group);
+			} else if (!ext4_try_lock_group(sb, group)) {
+				ext4_mb_unload_buddy(&e4b);
+				continue;
+			}
 
 			/*
 			 * We need to check again after locking the
