@@ -1482,4 +1482,11 @@ config NUMABALANCING_MEM_SAMPLING
 
 source "mm/damon/Kconfig"
 
+config THP_CONTROL
+	tristate "Support thp process control"
+	depends on TRANSPARENT_HUGEPAGE
+	default n
+	help
+	  This provides interface to control thp policy.
+
 endmenu
