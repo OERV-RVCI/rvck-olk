@@ -3743,4 +3743,16 @@ extern int entity_eligible(struct cfs_rq *cfs_rq, struct sched_entity *se);
 bool bpf_sched_is_cpu_allowed(struct task_struct *p, int cpu);
 #endif
 
+#ifdef CONFIG_SCHED_SOFT_DOMAIN
+void build_soft_domain(void);
+static inline struct cpumask *soft_domain_span(unsigned long span[])
+{
+	return to_cpumask(span);
+}
+#else
+
+static inline void build_soft_domain(void) { }
+
+#endif
+
 #endif /* _KERNEL_SCHED_SCHED_H */
