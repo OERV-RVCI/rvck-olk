@@ -302,4 +302,20 @@ int cgroup_addrm_files(struct cgroup_subsys_state *css,
 		       struct cgroup *cgrp, struct cftype cfts[],
 		       bool is_add);
 
+#ifdef CONFIG_CGROUP_IFS
+int cgroup_ifs_alloc(struct cgroup *cgrp);
+void cgroup_ifs_free(struct cgroup *cgrp);
+void cgroup_ifs_init(void);
+int cgroup_ifs_add_files(struct cgroup_subsys_state *css, struct cgroup *cgrp);
+void cgroup_ifs_rm_files(struct cgroup_subsys_state *css, struct cgroup *cgrp);
+#else /* !CONFIG_CGROUP_IFS */
+static inline int cgroup_ifs_alloc(struct cgroup *cgrp) { return 0; }
+static inline void cgroup_ifs_free(struct cgroup *cgrp) {}
+static inline void cgroup_ifs_init(void) {}
+static inline int cgroup_ifs_add_files(struct cgroup_subsys_state *css,
+				       struct cgroup *cgrp) { return 0; }
+static inline void cgroup_ifs_rm_files(struct cgroup_subsys_state *css,
+				       struct cgroup *cgrp) {}
+#endif /* CONFIG_CGROUP_IFS */
+
 #endif /* __CGROUP_INTERNAL_H */

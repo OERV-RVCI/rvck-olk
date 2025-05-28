@@ -860,4 +860,59 @@ static inline void cgroup_bpf_put(struct cgroup *cgrp) {}
 void cgroup_move_task_to_root(struct task_struct *tsk);
 #endif
 
+#ifdef CONFIG_CGROUP_IFS
+
+enum ifs_types {
+	IFS_STUB,
+	NR_IFS_TYPES,
+};
+
+struct cgroup_ifs_cpu {
+	/* total time for each interference, in ns */
+	u64 time[NR_IFS_TYPES];
+};
+
+/*
+ * cgroup interference statistics
+ */
+struct cgroup_ifs {
+	/* per-cpu interference statistics tracking */
+	struct cgroup_ifs_cpu __percpu *pcpu;
+};
+
+extern struct cgroup_ifs cgroup_root_ifs;
+
+DECLARE_STATIC_KEY_FALSE(cgrp_ifs_enabled);
+static inline bool cgroup_ifs_enabled(void)
+{
+	return static_branch_unlikely(&cgrp_ifs_enabled);
+}
+
+static inline struct cgroup_ifs *cgroup_ifs(struct cgroup *cgrp)
+{
+	return cgroup_ino(cgrp) == 1 ? &cgroup_root_ifs : cgrp->ifs;
+}
+
+static inline struct cgroup_ifs *task_ifs(struct task_struct *task)
+{
+	return cgroup_ifs(task_dfl_cgroup(task));
+}
+
+static inline struct cgroup_ifs *current_ifs(void)
+{
+	return task_ifs(current);
+}
+
+static inline void cgroup_ifs_account_delta(struct cgroup_ifs_cpu *ifsc,
+					    int type, u64 delta)
+{
+	if (!cgroup_ifs_enabled())
+		return;
+
+	if (delta > 0)
+		ifsc->time[type] += delta;
+}
+
+#endif /* CONFIG_CGROUP_IFS */
+
 #endif /* _LINUX_CGROUP_H */

@@ -1700,6 +1700,7 @@ static void css_clear_dir(struct cgroup_subsys_state *css)
 			if (cgroup_psi_enabled())
 				cgroup_addrm_files(css, cgrp,
 						   cgroup_psi_files, false);
+			cgroup_ifs_rm_files(css, cgrp);
 		} else {
 			cgroup_addrm_files(css, cgrp,
 					   cgroup1_base_files, false);
@@ -1738,6 +1739,10 @@ static int css_populate_dir(struct cgroup_subsys_state *css)
 				if (ret < 0)
 					return ret;
 			}
+
+			ret = cgroup_ifs_add_files(css, cgrp);
+			if (ret < 0)
+				return ret;
 		} else {
 			ret = cgroup_addrm_files(css, cgrp,
 						 cgroup1_base_files, true);
@@ -5477,6 +5482,7 @@ static void css_free_rwork_fn(struct work_struct *work)
 			cgroup_put(cgroup_parent(cgrp));
 			kernfs_put(cgrp->kn);
 			psi_cgroup_free(cgrp);
+			cgroup_ifs_free(cgrp);
 			cgroup_rstat_exit(cgrp);
 			kfree(cgrp);
 		} else {
@@ -5724,10 +5730,14 @@ static struct cgroup *cgroup_create(struct cgroup *parent, const char *name,
 	if (ret)
 		goto out_kernfs_remove;
 
+	ret = cgroup_ifs_alloc(cgrp);
+	if (ret)
+		goto out_psi_free;
+
 	if (cgrp->root == &cgrp_dfl_root) {
 		ret = cgroup_bpf_inherit(cgrp);
 		if (ret)
-			goto out_psi_free;
+			goto out_ifs_free;
 	}
 
 	/*
@@ -5788,6 +5798,8 @@ static struct cgroup *cgroup_create(struct cgroup *parent, const char *name,
 
 	return cgrp;
 
+out_ifs_free:
+	cgroup_ifs_free(cgrp);
 out_psi_free:
 	psi_cgroup_free(cgrp);
 out_kernfs_remove:
@@ -6194,6 +6206,8 @@ int __init cgroup_init(void)
 	BUG_ON(cgroup_init_cftypes(NULL, cgroup_base_files));
 	BUG_ON(cgroup_init_cftypes(NULL, cgroup_psi_files));
 	BUG_ON(cgroup_init_cftypes(NULL, cgroup1_base_files));
+
+	cgroup_ifs_init();
 
 	cgroup_rstat_boot();
 

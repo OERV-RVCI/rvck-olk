@@ -1,0 +1,163 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * Interference statistics for cgroup
+ *
+ * Copyright (C) 2025-2025 Huawei Technologies Co., Ltd
+ */
+
+#include "cgroup-internal.h"
+
+static DEFINE_PER_CPU(struct cgroup_ifs_cpu, cgrp_root_ifs_cpu);
+struct cgroup_ifs cgroup_root_ifs = {
+	.pcpu = &cgrp_root_ifs_cpu,
+};
+
+DEFINE_STATIC_KEY_FALSE(cgrp_ifs_enabled);
+
+#ifdef CONFIG_CGROUP_IFS_DEFAULT_ENABLED
+static bool ifs_enable = true;
+#else
+static bool ifs_enable;
+#endif
+
+static int __init setup_ifs(char *str)
+{
+	return kstrtobool(str, &ifs_enable) == 0;
+}
+__setup("cgroup_ifs=", setup_ifs);
+
+int cgroup_ifs_alloc(struct cgroup *cgrp)
+{
+	cgrp->ifs = kzalloc(sizeof(struct cgroup_ifs), GFP_KERNEL);
+	if (!cgrp->ifs)
+		return -ENOMEM;
+
+	cgrp->ifs->pcpu = alloc_percpu(struct cgroup_ifs_cpu);
+	if (!cgrp->ifs->pcpu) {
+		kfree(cgrp->ifs);
+		return -ENOMEM;
+	}
+
+	return 0;
+}
+
+void cgroup_ifs_free(struct cgroup *cgrp)
+{
+	free_percpu(cgrp->ifs->pcpu);
+	kfree(cgrp->ifs);
+}
+
+static const char *ifs_type_name(int type)
+{
+	char *name = NULL;
+
+	switch (type) {
+	default:
+		break;
+	}
+
+	return name;
+}
+
+static int print_sum_time(struct cgroup_ifs *ifs, struct seq_file *seq)
+{
+	u64 time[NR_IFS_TYPES] = { 0 };
+	int cpu;
+	int i;
+
+	for_each_possible_cpu(cpu) {
+		for (i = 0; i < NR_IFS_TYPES; i++)
+			time[i] += per_cpu_ptr(ifs->pcpu, cpu)->time[i];
+	}
+
+	seq_printf(seq, "%-18s%s\n", "Interference", "Total Time (ns)");
+
+	for (i = 0; i < NR_IFS_TYPES; i++)
+		seq_printf(seq, "%-18s%llu\n", ifs_type_name(i), time[i]);
+
+	return 0;
+}
+
+static int cgroup_ifs_show(struct seq_file *seq, void *v)
+{
+	struct cgroup __maybe_unused *cgrp = seq_css(seq)->cgroup;
+	struct cgroup_ifs __maybe_unused *ifs = cgroup_ifs(cgrp);
+	int ret;
+
+	if (!ifs) {
+		pr_info("cgroup_ino(cgrp) = %ld\n", cgroup_ino(cgrp));
+		return -EINVAL;
+	}
+
+	ret = print_sum_time(ifs, seq);
+	if (ret)
+		return ret;
+
+	return 0;
+}
+
+static ssize_t cgroup_ifs_write(struct kernfs_open_file *of, char *buf,
+				size_t nbytes, loff_t off)
+{
+	struct cgroup *cgrp = seq_css(of->seq_file)->cgroup;
+	struct cgroup_ifs *ifs = cgroup_ifs(cgrp);
+	struct cgroup_ifs_cpu *ifsc;
+	bool clear;
+	int cpu;
+
+	if (!ifs)
+		return -EOPNOTSUPP;
+
+	if (kstrtobool(strstrip(buf), &clear) < 0)
+		return -EINVAL;
+
+	if (!clear) {
+		for_each_possible_cpu(cpu) {
+			ifsc = per_cpu_ptr(ifs->pcpu, cpu);
+			memset(ifsc->time, 0, sizeof(ifsc->time));
+		}
+	}
+
+	return nbytes;
+}
+
+static struct cftype cgroup_ifs_files[] = {
+	{
+		.name = "interference.stat",
+		.seq_show = cgroup_ifs_show,
+		.write = cgroup_ifs_write,
+	},
+	{ }     /* terminate */
+};
+
+void cgroup_ifs_init(void)
+{
+	if (!ifs_enable)
+		return;
+
+	BUG_ON(cgroup_init_cftypes(NULL, cgroup_ifs_files));
+
+	static_branch_enable(&cgrp_ifs_enabled);
+}
+
+int cgroup_ifs_add_files(struct cgroup_subsys_state *css, struct cgroup *cgrp)
+{
+	int ret = 0;
+
+	if (!cgroup_ifs_enabled())
+		return 0;
+
+	ret = cgroup_addrm_files(css, cgrp, cgroup_ifs_files, true);
+	if (ret < 0) {
+		cgroup_addrm_files(css, cgrp, cgroup_ifs_files, false);
+		return ret;
+	}
+
+	return 0;
+}
+
+void cgroup_ifs_rm_files(struct cgroup_subsys_state *css, struct cgroup *cgrp)
+{
+	if (cgroup_ifs_enabled())
+		cgroup_addrm_files(css, cgrp, cgroup_ifs_files, false);
+}
