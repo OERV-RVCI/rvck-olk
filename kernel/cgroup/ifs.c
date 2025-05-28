@@ -32,6 +32,10 @@ static bool ifs_enable = true;
 static bool ifs_enable;
 #endif
 
+#ifdef CONFIG_SCHEDSTATS
+static bool ifs_sleep_enable;
+#endif
+
 static int __init setup_ifs(char *str)
 {
 	return kstrtobool(str, &ifs_enable) == 0;
@@ -158,11 +162,25 @@ static const char *ifs_type_name(int type)
 	case IFS_RUNDELAY:
 		name = "rundelay";
 		break;
+#ifdef CONFIG_SCHEDSTATS
+	case IFS_SLEEP:
+		name = "sleep";
+		break;
+#endif
 	default:
 		break;
 	}
 
 	return name;
+}
+
+static bool should_print(int type)
+{
+#ifdef CONFIG_SCHEDSTATS
+	if (type == IFS_SLEEP)
+		return ifs_sleep_enable;
+#endif
+	return true;
 }
 
 static int print_sum_time(struct cgroup_ifs *ifs, struct seq_file *seq)
@@ -172,14 +190,20 @@ static int print_sum_time(struct cgroup_ifs *ifs, struct seq_file *seq)
 	int i;
 
 	for_each_possible_cpu(cpu) {
-		for (i = 0; i < NR_IFS_TYPES; i++)
+		for (i = 0; i < NR_IFS_TYPES; i++) {
+			if (!should_print(i))
+				continue;
 			time[i] += per_cpu_ptr(ifs->pcpu, cpu)->time[i];
+		}
 	}
 
 	seq_printf(seq, "%-18s%s\n", "Interference", "Total Time (ns)");
 
-	for (i = 0; i < NR_IFS_TYPES; i++)
+	for (i = 0; i < NR_IFS_TYPES; i++) {
+		if (!should_print(i))
+			continue;
 		seq_printf(seq, "%-18s%llu\n", ifs_type_name(i), time[i]);
+	}
 
 	return 0;
 }
@@ -267,3 +291,10 @@ void cgroup_ifs_rm_files(struct cgroup_subsys_state *css, struct cgroup *cgrp)
 	if (cgroup_ifs_enabled())
 		cgroup_addrm_files(css, cgrp, cgroup_ifs_files, false);
 }
+
+#ifdef CONFIG_SCHEDSTATS
+void cgroup_ifs_enable_sleep_account(void)
+{
+	ifs_sleep_enable = true;
+}
+#endif

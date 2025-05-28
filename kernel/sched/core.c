@@ -4667,6 +4667,7 @@ static void set_schedstats(bool enabled)
 {
 	if (enabled) {
 		compute_skid();
+		cgroup_ifs_enable_sleep_account();
 		static_branch_enable(&sched_schedstats);
 	} else {
 		static_branch_disable(&sched_schedstats);
