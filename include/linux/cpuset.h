@@ -75,6 +75,9 @@ extern void dec_dl_tasks_cs(struct task_struct *task);
 extern void cpuset_lock(void);
 extern void cpuset_unlock(void);
 extern void cpuset_cpus_allowed(struct task_struct *p, struct cpumask *mask);
+#ifdef CONFIG_BPF_RVI
+extern void task_effective_cpumask(struct task_struct *p, struct cpumask *mask);
+#endif
 extern bool cpuset_cpus_allowed_fallback(struct task_struct *p);
 extern nodemask_t cpuset_mems_allowed(struct task_struct *p);
 #define cpuset_current_mems_allowed (current->mems_allowed)
@@ -198,6 +201,14 @@ static inline void cpuset_cpus_allowed(struct task_struct *p,
 {
 	cpumask_copy(mask, task_cpu_possible_mask(p));
 }
+
+#ifdef CONFIG_BPF_RVI
+static inline void task_effective_cpumask(struct task_struct *p,
+					  struct cpumask *mask)
+{
+	cpuset_cpus_allowed(p, mask);
+}
+#endif
 
 static inline bool cpuset_cpus_allowed_fallback(struct task_struct *p)
 {

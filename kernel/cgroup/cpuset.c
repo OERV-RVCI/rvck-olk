@@ -46,6 +46,12 @@
 #include <linux/wait.h>
 #include <linux/kabi.h>
 
+#ifdef CONFIG_BPF_RVI
+#include <linux/bpf.h>
+#include <linux/btf.h>
+#include <linux/btf_ids.h>
+#endif
+
 DEFINE_STATIC_KEY_FALSE(cpusets_pre_enable_key);
 DEFINE_STATIC_KEY_FALSE(cpusets_enabled_key);
 
@@ -5200,3 +5206,47 @@ void cpuset_task_status_allowed(struct seq_file *m, struct task_struct *task)
 	seq_printf(m, "Mems_allowed_list:\t%*pbl\n",
 		   nodemask_pr_args(&task->mems_allowed));
 }
+
+#ifdef CONFIG_BPF_RVI
+void task_effective_cpumask(struct task_struct *tsk, struct cpumask *pmask)
+{
+	struct cpuset *cs;
+
+	if (!tsk)
+		cpumask_clear(pmask);
+
+	rcu_read_lock();
+	cs = task_cs(tsk);
+	cpumask_copy(pmask, cs->effective_cpus);
+	rcu_read_unlock();
+}
+
+__bpf_kfunc struct cpuset *bpf_cpuset_from_task(struct task_struct *task)
+{
+	if (!task)
+		return NULL;
+	return task_cs(task);
+}
+
+__bpf_kfunc unsigned int bpf_cpumask_weight(struct cpumask *pmask)
+{
+	return cpumask_weight(pmask);
+}
+
+BTF_SET8_START(bpf_cpuset_kfunc_ids)
+BTF_ID_FLAGS(func, bpf_cpuset_from_task, KF_RET_NULL | KF_RCU)
+BTF_ID_FLAGS(func, bpf_cpumask_weight)
+BTF_SET8_END(bpf_cpuset_kfunc_ids)
+
+static const struct btf_kfunc_id_set bpf_cpuset_kfunc_set = {
+	.owner		= THIS_MODULE,
+	.set		= &bpf_cpuset_kfunc_ids,
+};
+
+static int __init bpf_cpuset_kfunc_init(void)
+{
+	return register_btf_kfunc_id_set(BPF_PROG_TYPE_TRACING,
+					 &bpf_cpuset_kfunc_set);
+}
+late_initcall(bpf_cpuset_kfunc_init);
+#endif

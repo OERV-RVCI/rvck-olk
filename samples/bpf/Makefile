@@ -149,6 +149,10 @@ always-y += task_fd_query_kern.o
 always-y += ibumad_kern.o
 always-y += hbm_out_kern.o
 always-y += hbm_edt_kern.o
+ifeq ($(ARCH), x86)
+always-$(CONFIG_BPF_RVI) += bpf_rvi_cpuinfo_x86.bpf.o
+endif
+always-$(CONFIG_BPF_RVI) += bpf_rvi_cpu_online.bpf.o
 
 ifeq ($(ARCH), arm)
 # Strip all except -D__LINUX_ARM_ARCH__ option needed to handle linux
