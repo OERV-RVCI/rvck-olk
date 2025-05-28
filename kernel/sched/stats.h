@@ -134,6 +134,24 @@ __schedstats_from_se(struct sched_entity *se)
 #define QOS_THROTTLED	2
 #endif
 
+#ifdef CONFIG_CGROUP_IFS
+static inline void ifs_account_rundelay(struct task_struct *task, u64 delta)
+{
+	/*
+	 * No need to include bandwidth throttling time in rundelay,
+	 * leave it to the throttle metric.
+	 */
+	if (unlikely(task->in_throttle)) {
+		task->in_throttle = 0;
+		return;
+	}
+
+	cgroup_ifs_account_rundelay(task, delta);
+}
+#else
+static inline void ifs_account_rundelay(struct task_struct *task, u64 delta) {}
+#endif
+
 #ifdef CONFIG_PSI
 void psi_task_change(struct task_struct *task, int clear, int set);
 void psi_task_switch(struct task_struct *prev, struct task_struct *next,
@@ -241,7 +259,7 @@ static inline void sched_info_dequeue(struct rq *rq, struct task_struct *t)
 	t->sched_info.last_queued = 0;
 	t->sched_info.run_delay += delta;
 
-	cgroup_ifs_account_rundelay(t, delta);
+	ifs_account_rundelay(t, delta);
 	rq_sched_info_dequeue(rq, delta);
 }
 
@@ -264,7 +282,7 @@ static void sched_info_arrive(struct rq *rq, struct task_struct *t)
 	t->sched_info.last_arrival = now;
 	t->sched_info.pcount++;
 
-	cgroup_ifs_account_rundelay(t, delta);
+	ifs_account_rundelay(t, delta);
 	rq_sched_info_arrive(rq, delta);
 }
 
@@ -277,6 +295,11 @@ static inline void sched_info_enqueue(struct rq *rq, struct task_struct *t)
 {
 	if (!t->sched_info.last_queued)
 		t->sched_info.last_queued = rq_clock(rq);
+
+#ifdef CONFIG_CGROUP_IFS
+	if (!t->in_throttle && sched_task_is_throttled(t, task_cpu(t)))
+		t->in_throttle = 1;
+#endif
 }
 
 /*

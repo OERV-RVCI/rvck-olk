@@ -154,6 +154,16 @@ const_debug unsigned int sysctl_sched_nr_migrate = SCHED_NR_MIGRATE_BREAK;
 
 __read_mostly int scheduler_running;
 
+#if defined(CONFIG_SCHED_CORE) || defined(CONFIG_CGROUP_IFS)
+int sched_task_is_throttled(struct task_struct *p, int cpu)
+{
+	if (p->sched_class->task_is_throttled)
+		return p->sched_class->task_is_throttled(p, cpu);
+
+	return 0;
+}
+#endif
+
 #ifdef CONFIG_SCHED_CORE
 
 DEFINE_STATIC_KEY_FALSE(__sched_core_enabled);
@@ -266,14 +276,6 @@ void sched_core_dequeue(struct rq *rq, struct task_struct *p, int flags)
 	if (!(flags & DEQUEUE_SAVE) && rq->nr_running == 1 &&
 	    rq->core->core_forceidle_count && rq->curr == rq->idle)
 		resched_curr(rq);
-}
-
-static int sched_task_is_throttled(struct task_struct *p, int cpu)
-{
-	if (p->sched_class->task_is_throttled)
-		return p->sched_class->task_is_throttled(p, cpu);
-
-	return 0;
 }
 
 static struct task_struct *sched_core_next(struct task_struct *p, unsigned long cookie)

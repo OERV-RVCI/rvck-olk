@@ -14348,7 +14348,11 @@ bool cfs_prio_less(const struct task_struct *a, const struct task_struct *b,
 
 	return delta > 0;
 }
+#else
+static inline void task_tick_core(struct rq *rq, struct task_struct *curr) {}
+#endif
 
+#if defined(CONFIG_SCHED_CORE) || defined(CONFIG_CGROUP_IFS)
 static int task_is_throttled_fair(struct task_struct *p, int cpu)
 {
 	struct cfs_rq *cfs_rq;
@@ -14360,8 +14364,6 @@ static int task_is_throttled_fair(struct task_struct *p, int cpu)
 #endif
 	return throttled_hierarchy(cfs_rq);
 }
-#else
-static inline void task_tick_core(struct rq *rq, struct task_struct *curr) {}
 #endif
 
 #ifdef CONFIG_SCHED_STEAL
@@ -15096,7 +15098,7 @@ DEFINE_SCHED_CLASS(fair) = {
 	.task_change_group	= task_change_group_fair,
 #endif
 
-#ifdef CONFIG_SCHED_CORE
+#if defined(CONFIG_SCHED_CORE) || defined(CONFIG_CGROUP_IFS)
 	.task_is_throttled	= task_is_throttled_fair,
 #endif
 

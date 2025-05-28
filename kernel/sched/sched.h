@@ -546,6 +546,15 @@ extern void sched_release_group(struct task_group *tg);
 
 extern void sched_move_task(struct task_struct *tsk);
 
+#if defined(CONFIG_SCHED_CORE) || defined(CONFIG_CGROUP_IFS)
+extern int sched_task_is_throttled(struct task_struct *p, int cpu);
+#else
+static inline int sched_task_is_throttled(struct task_struct *p, int cpu)
+{
+	return 0;
+}
+#endif
+
 #ifdef CONFIG_QOS_SCHED_SMART_GRID
 extern void start_auto_affinity(struct auto_affinity *auto_affi);
 extern void stop_auto_affinity(struct auto_affinity *auto_affi);
@@ -2451,7 +2460,7 @@ struct sched_class {
 	void (*task_change_group)(struct task_struct *p);
 #endif
 
-#ifdef CONFIG_SCHED_CORE
+#if defined(CONFIG_SCHED_CORE) || defined(CONFIG_CGROUP_IFS)
 	int (*task_is_throttled)(struct task_struct *p, int cpu);
 #endif
 	KABI_RESERVE(1)

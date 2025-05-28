@@ -994,6 +994,10 @@ struct task_struct {
 	/* delay due to memory thrashing */
 	unsigned                        in_thrashing:1;
 #endif
+#ifdef CONFIG_CGROUP_IFS
+	/* Run delayed due to bandwidth throttling */
+	KABI_FILL_HOLE(unsigned	in_throttle:1)
+#endif
 
 	unsigned long			atomic_flags; /* Flags requiring atomic access. */
 
