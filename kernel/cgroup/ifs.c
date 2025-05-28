@@ -36,6 +36,10 @@ static bool ifs_enable;
 static bool ifs_sleep_enable;
 #endif
 
+#ifdef CONFIG_IRQ_TIME_ACCOUNTING
+static bool ifs_irq_enable;
+#endif
+
 static int __init setup_ifs(char *str)
 {
 	return kstrtobool(str, &ifs_enable) == 0;
@@ -168,6 +172,14 @@ static const char *ifs_type_name(int type)
 	case IFS_THROTTLE:
 		name = "throttle";
 		break;
+#ifdef CONFIG_IRQ_TIME_ACCOUNTING
+	case IFS_SOFTIRQ:
+		name = "softirq";
+		break;
+	case IFS_HARDIRQ:
+		name = "hardirq";
+		break;
+#endif
 #ifdef CONFIG_SCHEDSTATS
 	case IFS_SLEEP:
 		name = "sleep";
@@ -185,6 +197,10 @@ static bool should_print(int type)
 #ifdef CONFIG_SCHEDSTATS
 	if (type == IFS_SLEEP)
 		return ifs_sleep_enable;
+#endif
+#ifdef CONFIG_IRQ_TIME_ACCOUNTING
+	if (type == IFS_SOFTIRQ || type == IFS_HARDIRQ)
+		return ifs_irq_enable;
 #endif
 	return true;
 }
@@ -302,5 +318,12 @@ void cgroup_ifs_rm_files(struct cgroup_subsys_state *css, struct cgroup *cgrp)
 void cgroup_ifs_enable_sleep_account(void)
 {
 	ifs_sleep_enable = true;
+}
+#endif
+
+#ifdef CONFIG_IRQ_TIME_ACCOUNTING
+void cgroup_ifs_enable_irq_account(void)
+{
+	ifs_irq_enable = true;
 }
 #endif

@@ -867,6 +867,10 @@ enum ifs_types {
 	IFS_RUNDELAY,
 	IFS_WAKELAT,
 	IFS_THROTTLE,
+#ifdef CONFIG_IRQ_TIME_ACCOUNTING
+	IFS_SOFTIRQ,
+	IFS_HARDIRQ,
+#endif
 #ifdef CONFIG_SCHEDSTATS
 	IFS_SLEEP,
 #endif
@@ -971,6 +975,42 @@ static inline void cgroup_ifs_account_throttle(struct cgroup *cgrp, int cpu,
 	cgroup_ifs_account_delta(ifsc, IFS_THROTTLE, delta);
 }
 
+#ifdef CONFIG_IRQ_TIME_ACCOUNTING
+static inline void cgroup_ifs_account_softirq(u64 delta)
+{
+	struct cgroup_ifs *ifs;
+	struct cgroup_ifs_cpu *ifsc;
+
+	if (!cgroup_ifs_enabled())
+		return;
+
+	ifs = current_ifs();
+	if (!ifs)
+		return;
+
+	ifsc = this_cpu_ptr(ifs->pcpu);
+	cgroup_ifs_account_delta(ifsc, IFS_SOFTIRQ, delta);
+}
+
+static inline void cgroup_ifs_account_hardirq(u64 delta)
+{
+	struct cgroup_ifs *ifs;
+	struct cgroup_ifs_cpu *ifsc;
+
+	if (!cgroup_ifs_enabled())
+		return;
+
+	ifs = current_ifs();
+	if (!ifs)
+		return;
+
+	ifsc = this_cpu_ptr(ifs->pcpu);
+	cgroup_ifs_account_delta(ifsc, IFS_HARDIRQ, delta);
+}
+
+void cgroup_ifs_enable_irq_account(void);
+#endif
+
 #ifdef CONFIG_SCHEDSTATS
 static inline void cgroup_ifs_account_sleep(struct task_struct *task,
 					    u64 delta)
@@ -998,6 +1038,11 @@ static inline void cgroup_ifs_set_smt(cpumask_t *sibling) {}
 static inline void cgroup_ifs_account_rundelay(struct task_struct *task, u64 delta) {}
 static inline void cgroup_ifs_account_wakelat(struct task_struct *task, u64 delta) {}
 static inline void cgroup_ifs_account_throttle(struct cgroup *cgrp, int cpu, u64 delta) {}
+#ifdef CONFIG_IRQ_TIME_ACCOUNTING
+static inline void cgroup_ifs_account_softirq(u64 delta) {}
+static inline void cgroup_ifs_account_hardirq(u64 delta) {}
+static inline void cgroup_ifs_enable_irq_account(void) {}
+#endif
 #ifdef CONFIG_SCHEDSTATS
 static inline void cgroup_ifs_account_sleep(struct task_struct *task, u64 delta) {}
 static inline void cgroup_ifs_enable_sleep_account(void) {}
