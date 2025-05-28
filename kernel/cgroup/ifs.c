@@ -282,6 +282,16 @@ static struct cftype cgroup_ifs_files[] = {
 	{ }     /* terminate */
 };
 
+struct cftype cgroup_v1_ifs_files[] = {
+	{
+		.name = "interference.stat",
+		.flags = CFTYPE_NO_PREFIX,
+		.seq_show = cgroup_ifs_show,
+		.write = cgroup_ifs_write,
+	},
+	{ }     /* terminate */
+};
+
 void cgroup_ifs_init(void)
 {
 	if (!ifs_enable)
