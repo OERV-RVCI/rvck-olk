@@ -61,6 +61,7 @@
 #include <linux/cpuhotplug.h>
 #include <linux/mc146818rtc.h>
 #include <linux/acpi.h>
+#include <linux/cgroup.h>
 #include <linux/cpuset.h>
 
 #include <asm/acpi.h>
@@ -681,8 +682,10 @@ void set_cpu_sibling_map(int cpu)
 		if (match_pkg(c, o) && !topology_same_node(c, o))
 			x86_has_numa_in_package = true;
 
-		if ((i == cpu) || (has_smt && match_smt(c, o)))
+		if ((i == cpu) || (has_smt && match_smt(c, o))) {
 			link_mask(topology_sibling_cpumask, cpu, i);
+			cgroup_ifs_set_smt(topology_sibling_cpumask(cpu));
+		}
 
 		if ((i == cpu) || (has_mp && match_llc(c, o)))
 			link_mask(cpu_llc_shared_mask, cpu, i);

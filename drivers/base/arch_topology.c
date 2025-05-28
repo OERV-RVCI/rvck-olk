@@ -807,6 +807,8 @@ void update_siblings_masks(unsigned int cpuid)
 		cpumask_set_cpu(cpuid, &cpu_topo->thread_sibling);
 		cpumask_set_cpu(cpu, &cpuid_topo->thread_sibling);
 	}
+
+	cgroup_ifs_set_smt(&cpuid_topo->thread_sibling);
 }
 
 static void clear_cpu_topology(int cpu)
@@ -823,6 +825,8 @@ static void clear_cpu_topology(int cpu)
 	cpumask_set_cpu(cpu, &cpu_topo->core_sibling);
 	cpumask_clear(&cpu_topo->thread_sibling);
 	cpumask_set_cpu(cpu, &cpu_topo->thread_sibling);
+
+	cgroup_ifs_set_smt(&cpu_topo->thread_sibling);
 }
 
 void __init reset_cpu_topology(void)

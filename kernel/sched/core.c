@@ -6750,6 +6750,7 @@ static void __sched notrace __schedule(unsigned int sched_mode)
 
 		migrate_disable_switch(rq, prev);
 		psi_sched_switch(prev, next, !task_on_rq_queued(prev));
+		cgroup_ifs_account_smttime(prev, next, rq->idle);
 
 		trace_sched_switch(sched_mode & SM_MASK_PREEMPT, prev, next, prev_state);
 

@@ -863,7 +863,7 @@ void cgroup_move_task_to_root(struct task_struct *tsk);
 #ifdef CONFIG_CGROUP_IFS
 
 enum ifs_types {
-	IFS_STUB,
+	IFS_SMT,
 	NR_IFS_TYPES,
 };
 
@@ -913,6 +913,16 @@ static inline void cgroup_ifs_account_delta(struct cgroup_ifs_cpu *ifsc,
 		ifsc->time[type] += delta;
 }
 
+void cgroup_ifs_account_smttime(struct task_struct *prev,
+				struct task_struct *next,
+				struct task_struct *idle);
+void cgroup_ifs_set_smt(cpumask_t *sibling);
+
+#else /* !CONFIG_CGROUP_IFS */
+static inline void cgroup_ifs_account_smttime(struct task_struct *prev,
+					      struct task_struct *next,
+					      struct task_struct *idle) {}
+static inline void cgroup_ifs_set_smt(cpumask_t *sibling) {}
 #endif /* CONFIG_CGROUP_IFS */
 
 #endif /* _LINUX_CGROUP_H */

@@ -5,7 +5,19 @@
  * Copyright (C) 2025-2025 Huawei Technologies Co., Ltd
  */
 
+#include <linux/sched/clock.h>
 #include "cgroup-internal.h"
+
+/* smt information */
+struct smt_info {
+	u64 total_time;
+	u64 prev_read_time;
+	u64 noidle_enter_time;
+	bool is_noidle;
+};
+
+static DEFINE_PER_CPU(struct smt_info, smt_info);
+static DEFINE_PER_CPU_READ_MOSTLY(int, smt_sibling) = -1;
 
 static DEFINE_PER_CPU(struct cgroup_ifs_cpu, cgrp_root_ifs_cpu);
 struct cgroup_ifs cgroup_root_ifs = {
@@ -25,6 +37,94 @@ static int __init setup_ifs(char *str)
 	return kstrtobool(str, &ifs_enable) == 0;
 }
 __setup("cgroup_ifs=", setup_ifs);
+
+void cgroup_ifs_set_smt(cpumask_t *sibling)
+{
+	int cpu;
+	int cpuid1 = -1;
+	int cpuid2 = -1;
+	bool off = false;
+
+	for_each_cpu(cpu, sibling) {
+		if (cpuid1 == -1) {
+			cpuid1 = cpu;
+		} else if (cpuid2 == -1) {
+			cpuid2 = cpu;
+		} else {
+			*per_cpu_ptr(&smt_sibling, cpu) = -1;
+			off = true;
+		}
+	}
+
+	if (cpuid1 != -1)
+		*per_cpu_ptr(&smt_sibling, cpuid1) = off ? -1 : cpuid2;
+
+	if (cpuid2 != -1)
+		*per_cpu_ptr(&smt_sibling, cpuid2) = off ? -1 : cpuid1;
+}
+
+static void account_smttime(struct task_struct *task)
+{
+	u64 delta;
+	struct cgroup_ifs *ifs;
+	struct smt_info *info;
+
+	ifs = task_ifs(task);
+	if (!ifs)
+		return;
+
+	info = this_cpu_ptr(&smt_info);
+
+	delta = info->total_time - info->prev_read_time;
+	info->prev_read_time = info->total_time;
+
+	cgroup_ifs_account_delta(this_cpu_ptr(ifs->pcpu), IFS_SMT, delta);
+}
+
+void cgroup_ifs_account_smttime(struct task_struct *prev,
+				struct task_struct *next,
+				struct task_struct *idle)
+{
+	struct smt_info *ci, *si;
+	u64 now, delta;
+	int sibling;
+
+	sibling = this_cpu_read(smt_sibling);
+	if (sibling == -1 || prev == next)
+		return;
+
+	ci = this_cpu_ptr(&smt_info);
+	si = per_cpu_ptr(&smt_info, sibling);
+
+	now = sched_clock_cpu(smp_processor_id());
+
+	/* leave noidle */
+	if (prev != idle && next == idle) {
+		ci->is_noidle = false;
+		/* account interference time */
+		if (ci->noidle_enter_time && si->is_noidle) {
+			delta = now - ci->noidle_enter_time;
+
+			ci->total_time += delta;
+			si->total_time += delta;
+
+			si->noidle_enter_time = 0;
+			ci->noidle_enter_time = 0;
+
+			account_smttime(prev);
+		}
+	/* enter noidle */
+	} else if (prev == idle && next != idle) {
+		/* if the sibling is also nonidle, there is smt interference */
+		if (si->is_noidle) {
+			ci->noidle_enter_time = now;
+			si->noidle_enter_time = now;
+		}
+		ci->is_noidle = true;
+	/* cgroup changed */
+	} else if (task_ifs(prev) != task_ifs(next))
+		account_smttime(prev);
+}
 
 int cgroup_ifs_alloc(struct cgroup *cgrp)
 {
@@ -52,6 +152,9 @@ static const char *ifs_type_name(int type)
 	char *name = NULL;
 
 	switch (type) {
+	case IFS_SMT:
+		name = "smt";
+		break;
 	default:
 		break;
 	}
