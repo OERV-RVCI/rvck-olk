@@ -241,6 +241,7 @@ static inline void sched_info_dequeue(struct rq *rq, struct task_struct *t)
 	t->sched_info.last_queued = 0;
 	t->sched_info.run_delay += delta;
 
+	cgroup_ifs_account_rundelay(t, delta);
 	rq_sched_info_dequeue(rq, delta);
 }
 
@@ -263,6 +264,7 @@ static void sched_info_arrive(struct rq *rq, struct task_struct *t)
 	t->sched_info.last_arrival = now;
 	t->sched_info.pcount++;
 
+	cgroup_ifs_account_rundelay(t, delta);
 	rq_sched_info_arrive(rq, delta);
 }
 

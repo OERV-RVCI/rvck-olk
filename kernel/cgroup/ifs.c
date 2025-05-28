@@ -155,6 +155,9 @@ static const char *ifs_type_name(int type)
 	case IFS_SMT:
 		name = "smt";
 		break;
+	case IFS_RUNDELAY:
+		name = "rundelay";
+		break;
 	default:
 		break;
 	}
