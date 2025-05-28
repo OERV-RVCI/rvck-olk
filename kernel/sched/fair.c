@@ -6053,8 +6053,12 @@ void unthrottle_cfs_rq(struct cfs_rq *cfs_rq)
 
 	raw_spin_lock(&cfs_b->lock);
 	if (cfs_rq->throttled_clock) {
-		cfs_b->throttled_time += rq_clock(rq) - cfs_rq->throttled_clock;
+		u64 delta = rq_clock(rq) - cfs_rq->throttled_clock;
+
+		cfs_b->throttled_time += delta;
 		cfs_rq->throttled_clock = 0;
+		cgroup_ifs_account_throttle(cfs_rq->tg->css.cgroup,
+					    cpu_of(rq), delta);
 	}
 	list_del_rcu(&cfs_rq->throttled_list);
 	raw_spin_unlock(&cfs_b->lock);
