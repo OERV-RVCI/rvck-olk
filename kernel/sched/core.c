@@ -154,6 +154,16 @@ const_debug unsigned int sysctl_sched_nr_migrate = SCHED_NR_MIGRATE_BREAK;
 
 __read_mostly int scheduler_running;
 
+#if defined(CONFIG_SCHED_CORE) || defined(CONFIG_CGROUP_IFS)
+int sched_task_is_throttled(struct task_struct *p, int cpu)
+{
+	if (p->sched_class->task_is_throttled)
+		return p->sched_class->task_is_throttled(p, cpu);
+
+	return 0;
+}
+#endif
+
 #ifdef CONFIG_SCHED_CORE
 
 DEFINE_STATIC_KEY_FALSE(__sched_core_enabled);
@@ -266,14 +276,6 @@ void sched_core_dequeue(struct rq *rq, struct task_struct *p, int flags)
 	if (!(flags & DEQUEUE_SAVE) && rq->nr_running == 1 &&
 	    rq->core->core_forceidle_count && rq->curr == rq->idle)
 		resched_curr(rq);
-}
-
-static int sched_task_is_throttled(struct task_struct *p, int cpu)
-{
-	if (p->sched_class->task_is_throttled)
-		return p->sched_class->task_is_throttled(p, cpu);
-
-	return 0;
 }
 
 static struct task_struct *sched_core_next(struct task_struct *p, unsigned long cookie)
@@ -4244,6 +4246,7 @@ int try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 
 		trace_sched_waking(p);
 		ttwu_do_wakeup(p);
+		ifs_task_waking(p);
 		goto out;
 	}
 
@@ -4259,6 +4262,7 @@ int try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 			break;
 
 		trace_sched_waking(p);
+		ifs_task_waking(p);
 
 		/*
 		 * Ensure we load p->on_rq _after_ p->state, otherwise it would
@@ -4667,6 +4671,7 @@ static void set_schedstats(bool enabled)
 {
 	if (enabled) {
 		compute_skid();
+		cgroup_ifs_enable_sleep_account();
 		static_branch_enable(&sched_schedstats);
 	} else {
 		static_branch_disable(&sched_schedstats);
@@ -4932,6 +4937,7 @@ void wake_up_new_task(struct task_struct *p)
 
 	activate_task(rq, p, ENQUEUE_NOCLOCK);
 	trace_sched_wakeup_new(p);
+	ifs_task_waking(p);
 	check_preempt_curr(rq, p, WF_FORK);
 #ifdef CONFIG_SMP
 	if (p->sched_class->task_woken) {
@@ -6750,6 +6756,7 @@ static void __sched notrace __schedule(unsigned int sched_mode)
 
 		migrate_disable_switch(rq, prev);
 		psi_sched_switch(prev, next, !task_on_rq_queued(prev));
+		cgroup_ifs_account_smttime(prev, next, rq->idle);
 
 		trace_sched_switch(sched_mode & SM_MASK_PREEMPT, prev, next, prev_state);
 

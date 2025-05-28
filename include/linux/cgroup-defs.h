@@ -552,7 +552,11 @@ struct cgroup {
 	struct bpf_local_storage __rcu  *bpf_cgrp_storage;
 #endif
 
+#ifdef CONFIG_CGROUP_IFS
+	KABI_USE(1, struct cgroup_ifs *ifs)
+#else
 	KABI_RESERVE(1)
+#endif
 	KABI_RESERVE(2)
 	KABI_RESERVE(3)
 	KABI_RESERVE(4)

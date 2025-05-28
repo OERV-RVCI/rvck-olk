@@ -67,6 +67,7 @@ void __update_stats_enqueue_sleeper(struct rq *rq, struct task_struct *p,
 		if (p) {
 			account_scheduler_latency(p, delta >> 10, 1);
 			trace_sched_stat_sleep(p, delta);
+			cgroup_ifs_account_sleep(p, delta);
 		}
 	}
 
@@ -91,6 +92,7 @@ void __update_stats_enqueue_sleeper(struct rq *rq, struct task_struct *p,
 			}
 
 			trace_sched_stat_blocked(p, delta);
+			cgroup_ifs_account_sleep(p, delta);
 
 			/*
 			 * Blocking time is in units of nanosecs, so shift by

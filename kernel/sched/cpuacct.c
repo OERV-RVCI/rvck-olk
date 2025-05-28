@@ -386,3 +386,18 @@ static int __init cgroup_v1_psi_init(void)
 
 late_initcall_sync(cgroup_v1_psi_init);
 #endif
+
+#ifdef CONFIG_CGROUP_IFS
+extern struct cftype cgroup_v1_ifs_files[];
+
+static int __init cgroup_v1_ifs_init(void)
+{
+	if (!cgroup_ifs_enabled())
+		return 0;
+
+	cgroup_add_legacy_cftypes(&cpuacct_cgrp_subsys, cgroup_v1_ifs_files);
+
+	return 0;
+}
+late_initcall_sync(cgroup_v1_ifs_init);
+#endif

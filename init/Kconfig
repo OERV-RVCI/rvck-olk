@@ -1342,6 +1342,29 @@ config CGROUP_FILES
 	  This supports catching misbehaving processes and
 	  return EMFILE instead of ENOMEM for kernel memory limits.
 
+config CGROUP_IFS
+	bool "Cgroup-based Interference Statistics"
+	default n
+	select KERNFS
+	select IRQ_TIME_ACCOUTING
+	help
+	  This option will provide online low-overhead interference
+	  statistics based on cgroup, which will help in troubleshooting
+	  performance issues.
+
+	  Say N if unsure.
+
+config CGROUP_IFS_DEFAULT_ENABLED
+	bool "Enable Cgroup-based Interference Statistics by default"
+	default y
+	depends on CGROUP_IFS
+	help
+	  This option will enable cgroup-based interference statistics
+	  by default. If this option is N, you need to enable cgroup-based
+	  interference statistics by configuring the cgroup_ifs startup param.
+
+	  Say Y if unsure.
+
 endif # CGROUPS
 
 config UCOUNTS_PERCPU_COUNTER

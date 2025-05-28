@@ -297,5 +297,25 @@ void cgroup1_check_for_release(struct cgroup *cgrp);
 int cgroup1_parse_param(struct fs_context *fc, struct fs_parameter *param);
 int cgroup1_get_tree(struct fs_context *fc);
 int cgroup1_reconfigure(struct fs_context *ctx);
+int cgroup_init_cftypes(struct cgroup_subsys *ss, struct cftype *cfts);
+int cgroup_addrm_files(struct cgroup_subsys_state *css,
+		       struct cgroup *cgrp, struct cftype cfts[],
+		       bool is_add);
+
+#ifdef CONFIG_CGROUP_IFS
+int cgroup_ifs_alloc(struct cgroup *cgrp);
+void cgroup_ifs_free(struct cgroup *cgrp);
+void cgroup_ifs_init(void);
+int cgroup_ifs_add_files(struct cgroup_subsys_state *css, struct cgroup *cgrp);
+void cgroup_ifs_rm_files(struct cgroup_subsys_state *css, struct cgroup *cgrp);
+#else /* !CONFIG_CGROUP_IFS */
+static inline int cgroup_ifs_alloc(struct cgroup *cgrp) { return 0; }
+static inline void cgroup_ifs_free(struct cgroup *cgrp) {}
+static inline void cgroup_ifs_init(void) {}
+static inline int cgroup_ifs_add_files(struct cgroup_subsys_state *css,
+				       struct cgroup *cgrp) { return 0; }
+static inline void cgroup_ifs_rm_files(struct cgroup_subsys_state *css,
+				       struct cgroup *cgrp) {}
+#endif /* CONFIG_CGROUP_IFS */
 
 #endif /* __CGROUP_INTERNAL_H */

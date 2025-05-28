@@ -860,4 +860,193 @@ static inline void cgroup_bpf_put(struct cgroup *cgrp) {}
 void cgroup_move_task_to_root(struct task_struct *tsk);
 #endif
 
+#ifdef CONFIG_CGROUP_IFS
+
+enum ifs_types {
+	IFS_SMT,
+	IFS_RUNDELAY,
+	IFS_WAKELAT,
+	IFS_THROTTLE,
+#ifdef CONFIG_IRQ_TIME_ACCOUNTING
+	IFS_SOFTIRQ,
+	IFS_HARDIRQ,
+#endif
+#ifdef CONFIG_SCHEDSTATS
+	IFS_SLEEP,
+#endif
+	NR_IFS_TYPES,
+};
+
+struct cgroup_ifs_cpu {
+	/* total time for each interference, in ns */
+	u64 time[NR_IFS_TYPES];
+};
+
+/*
+ * cgroup interference statistics
+ */
+struct cgroup_ifs {
+	/* per-cpu interference statistics tracking */
+	struct cgroup_ifs_cpu __percpu *pcpu;
+};
+
+extern struct cgroup_ifs cgroup_root_ifs;
+
+DECLARE_STATIC_KEY_FALSE(cgrp_ifs_enabled);
+static inline bool cgroup_ifs_enabled(void)
+{
+	return static_branch_unlikely(&cgrp_ifs_enabled);
+}
+
+static inline struct cgroup_ifs *cgroup_ifs(struct cgroup *cgrp)
+{
+	return cgroup_ino(cgrp) == 1 ? &cgroup_root_ifs : cgrp->ifs;
+}
+
+static inline struct cgroup_ifs *task_ifs(struct task_struct *task)
+{
+	return cgroup_ifs(task_dfl_cgroup(task));
+}
+
+static inline struct cgroup_ifs *current_ifs(void)
+{
+	return task_ifs(current);
+}
+
+static inline void cgroup_ifs_account_delta(struct cgroup_ifs_cpu *ifsc,
+					    int type, u64 delta)
+{
+	if (!cgroup_ifs_enabled())
+		return;
+
+	if (delta > 0)
+		ifsc->time[type] += delta;
+}
+
+void cgroup_ifs_account_smttime(struct task_struct *prev,
+				struct task_struct *next,
+				struct task_struct *idle);
+void cgroup_ifs_set_smt(cpumask_t *sibling);
+
+static inline void cgroup_ifs_account_rundelay(struct task_struct *task,
+					       u64 delta)
+{
+	struct cgroup_ifs *ifs;
+
+	if (!cgroup_ifs_enabled())
+		return;
+
+	ifs = task_ifs(task);
+	if (!ifs)
+		return;
+
+	cgroup_ifs_account_delta(this_cpu_ptr(ifs->pcpu), IFS_RUNDELAY, delta);
+}
+
+static inline void cgroup_ifs_account_wakelat(struct task_struct *task,
+					      u64 delta)
+{
+	struct cgroup_ifs *ifs;
+
+	if (!cgroup_ifs_enabled())
+		return;
+
+	ifs = task_ifs(task);
+	if (!ifs)
+		return;
+
+	cgroup_ifs_account_delta(this_cpu_ptr(ifs->pcpu), IFS_WAKELAT, delta);
+}
+
+static inline void cgroup_ifs_account_throttle(struct cgroup *cgrp, int cpu,
+					       u64 delta)
+{
+	struct cgroup_ifs *ifs;
+	struct cgroup_ifs_cpu *ifsc;
+
+	if (!cgroup_ifs_enabled())
+		return;
+
+	ifs = cgroup_ifs(cgrp);
+	if (!ifs)
+		return;
+
+	ifsc = per_cpu_ptr(ifs->pcpu, cpu); /* XXX: set another cpu data ? */
+	cgroup_ifs_account_delta(ifsc, IFS_THROTTLE, delta);
+}
+
+#ifdef CONFIG_IRQ_TIME_ACCOUNTING
+static inline void cgroup_ifs_account_softirq(u64 delta)
+{
+	struct cgroup_ifs *ifs;
+	struct cgroup_ifs_cpu *ifsc;
+
+	if (!cgroup_ifs_enabled())
+		return;
+
+	ifs = current_ifs();
+	if (!ifs)
+		return;
+
+	ifsc = this_cpu_ptr(ifs->pcpu);
+	cgroup_ifs_account_delta(ifsc, IFS_SOFTIRQ, delta);
+}
+
+static inline void cgroup_ifs_account_hardirq(u64 delta)
+{
+	struct cgroup_ifs *ifs;
+	struct cgroup_ifs_cpu *ifsc;
+
+	if (!cgroup_ifs_enabled())
+		return;
+
+	ifs = current_ifs();
+	if (!ifs)
+		return;
+
+	ifsc = this_cpu_ptr(ifs->pcpu);
+	cgroup_ifs_account_delta(ifsc, IFS_HARDIRQ, delta);
+}
+
+void cgroup_ifs_enable_irq_account(void);
+#endif
+
+#ifdef CONFIG_SCHEDSTATS
+static inline void cgroup_ifs_account_sleep(struct task_struct *task,
+					    u64 delta)
+{
+	struct cgroup_ifs *ifs;
+
+	if (!cgroup_ifs_enabled())
+		return;
+
+	ifs = task_ifs(task);
+	if (!ifs)
+		return;
+
+	cgroup_ifs_account_delta(this_cpu_ptr(ifs->pcpu), IFS_SLEEP, delta);
+}
+
+void cgroup_ifs_enable_sleep_account(void);
+#endif
+
+#else /* !CONFIG_CGROUP_IFS */
+static inline void cgroup_ifs_account_smttime(struct task_struct *prev,
+					      struct task_struct *next,
+					      struct task_struct *idle) {}
+static inline void cgroup_ifs_set_smt(cpumask_t *sibling) {}
+static inline void cgroup_ifs_account_rundelay(struct task_struct *task, u64 delta) {}
+static inline void cgroup_ifs_account_wakelat(struct task_struct *task, u64 delta) {}
+static inline void cgroup_ifs_account_throttle(struct cgroup *cgrp, int cpu, u64 delta) {}
+#ifdef CONFIG_IRQ_TIME_ACCOUNTING
+static inline void cgroup_ifs_account_softirq(u64 delta) {}
+static inline void cgroup_ifs_account_hardirq(u64 delta) {}
+static inline void cgroup_ifs_enable_irq_account(void) {}
+#endif
+#ifdef CONFIG_SCHEDSTATS
+static inline void cgroup_ifs_account_sleep(struct task_struct *task, u64 delta) {}
+static inline void cgroup_ifs_enable_sleep_account(void) {}
+#endif
+#endif /* CONFIG_CGROUP_IFS */
+
 #endif /* _LINUX_CGROUP_H */

@@ -27,6 +27,7 @@ static int sched_clock_irqtime;
 void enable_sched_clock_irqtime(void)
 {
 	sched_clock_irqtime = 1;
+	cgroup_ifs_enable_irq_account();
 }
 
 void disable_sched_clock_irqtime(void)
@@ -71,10 +72,13 @@ void irqtime_account_irq(struct task_struct *curr, unsigned int offset)
 	 * in that case, so as not to confuse scheduler with a special task
 	 * that do not consume any time, but still wants to run.
 	 */
-	if (pc & HARDIRQ_MASK)
+	if (pc & HARDIRQ_MASK) {
 		irqtime_account_delta(irqtime, delta, CPUTIME_IRQ);
-	else if ((pc & SOFTIRQ_OFFSET) && curr != this_cpu_ksoftirqd())
+		cgroup_ifs_account_hardirq(delta);
+	} else if ((pc & SOFTIRQ_OFFSET) && curr != this_cpu_ksoftirqd()) {
 		irqtime_account_delta(irqtime, delta, CPUTIME_SOFTIRQ);
+		cgroup_ifs_account_softirq(delta);
+	}
 }
 
 static u64 irqtime_tick_accounted(u64 maxtime)

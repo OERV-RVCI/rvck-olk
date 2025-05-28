@@ -2692,7 +2692,7 @@ static unsigned int get_rr_interval_rt(struct rq *rq, struct task_struct *task)
 		return 0;
 }
 
-#ifdef CONFIG_SCHED_CORE
+#if defined(CONFIG_SCHED_CORE) || defined(CONFIG_CGROUP_IFS)
 static int task_is_throttled_rt(struct task_struct *p, int cpu)
 {
 	struct rt_rq *rt_rq;
@@ -2740,7 +2740,7 @@ DEFINE_SCHED_CLASS(rt) = {
 
 	.update_curr		= update_curr_rt,
 
-#ifdef CONFIG_SCHED_CORE
+#if defined(CONFIG_SCHED_CORE) || defined(CONFIG_CGROUP_IFS)
 	.task_is_throttled	= task_is_throttled_rt,
 #endif
 

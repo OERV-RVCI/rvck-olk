@@ -2715,7 +2715,7 @@ static void prio_changed_dl(struct rq *rq, struct task_struct *p,
 #endif
 }
 
-#ifdef CONFIG_SCHED_CORE
+#if defined(CONFIG_SCHED_CORE) || defined(CONFIG_CGROUP_IFS)
 static int task_is_throttled_dl(struct task_struct *p, int cpu)
 {
 	return p->dl.dl_throttled;
@@ -2754,7 +2754,7 @@ DEFINE_SCHED_CLASS(dl) = {
 	.switched_to		= switched_to_dl,
 
 	.update_curr		= update_curr_dl,
-#ifdef CONFIG_SCHED_CORE
+#if defined(CONFIG_SCHED_CORE) || defined(CONFIG_CGROUP_IFS)
 	.task_is_throttled	= task_is_throttled_dl,
 #endif
 };

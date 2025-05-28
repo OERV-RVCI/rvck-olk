@@ -390,7 +390,12 @@ struct sched_info {
 	/* When were we last queued to run? */
 	unsigned long long		last_queued;
 
+#ifdef CONFIG_CGROUP_IFS
+	/* When were we last waking to run? */
+	KABI_USE(1, unsigned long long last_waking)
+#else
 	KABI_RESERVE(1)
+#endif
 	KABI_RESERVE(2)
 #endif /* CONFIG_SCHED_INFO */
 };
@@ -993,6 +998,10 @@ struct task_struct {
 #ifdef CONFIG_TASK_DELAY_ACCT
 	/* delay due to memory thrashing */
 	unsigned                        in_thrashing:1;
+#endif
+#ifdef CONFIG_CGROUP_IFS
+	/* Run delayed due to bandwidth throttling */
+	KABI_FILL_HOLE(unsigned	in_throttle:1)
 #endif
 
 	unsigned long			atomic_flags; /* Flags requiring atomic access. */
