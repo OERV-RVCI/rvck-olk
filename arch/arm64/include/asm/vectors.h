@@ -11,6 +11,7 @@
 #include <asm/fixmap.h>
 
 extern char vectors[];
+extern char vectors_xcall_xint[];
 extern char tramp_vectors[];
 extern char __bp_harden_el1_vectors[];
 

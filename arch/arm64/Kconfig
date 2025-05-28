@@ -267,8 +267,6 @@ config ARM64
 	select TRACE_IRQFLAGS_SUPPORT
 	select TRACE_IRQFLAGS_NMI_SUPPORT
 	select HAVE_SOFTIRQ_ON_OWN_STACK
-	select ARCH_SUPPORTS_FAST_SYSCALL if !ARM64_MTE && !KASAN_HW_TAGS
-	select ARCH_SUPPORTS_FAST_IRQ if ARM_GIC_V3 && !ARM64_MTE && !KASAN_HW_TAGS
 	help
 	  ARM 64-bit (AArch64) Linux support.
 
@@ -426,6 +424,8 @@ source "arch/arm64/Kconfig.platforms"
 source "kernel/livepatch/Kconfig"
 
 menu "Kernel Features"
+
+source "arch/arm64/Kconfig.turbo"
 
 menu "ARM errata workarounds via the alternatives framework"
 

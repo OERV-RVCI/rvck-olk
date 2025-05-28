@@ -44,3 +44,43 @@ void noinstr arch_cpu_idle(void)
 	cpu_do_idle();
 }
 EXPORT_SYMBOL_GPL(arch_cpu_idle);
+
+#ifdef CONFIG_ACTLR_XCALL_XINT
+struct arm_cpuidle_xcall_xint_context {
+	unsigned long actlr_el1;
+	unsigned long actlr_el2;
+};
+
+DEFINE_PER_CPU_ALIGNED(struct arm_cpuidle_xcall_xint_context, contexts);
+
+void arch_cpu_idle_enter(void)
+{
+	struct arm_cpuidle_xcall_xint_context *context;
+
+	if (!system_uses_xcall_xint())
+		return;
+
+	context = &get_cpu_var(contexts);
+	context->actlr_el1 = read_sysreg(actlr_el1);
+	if (read_sysreg(CurrentEL) == CurrentEL_EL2)
+		context->actlr_el2 = read_sysreg(actlr_el2);
+	put_cpu_var(contexts);
+}
+
+void arch_cpu_idle_exit(void)
+{
+	struct arm_cpuidle_xcall_xint_context *context;
+
+	if (!system_uses_xcall_xint())
+		return;
+
+	context = &get_cpu_var(contexts);
+	write_sysreg(context->actlr_el1, actlr_el1);
+	if (read_sysreg(CurrentEL) == CurrentEL_EL2)
+		write_sysreg(context->actlr_el2, actlr_el2);
+	put_cpu_var(contexts);
+}
+#else
+void arch_cpu_idle_enter(void) {}
+void arch_cpu_idle_exit(void) {}
+#endif

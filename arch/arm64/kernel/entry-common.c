@@ -186,7 +186,7 @@ static __always_inline void __fast_exit_to_user_mode(void)
 static __always_inline void fast_exit_to_user_mode(struct pt_regs *regs)
 {
 	fast_exit_to_user_mode_prepare(regs);
-#ifndef CONFIG_DEBUG_FEATURE_BYPASS
+#ifndef CONFIG_SECURITY_FEATURE_BYPASS
 	mte_check_tfsr_exit();
 #endif
 	__fast_exit_to_user_mode();
@@ -202,6 +202,8 @@ static __always_inline void fast_enter_from_user_mode(struct pt_regs *regs)
 	user_exit_irqoff();
 #ifndef CONFIG_DEBUG_FEATURE_BYPASS
 	trace_hardirqs_off_finish();
+#endif
+#ifndef CONFIG_SECURITY_FEATURE_BYPASS
 	mte_disable_tco_entry(current);
 #endif
 }
@@ -607,7 +609,7 @@ static void noinstr el0_xint(struct pt_regs *regs, u64 nmi_flag,
 }
 
 
-asmlinkage void noinstr el0t_64_xint_handler(struct pt_regs *regs)
+asmlinkage void noinstr el0t_64_fast_irq_handler(struct pt_regs *regs)
 {
 	el0_xint(regs, ISR_EL1_IS, handle_arch_irq, handle_arch_nmi_irq);
 }
@@ -829,7 +831,7 @@ static void noinstr el0_xcall(struct pt_regs *regs)
 	fast_exit_to_user_mode(regs);
 }
 
-asmlinkage void noinstr el0t_64_xcall_handler(struct pt_regs *regs)
+asmlinkage void noinstr el0t_64_fast_syscall_handler(struct pt_regs *regs)
 {
 	el0_xcall(regs);
 }
@@ -1048,6 +1050,17 @@ UNHANDLED(el0t, 32, irq)
 UNHANDLED(el0t, 32, fiq)
 UNHANDLED(el0t, 32, error)
 #endif /* CONFIG_AARCH32_EL0 */
+
+#ifdef CONFIG_ACTLR_XCALL_XINT
+asmlinkage void noinstr el0t_64_xcall_handler(struct pt_regs *regs)
+{
+	el0_svc(regs);
+}
+asmlinkage void noinstr el0t_64_xint_handler(struct pt_regs *regs)
+{
+	el0_interrupt(regs, ISR_EL1_IS, handle_arch_irq, handle_arch_nmi_irq);
+}
+#endif
 
 #ifdef CONFIG_VMAP_STACK
 asmlinkage void noinstr __noreturn handle_bad_stack(struct pt_regs *regs)

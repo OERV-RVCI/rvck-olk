@@ -48,7 +48,13 @@
 	mrs	x30, tpidrro_el0
 	msr	tpidrro_el0, xzr
 	.else
+	alternative_if ARM64_HAS_HW_XCALL_XINT
+	mrs	x30, tpidrro_el0
+	msr	tpidrro_el0, xzr
+	alternative_else
 	mov	x30, xzr
+	nop
+	alternative_endif
 	.endif
 .Lskip_tramp_vectors_cleanup\@:
 	.endif
@@ -570,6 +576,29 @@ SYM_CODE_START(vectors)
 	kernel_ventry	0, t, 32, error		// Error 32-bit EL0
 SYM_CODE_END(vectors)
 
+	.align	11
+SYM_CODE_START(vectors_xcall_xint)
+	kernel_ventry	1, t, 64, sync		// Synchronous EL1t
+	kernel_ventry	1, t, 64, irq		// IRQ EL1t
+	kernel_ventry	1, t, 64, fiq		// FIQ EL1t
+	kernel_ventry	1, t, 64, error		// Error EL1t
+
+	kernel_ventry	1, h, 64, sync		// Synchronous EL1h
+	kernel_ventry	1, h, 64, irq		// IRQ EL1h
+	kernel_ventry	1, h, 64, fiq		// FIQ EL1h
+	kernel_ventry	1, h, 64, error		// Error EL1h
+
+	kernel_ventry	0, t, 64, sync		// Synchronous 64-bit EL0
+	kernel_ventry	0, t, 64, irq		// IRQ 64-bit EL0
+	kernel_ventry	0, t, 64, fiq		// FIQ 64-bit EL0
+	kernel_ventry	0, t, 64, error		// Error 64-bit EL0
+
+	kernel_ventry	0, t, 64, xcall		// XCALL synchronous 64-bit EL0
+	kernel_ventry	0, t, 64, xint		// XINT 64-bit EL0
+	kernel_ventry	0, t, 32, fiq		// FIQ 32-bit EL0
+	kernel_ventry	0, t, 32, error		// Error 32-bit EL0
+SYM_CODE_END(vectors_xcall_xint)
+
 #ifdef CONFIG_VMAP_STACK
 SYM_CODE_START_LOCAL(__bad_stack)
 	/*
@@ -648,7 +677,7 @@ SYM_CODE_END(__bad_stack)
 	kernel_entry 0, 64
 #endif
 	mov	x0, sp
-	bl	el0t_64_xcall_handler
+	bl	el0t_64_fast_syscall_handler
 #ifdef CONFIG_SECURITY_FEATURE_BYPASS
 	kernel_exit 0, xcall
 #else
@@ -696,7 +725,7 @@ SYM_CODE_END(__bad_stack)
 	kernel_entry 0, 64
 #endif
 	mov	x0, sp
-	bl	el0t_64_xint_handler
+	bl	el0t_64_fast_irq_handler
 #ifdef CONFIG_SECURITY_FEATURE_BYPASS
 	kernel_exit 0, xint
 #else
@@ -759,6 +788,10 @@ SYM_CODE_END(el\el\ht\()_\regsize\()_\label)
 	entry_handler	0, t, 64, fiq
 	entry_handler	0, t, 64, error
 
+#ifdef CONFIG_ACTLR_XCALL_XINT
+	entry_handler	0, t, 64, xcall
+	entry_handler	0, t, 64, xint
+#endif
 	entry_handler	0, t, 32, sync
 	entry_handler	0, t, 32, irq
 	entry_handler	0, t, 32, fiq
@@ -849,6 +882,12 @@ alternative_else_nop_endif
 	msr	tpidrro_el0, x30	// Restored in kernel_ventry
 	.endif
 
+	.if	\regsize == 32
+	alternative_if ARM64_HAS_HW_XCALL_XINT
+	msr	tpidrro_el0, x30	// Restored in kernel_ventry
+	alternative_else_nop_endif
+	.endif
+
 	.if	\bhb == BHB_MITIGATION_LOOP
 	/*
 	 * This sequence must appear before the first indirect branch. i.e. the
@@ -873,7 +912,12 @@ alternative_else_nop_endif
 2:
 	tramp_map_kernel	x30
 alternative_insn isb, nop, ARM64_WORKAROUND_QCOM_FALKOR_E1003
+alternative_if_not ARM64_HAS_HW_XCALL_XINT
 	tramp_data_read_var	x30, vectors
+	b	3f
+alternative_else_nop_endif
+	tramp_data_read_var	x30, vectors_xcall_xint
+3:
 alternative_if_not ARM64_WORKAROUND_CAVIUM_TX2_219_PRFM
 	prfm	plil1strm, [x30, #(1b - \vector_start)]
 alternative_else_nop_endif
@@ -881,7 +925,11 @@ alternative_else_nop_endif
 	msr	vbar_el1, x30
 	isb
 	.else
+alternative_if_not ARM64_HAS_HW_XCALL_XINT
 	adr_l	x30, vectors
+alternative_else
+	adr_l	x30, vectors_xcall_xint
+alternative_endif
 	.endif // \kpti == 1
 
 	.if	\bhb == BHB_MITIGATION_FW
