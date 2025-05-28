@@ -1253,6 +1253,8 @@ CONFIG_DAMON_SYSFS=y
 CONFIG_DAMON_RECLAIM=y
 CONFIG_DAMON_LRU_SORT=y
 # end of Data Access Monitoring
+
+CONFIG_THP_CONTROL=y
 # end of Memory Management options
 
 CONFIG_NET=y

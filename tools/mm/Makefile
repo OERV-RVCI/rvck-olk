@@ -3,7 +3,7 @@
 #
 include ../scripts/Makefile.include
 
-BUILD_TARGETS=page-types slabinfo page_owner_sort
+BUILD_TARGETS=page-types slabinfo page_owner_sort task_thpctl
 INSTALL_TARGETS = $(BUILD_TARGETS) thpmaps
 
 LIB_DIR = ../lib/api
@@ -23,7 +23,7 @@ $(LIBS):
 	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
 
 clean:
-	$(RM) page-types slabinfo page_owner_sort
+	$(RM) page-types slabinfo page_owner_sort task_thpctl
 	make -C $(LIB_DIR) clean
 
 sbindir ?= /usr/sbin
