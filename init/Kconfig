@@ -1353,6 +1353,17 @@ config CGROUP_IFS
 
 	  Say N if unsure.
 
+config CGROUP_IFS_DEFAULT_ENABLED
+	bool "Enable Cgroup-based Interference Statistics by default"
+	default y
+	depends on CGROUP_IFS
+	help
+	  This option will enable cgroup-based interference statistics
+	  by default. If this option is N, you need to enable cgroup-based
+	  interference statistics by configuring the cgroup_ifs startup param.
+
+	  Say Y if unsure.
+
 endif # CGROUPS
 
 config UCOUNTS_PERCPU_COUNTER
