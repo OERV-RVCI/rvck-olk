@@ -4414,7 +4414,7 @@ static void cgroup_exit_cftypes(struct cftype *cfts)
 	}
 }
 
-static int cgroup_init_cftypes(struct cgroup_subsys *ss, struct cftype *cfts)
+int cgroup_init_cftypes(struct cgroup_subsys *ss, struct cftype *cfts)
 {
 	struct cftype *cft;
 	int ret = 0;

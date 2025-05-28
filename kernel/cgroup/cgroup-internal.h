@@ -297,5 +297,6 @@ void cgroup1_check_for_release(struct cgroup *cgrp);
 int cgroup1_parse_param(struct fs_context *fc, struct fs_parameter *param);
 int cgroup1_get_tree(struct fs_context *fc);
 int cgroup1_reconfigure(struct fs_context *ctx);
+int cgroup_init_cftypes(struct cgroup_subsys *ss, struct cftype *cfts);
 
 #endif /* __CGROUP_INTERNAL_H */
