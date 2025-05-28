@@ -14771,6 +14771,22 @@ void free_fair_sched_group(struct task_group *tg)
 	kfree(tg->se);
 }
 
+#ifdef CONFIG_SCHED_SOFT_DOMAIN
+int init_soft_domain(struct task_group *tg)
+{
+	struct soft_domain_ctx *sf_ctx = NULL;
+
+	sf_ctx = kzalloc(sizeof(*sf_ctx) + cpumask_size(), GFP_KERNEL);
+	if (!sf_ctx)
+		return -ENOMEM;
+
+	sf_ctx->policy = 0;
+	tg->sf_ctx = sf_ctx;
+
+	return 0;
+}
+#endif
+
 int alloc_fair_sched_group(struct task_group *tg, struct task_group *parent)
 {
 	struct sched_entity *se;
@@ -14788,6 +14804,10 @@ int alloc_fair_sched_group(struct task_group *tg, struct task_group *parent)
 
 	init_cfs_bandwidth(tg_cfs_bandwidth(tg), tg_cfs_bandwidth(parent));
 	ret = init_auto_affinity(tg);
+	if (ret)
+		goto err;
+
+	ret = init_soft_domain(tg);
 	if (ret)
 		goto err;
 

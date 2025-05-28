@@ -404,6 +404,16 @@ struct auto_affinity {
 };
 #endif
 
+#ifdef CONFIG_SCHED_SOFT_DOMAIN
+
+struct soft_domain_ctx {
+	int			policy;
+	int			nr_cpus;
+	struct soft_domain	*sf_d;
+	unsigned long		span[];
+};
+#endif
+
 /* Task group related information */
 struct task_group {
 	struct cgroup_subsys_state css;
@@ -469,7 +479,11 @@ struct task_group {
 	struct auto_affinity *auto_affinity;
 #endif
 
+#ifdef CONFIG_SCHED_SOFT_DOMAIN
+	KABI_USE(1, struct soft_domain_ctx *sf_ctx)
+#else
 	KABI_RESERVE(1)
+#endif
 	KABI_RESERVE(2)
 	KABI_RESERVE(3)
 	KABI_RESERVE(4)
@@ -3745,6 +3759,10 @@ bool bpf_sched_is_cpu_allowed(struct task_struct *p, int cpu);
 
 #ifdef CONFIG_SCHED_SOFT_DOMAIN
 void build_soft_domain(void);
+int init_soft_domain(struct task_group *tg);
+
+int sched_group_set_soft_domain(struct task_group *tg, long val);
+
 static inline struct cpumask *soft_domain_span(unsigned long span[])
 {
 	return to_cpumask(span);
@@ -3752,6 +3770,10 @@ static inline struct cpumask *soft_domain_span(unsigned long span[])
 #else
 
 static inline void build_soft_domain(void) { }
+static inline int init_soft_domain(struct task_group *tg)
+{
+	return 0;
+}
 
 #endif
 
