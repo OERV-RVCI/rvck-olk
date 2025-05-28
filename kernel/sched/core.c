@@ -4246,6 +4246,7 @@ int try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 
 		trace_sched_waking(p);
 		ttwu_do_wakeup(p);
+		ifs_task_waking(p);
 		goto out;
 	}
 
@@ -4261,6 +4262,7 @@ int try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 			break;
 
 		trace_sched_waking(p);
+		ifs_task_waking(p);
 
 		/*
 		 * Ensure we load p->on_rq _after_ p->state, otherwise it would
@@ -4935,6 +4937,7 @@ void wake_up_new_task(struct task_struct *p)
 
 	activate_task(rq, p, ENQUEUE_NOCLOCK);
 	trace_sched_wakeup_new(p);
+	ifs_task_waking(p);
 	check_preempt_curr(rq, p, WF_FORK);
 #ifdef CONFIG_SMP
 	if (p->sched_class->task_woken) {

@@ -2,6 +2,8 @@
 #ifndef _KERNEL_STATS_H
 #define _KERNEL_STATS_H
 
+#include <linux/sched/clock.h>
+
 #ifdef CONFIG_SCHEDSTATS
 
 extern struct static_key_false sched_schedstats;
@@ -148,8 +150,31 @@ static inline void ifs_account_rundelay(struct task_struct *task, u64 delta)
 
 	cgroup_ifs_account_rundelay(task, delta);
 }
+
+static inline void ifs_task_waking(struct task_struct *t)
+{
+	if (t->sched_info.last_waking)
+		return;
+
+	t->sched_info.last_waking = sched_clock();
+}
+
+static inline void ifs_task_arrive(struct task_struct *t)
+{
+	unsigned long long now, delta = 0;
+
+	if (!t->sched_info.last_waking)
+		return;
+
+	now = sched_clock();
+	delta = now - t->sched_info.last_waking;
+	t->sched_info.last_waking = 0;
+	cgroup_ifs_account_wakelat(t, delta);
+}
 #else
 static inline void ifs_account_rundelay(struct task_struct *task, u64 delta) {}
+static inline void ifs_task_waking(struct task_struct *t) {}
+static inline void ifs_task_arrive(struct task_struct *t) {}
 #endif
 
 #ifdef CONFIG_PSI
@@ -336,8 +361,10 @@ sched_info_switch(struct rq *rq, struct task_struct *prev, struct task_struct *n
 	if (prev != rq->idle)
 		sched_info_depart(rq, prev);
 
-	if (next != rq->idle)
+	if (next != rq->idle) {
 		sched_info_arrive(rq, next);
+		ifs_task_arrive(next);
+	}
 }
 
 #else /* !CONFIG_SCHED_INFO: */

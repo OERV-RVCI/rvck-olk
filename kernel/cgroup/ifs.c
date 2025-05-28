@@ -162,6 +162,9 @@ static const char *ifs_type_name(int type)
 	case IFS_RUNDELAY:
 		name = "rundelay";
 		break;
+	case IFS_WAKELAT:
+		name = "wakelat";
+		break;
 	case IFS_THROTTLE:
 		name = "throttle";
 		break;

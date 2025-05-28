@@ -865,6 +865,7 @@ void cgroup_move_task_to_root(struct task_struct *tsk);
 enum ifs_types {
 	IFS_SMT,
 	IFS_RUNDELAY,
+	IFS_WAKELAT,
 	IFS_THROTTLE,
 #ifdef CONFIG_SCHEDSTATS
 	IFS_SLEEP,
@@ -938,6 +939,21 @@ static inline void cgroup_ifs_account_rundelay(struct task_struct *task,
 	cgroup_ifs_account_delta(this_cpu_ptr(ifs->pcpu), IFS_RUNDELAY, delta);
 }
 
+static inline void cgroup_ifs_account_wakelat(struct task_struct *task,
+					      u64 delta)
+{
+	struct cgroup_ifs *ifs;
+
+	if (!cgroup_ifs_enabled())
+		return;
+
+	ifs = task_ifs(task);
+	if (!ifs)
+		return;
+
+	cgroup_ifs_account_delta(this_cpu_ptr(ifs->pcpu), IFS_WAKELAT, delta);
+}
+
 static inline void cgroup_ifs_account_throttle(struct cgroup *cgrp, int cpu,
 					       u64 delta)
 {
@@ -980,6 +996,7 @@ static inline void cgroup_ifs_account_smttime(struct task_struct *prev,
 					      struct task_struct *idle) {}
 static inline void cgroup_ifs_set_smt(cpumask_t *sibling) {}
 static inline void cgroup_ifs_account_rundelay(struct task_struct *task, u64 delta) {}
+static inline void cgroup_ifs_account_wakelat(struct task_struct *task, u64 delta) {}
 static inline void cgroup_ifs_account_throttle(struct cgroup *cgrp, int cpu, u64 delta) {}
 #ifdef CONFIG_SCHEDSTATS
 static inline void cgroup_ifs_account_sleep(struct task_struct *task, u64 delta) {}
