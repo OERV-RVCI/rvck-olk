@@ -905,6 +905,10 @@ static inline struct cgroup_ifs *cgroup_ifs(struct cgroup *cgrp)
 
 static inline struct cgroup_ifs *task_ifs(struct task_struct *task)
 {
+#ifdef CONFIG_CGROUP_CPUACCT
+	if (!cgroup_subsys_on_dfl(cpuacct_cgrp_subsys))
+		return cgroup_ifs(task_cgroup(task, cpuacct_cgrp_id));
+#endif
 	return cgroup_ifs(task_dfl_cgroup(task));
 }
 
