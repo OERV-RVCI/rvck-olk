@@ -48,6 +48,7 @@
 	mrs	x30, tpidrro_el0
 	msr	tpidrro_el0, xzr
 	.else
+#ifdef CONFIG_ACTLR_XCALL_XINT
 	alternative_if ARM64_HAS_HW_XCALL_XINT
 	mrs	x30, tpidrro_el0
 	msr	tpidrro_el0, xzr
@@ -55,6 +56,9 @@
 	mov	x30, xzr
 	nop
 	alternative_endif
+#else
+	mov	x30, xzr
+#endif
 	.endif
 .Lskip_tramp_vectors_cleanup\@:
 	.endif
@@ -576,6 +580,7 @@ SYM_CODE_START(vectors)
 	kernel_ventry	0, t, 32, error		// Error 32-bit EL0
 SYM_CODE_END(vectors)
 
+#ifdef CONFIG_ACTLR_XCALL_XINT
 	.align	11
 SYM_CODE_START(vectors_xcall_xint)
 	kernel_ventry	1, t, 64, sync		// Synchronous EL1t
@@ -598,6 +603,7 @@ SYM_CODE_START(vectors_xcall_xint)
 	kernel_ventry	0, t, 32, fiq		// FIQ 32-bit EL0
 	kernel_ventry	0, t, 32, error		// Error 32-bit EL0
 SYM_CODE_END(vectors_xcall_xint)
+#endif
 
 #ifdef CONFIG_VMAP_STACK
 SYM_CODE_START_LOCAL(__bad_stack)
@@ -882,11 +888,13 @@ alternative_else_nop_endif
 	msr	tpidrro_el0, x30	// Restored in kernel_ventry
 	.endif
 
+#ifdef CONFIG_ACTLR_XCALL_XINT
 	.if	\regsize == 32
 	alternative_if ARM64_HAS_HW_XCALL_XINT
 	msr	tpidrro_el0, x30	// Restored in kernel_ventry
 	alternative_else_nop_endif
 	.endif
+#endif
 
 	.if	\bhb == BHB_MITIGATION_LOOP
 	/*
@@ -912,12 +920,16 @@ alternative_else_nop_endif
 2:
 	tramp_map_kernel	x30
 alternative_insn isb, nop, ARM64_WORKAROUND_QCOM_FALKOR_E1003
+#ifdef CONFIG_ACTLR_XCALL_XINT
 alternative_if_not ARM64_HAS_HW_XCALL_XINT
 	tramp_data_read_var	x30, vectors
 	b	3f
 alternative_else_nop_endif
 	tramp_data_read_var	x30, vectors_xcall_xint
 3:
+#else
+	tramp_data_read_var	x30, vectors
+#endif
 alternative_if_not ARM64_WORKAROUND_CAVIUM_TX2_219_PRFM
 	prfm	plil1strm, [x30, #(1b - \vector_start)]
 alternative_else_nop_endif
@@ -925,11 +937,15 @@ alternative_else_nop_endif
 	msr	vbar_el1, x30
 	isb
 	.else
+#ifdef CONFIG_ACTLR_XCALL_XINT
 alternative_if_not ARM64_HAS_HW_XCALL_XINT
 	adr_l	x30, vectors
 alternative_else
 	adr_l	x30, vectors_xcall_xint
 alternative_endif
+#else
+	adr_l	x30, vectors
+#endif
 	.endif // \kpti == 1
 
 	.if	\bhb == BHB_MITIGATION_FW
