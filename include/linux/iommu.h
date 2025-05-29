@@ -716,6 +716,7 @@ struct iommu_ops {
 	struct module *owner;
 	struct iommu_domain *identity_domain;
 	struct iommu_domain *blocked_domain;
+	struct iommu_domain *release_domain;
 	struct iommu_domain *default_domain;
 
 	KABI_USE(1, struct iommu_domain *(*domain_alloc_sva)(struct device *dev,
