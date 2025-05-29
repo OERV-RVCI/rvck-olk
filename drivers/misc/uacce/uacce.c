@@ -525,7 +525,7 @@ static int uacce_alloc_dma_buffers(struct uacce_queue *q,
 			size = vma->vm_end - start;
 		else
 			size = max_size;
-		dev_dbg(pdev, "allocate dma %ld pages\n",
+		dev_dbg(pdev, "allocate dma %lu pages\n",
 			(size + PAGE_SIZE - 1) >> PAGE_SHIFT);
 		slice[i].kaddr = dma_alloc_coherent(pdev, (size +
 						    PAGE_SIZE - 1) & PAGE_MASK,
@@ -886,7 +886,7 @@ static umode_t uacce_dev_is_visible(struct kobject *kobj,
 		return 0;
 
 	if (attr == &dev_attr_isolate_strategy.attr &&
-	    (!uacce->ops->isolate_err_threshold_read &&
+	    (!uacce->ops->isolate_err_threshold_read ||
 	     !uacce->ops->isolate_err_threshold_write))
 		return 0;
 
@@ -955,18 +955,14 @@ static void uacce_disable_sva(struct uacce_device *uacce)
 struct uacce_device *uacce_alloc(struct device *parent,
 				 struct uacce_interface *interface)
 {
+	unsigned int flags = interface->flags;
 	struct uacce_device *uacce;
-	unsigned int flags;
 	int ret;
-
-	if (!parent || !interface)
-		return ERR_PTR(-EINVAL);
 
 	uacce = kzalloc(sizeof(struct uacce_device), GFP_KERNEL);
 	if (!uacce)
 		return ERR_PTR(-ENOMEM);
 
-	flags = interface->flags;
 	flags = uacce_enable_sva(parent, flags);
 
 	uacce->parent = parent;
