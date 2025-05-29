@@ -15,6 +15,7 @@
 #include <linux/of.h>
 #include <linux/slab.h>
 #include <linux/sched/topology.h>
+#include <linux/cgroup.h>
 #include <linux/cpuset.h>
 #include <linux/cpumask.h>
 #include <linux/init.h>
