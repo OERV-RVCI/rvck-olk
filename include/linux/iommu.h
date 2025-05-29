@@ -731,7 +731,7 @@ struct iommu_ops {
 	KABI_USE(5, int (*set_group_qos_params)(struct iommu_group *group, u16 partition,
 						u8 perf_mon_grp))
 
-	KABI_RESERVE(6)
+	KABI_USE(6, struct iommu_domain *release_domain)
 	KABI_RESERVE(7)
 	KABI_RESERVE(8)
 	KABI_RESERVE(9)
