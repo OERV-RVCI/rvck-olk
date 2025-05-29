@@ -528,6 +528,8 @@ static ssize_t rdtgroup_cpus_write(struct kernfs_open_file *of,
 		goto unlock;
 	}
 
+	rdt_last_cmd_clear();
+
 	if (rdtgrp->mode == RDT_MODE_PSEUDO_LOCKED ||
 	    rdtgrp->mode == RDT_MODE_PSEUDO_LOCKSETUP) {
 		ret = -EINVAL;
@@ -3319,7 +3321,7 @@ static int rdtgroup_init_cat(struct resctrl_schema *s, u32 closid)
 }
 
 /* Initialize MBA resource with default values. */
-static void rdtgroup_init_mba(struct rdt_resource *r, u32 closid)
+static void rdtgroup_init_res(struct rdt_resource *r, u32 closid)
 {
 	struct resctrl_staged_config *cfg;
 	struct rdt_domain *d;
@@ -3347,15 +3349,16 @@ static int rdtgroup_init_alloc(struct rdtgroup *rdtgrp)
 
 	list_for_each_entry(s, &resctrl_schema_all, list) {
 		r = s->res;
-		if (r->rid == RDT_RESOURCE_MBA ||
-		    r->rid == RDT_RESOURCE_SMBA) {
-			rdtgroup_init_mba(r, rdtgrp->closid);
-			if (is_mba_sc(r))
-				continue;
-		} else {
+		if (r->rid == RDT_RESOURCE_L2 ||
+		    r->rid == RDT_RESOURCE_L3) {
 			ret = rdtgroup_init_cat(s, rdtgrp->closid);
 			if (ret < 0)
 				goto out;
+
+		} else {
+			rdtgroup_init_res(r, rdtgrp->closid);
+			if (is_mba_sc(r))
+				continue;
 		}
 
 		ret = resctrl_arch_update_domains(r, rdtgrp->closid);
@@ -3417,6 +3420,8 @@ static int mkdir_rdt_prepare(struct kernfs_node *parent_kn,
 		ret = -ENODEV;
 		goto out_unlock;
 	}
+
+	rdt_last_cmd_clear();
 
 	if (rtype == RDTMON_GROUP &&
 	    (prdtgrp->mode == RDT_MODE_PSEUDO_LOCKSETUP ||
@@ -4034,7 +4039,8 @@ static int domain_setup_mon_state(struct rdt_resource *r, struct rdt_domain *d)
 		d->mbm_core = kcalloc(idx_limit, tsize, GFP_KERNEL);
 		if (!d->mbm_core) {
 			bitmap_free(d->rmid_busy_llc);
-			kfree(d->mbm_core);
+			kfree(d->mbm_total);
+			kfree(d->mbm_local);
 			return -ENOMEM;
 		}
 	}
