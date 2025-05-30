@@ -2950,16 +2950,12 @@ static void hisi_pv_sgi_init(void)
 	struct arm_smccc_res res;
 
 	arm_smccc_1_1_invoke(ARM_SMCCC_VENDOR_PV_SGI_FEATURES, &res);
-	if (res.a0 != SMCCC_RET_SUCCESS) {
-		pr_info("Not Support HiSilicon PV SGI!\n");
+	if (res.a0 != SMCCC_RET_SUCCESS)
 		return;
-	}
 
 	arm_smccc_1_1_invoke(ARM_SMCCC_VENDOR_PV_SGI_ENABLE, &res);
-	if (res.a0 != SMCCC_RET_SUCCESS) {
-		pr_info("Disable HiSilicon PV SGI!\n");
+	if (res.a0 != SMCCC_RET_SUCCESS)
 		return;
-	}
 
 	hisi_pv_sgi_enabled = true;
 	pr_info("Enable HiSilicon PV SGI!\n");
