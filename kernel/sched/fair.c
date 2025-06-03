@@ -5219,7 +5219,10 @@ static inline void update_misfit_status(struct task_struct *p, struct rq *rq)
 
 static inline void rq_idle_stamp_update(struct rq *rq)
 {
-	rq->idle_stamp = rq_clock(rq);
+	if (sched_feat(IRQ_AVG))
+		rq->idle_stamp = rq_clock_task(rq);
+	else
+		rq->idle_stamp = rq_clock(rq);
 }
 
 static inline void rq_idle_stamp_clear(struct rq *rq)
