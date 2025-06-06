@@ -815,7 +815,6 @@ static const struct file_operations hisi_acc_vf_resume_fops = {
 	.owner = THIS_MODULE,
 	.write = hisi_acc_vf_resume_write,
 	.release = hisi_acc_vf_release_file,
-	.llseek = no_llseek,
 };
 
 static struct hisi_acc_vf_migration_file *
@@ -937,7 +936,6 @@ static const struct file_operations hisi_acc_vf_save_fops = {
 	.unlocked_ioctl = hisi_acc_vf_precopy_ioctl,
 	.compat_ioctl = compat_ptr_ioctl,
 	.release = hisi_acc_vf_release_file,
-	.llseek = no_llseek,
 };
 
 static struct hisi_acc_vf_migration_file *
@@ -1185,8 +1183,7 @@ static void hisi_acc_vf_pci_aer_reset_done(struct pci_dev *pdev)
 {
 	struct hisi_acc_vf_core_device *hisi_acc_vdev = hisi_acc_drvdata(pdev);
 
-	if (hisi_acc_vdev->core_device.vdev.migration_flags !=
-				VFIO_MIGRATION_STOP_COPY)
+	if (hisi_acc_vdev->core_device.vdev.mig_ops)
 		return;
 
 	mutex_lock(&hisi_acc_vdev->state_mutex);
