@@ -51,6 +51,7 @@
 #include <linux/sched/sysctl.h>
 #include <linux/memory-tiers.h>
 #include <linux/dynamic_pool.h>
+#include <linux/pagewalk.h>
 
 #include <asm/tlbflush.h>
 
