@@ -426,7 +426,7 @@ static struct fdtable *close_files(struct files_struct * files)
 		set = fdt->open_fds[j++];
 		while (set) {
 			if (set & 1) {
-				struct file * file = xchg(&fdt->fd[i], NULL);
+				struct file *file = fdt->fd[i];
 				if (file) {
 					files_cg_unalloc_fd(files, 1);
 					filp_close(file, files);
