@@ -4205,6 +4205,9 @@ static inline void accept_memory(phys_addr_t start, phys_addr_t end)
 
 #endif
 
+void vma_pgtable_walk_begin(struct vm_area_struct *vma);
+void vma_pgtable_walk_end(struct vm_area_struct *vma);
+
 /* added to mm.h to avoid every caller adding new header file */
 #include <linux/mem_reliable.h>
 
