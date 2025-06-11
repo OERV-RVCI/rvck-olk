@@ -473,25 +473,7 @@ static int mm_spe_device_probe(struct platform_device *pdev)
 
 	struct device *dev;
 
-	/*
-	 * If kernelspace is unmapped when running at EL0, then the SPE
-	 * buffer will fault and prematurely terminate the AUX session.
-	 */
-	if (arm64_kernel_unmapped_at_el0()) {
-		dev_warn_once(dev, "buffer inaccessible. Try passing \"kpti=off\" on the kernel command line\n");
-		return -EPERM;
-	}
-
-	if (!pdev) {
-		pr_err("pdev is NULL!\n");
-		return -ENODEV;
-	}
-
 	dev = &pdev->dev;
-	if (!dev) {
-		pr_err("dev is NULL!\n");
-		return -ENODEV;
-	}
 
 	spe = devm_kzalloc(dev, sizeof(*spe), GFP_KERNEL);
 	if (!spe)
