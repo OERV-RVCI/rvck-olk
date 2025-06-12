@@ -9176,22 +9176,25 @@ static void set_task_select_cpus(struct task_struct *p, int *idlest_cpu,
 #ifdef CONFIG_SCHED_SOFT_DOMAIN
 static int wake_soft_domain(struct task_struct *p, int target)
 {
-	struct cpumask *mask = NULL;
+	struct cpumask *mask = this_cpu_cpumask_var_ptr(select_rq_mask);
 	struct soft_domain_ctx *ctx = NULL;
 
-	rcu_read_lock();
 	ctx = task_group(p)->sf_ctx;
 	if (!ctx || ctx->policy == 0)
-		goto unlock;
+		goto out;
 
-	mask = to_cpumask(ctx->span);
-	if (cpumask_test_cpu(target, mask))
-		goto unlock;
+#ifdef CONFIG_QOS_SCHED_DYNAMIC_AFFINITY
+	cpumask_and(mask, to_cpumask(ctx->span), p->select_cpus);
+#else
+	cpumask_and(mask, to_cpumask(ctx->span), p->cpus_ptr);
+#endif
+	cpumask_and(mask, mask, cpu_active_mask);
+	if (cpumask_empty(mask) || cpumask_test_cpu(target, mask))
+		goto out;
 	else
 		target = cpumask_any_distribute(mask);
 
-unlock:
-	rcu_read_unlock();
+out:
 
 	return target;
 }
@@ -9251,11 +9254,6 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
 			new_cpu = prev_cpu;
 		}
 
-#ifdef CONFIG_SCHED_SOFT_DOMAIN
-		if (sched_feat(SOFT_DOMAIN))
-			new_cpu = prev_cpu = wake_soft_domain(p, prev_cpu);
-#endif
-
 #ifdef CONFIG_QOS_SCHED_DYNAMIC_AFFINITY
 		want_affine = !wake_wide(p) && cpumask_test_cpu(cpu, p->select_cpus);
 #else
@@ -9264,6 +9262,11 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
 	}
 
 	rcu_read_lock();
+
+#ifdef CONFIG_SCHED_SOFT_DOMAIN
+	if (sched_feat(SOFT_DOMAIN))
+		new_cpu = prev_cpu = wake_soft_domain(p, prev_cpu);
+#endif
 #ifdef CONFIG_BPF_SCHED
 	if (bpf_sched_enabled()) {
 		ctx.task = p;
