@@ -3759,8 +3759,9 @@ bool bpf_sched_is_cpu_allowed(struct task_struct *p, int cpu);
 
 #ifdef CONFIG_SCHED_SOFT_DOMAIN
 void build_soft_domain(void);
-int init_soft_domain(struct task_group *tg);
-
+int init_soft_domain(struct task_group *tg, struct task_group *parent);
+int destroy_soft_domain(struct task_group *tg);
+void offline_soft_domain(struct task_group *tg);
 int sched_group_set_soft_domain(struct task_group *tg, long val);
 int sched_group_set_soft_domain_quota(struct task_group *tg, long val);
 
@@ -3771,7 +3772,14 @@ static inline struct cpumask *soft_domain_span(unsigned long span[])
 #else
 
 static inline void build_soft_domain(void) { }
-static inline int init_soft_domain(struct task_group *tg)
+static inline int init_soft_domain(struct task_group *tg, struct task_group *parent)
+{
+	return 0;
+}
+
+static inline void offline_soft_domain(struct task_group *tg) { }
+
+static inline int destroy_soft_domain(struct task_group *tg)
 {
 	return 0;
 }
