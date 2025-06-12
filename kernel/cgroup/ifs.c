@@ -8,14 +8,20 @@
 #include <linux/sched/clock.h>
 #include "cgroup-internal.h"
 
-/* smt information */
+/* smt interference */
+struct smt_itf {
+	u64 total_time; /* total time of all smt interferences */
+	u64 enter_time; /* enter time of the most recent smt interference */
+	atomic_t lock;
+};
+
 struct smt_info {
-	u64 total_time;
+	struct smt_itf *itf;
 	u64 prev_read_time;
-	u64 noidle_enter_time;
 	bool is_noidle;
 };
 
+static DEFINE_PER_CPU(struct smt_itf, smt_itf);
 static DEFINE_PER_CPU(struct smt_info, smt_info);
 static DEFINE_PER_CPU_READ_MOSTLY(int, smt_sibling) = -1;
 
@@ -52,6 +58,7 @@ void cgroup_ifs_set_smt(cpumask_t *sibling)
 	int cpuid1 = -1;
 	int cpuid2 = -1;
 	bool off = false;
+	struct smt_itf *itf;
 
 	for_each_cpu(cpu, sibling) {
 		if (cpuid1 == -1) {
@@ -69,24 +76,39 @@ void cgroup_ifs_set_smt(cpumask_t *sibling)
 
 	if (cpuid2 != -1)
 		*per_cpu_ptr(&smt_sibling, cpuid2) = off ? -1 : cpuid1;
+
+	if (cpuid1 != -1 && cpuid2 != -1 && !off) {
+		itf = per_cpu_ptr(&smt_itf, cpuid1);
+		per_cpu_ptr(&smt_info, cpuid1)->itf = itf;
+		per_cpu_ptr(&smt_info, cpuid2)->itf = itf;
+	}
 }
 
-static void account_smttime(struct task_struct *task)
+static void account_smttime(struct cgroup_ifs *ifs, struct smt_info *info,
+			    u64 total_time)
 {
 	u64 delta;
-	struct cgroup_ifs *ifs;
-	struct smt_info *info;
 
-	ifs = task_ifs(task);
 	if (!ifs)
 		return;
 
-	info = this_cpu_ptr(&smt_info);
+	delta = total_time - info->prev_read_time;
+	if (!delta)
+		return;
 
-	delta = info->total_time - info->prev_read_time;
-	info->prev_read_time = info->total_time;
-
+	info->prev_read_time = total_time;
 	cgroup_ifs_account_delta(this_cpu_ptr(ifs->pcpu), IFS_SMT, delta);
+}
+
+static inline void ifs_smt_lock(atomic_t *lock)
+{
+	while (!atomic_cmpxchg_acquire(lock, 0, 1))
+		barrier();
+}
+
+static inline void ifs_smt_unlock(atomic_t *lock)
+{
+	atomic_set_release(lock, 0);
 }
 
 void cgroup_ifs_account_smttime(struct task_struct *prev,
@@ -94,8 +116,10 @@ void cgroup_ifs_account_smttime(struct task_struct *prev,
 				struct task_struct *idle)
 {
 	struct smt_info *ci, *si;
-	u64 now, delta;
+	struct smt_itf *itf;
+	u64 now, total_time;
 	int sibling;
+	s64 delta;
 
 	sibling = this_cpu_read(smt_sibling);
 	if (sibling == -1 || prev == next)
@@ -103,35 +127,49 @@ void cgroup_ifs_account_smttime(struct task_struct *prev,
 
 	ci = this_cpu_ptr(&smt_info);
 	si = per_cpu_ptr(&smt_info, sibling);
+	itf = ci->itf;
 
+	total_time = 0;
 	now = sched_clock_cpu(smp_processor_id());
 
-	/* leave noidle */
-	if (prev != idle && next == idle) {
-		ci->is_noidle = false;
-		/* account interference time */
-		if (ci->noidle_enter_time && si->is_noidle) {
-			delta = now - ci->noidle_enter_time;
-
-			ci->total_time += delta;
-			si->total_time += delta;
-
-			si->noidle_enter_time = 0;
-			ci->noidle_enter_time = 0;
-
-			account_smttime(prev);
-		}
-	/* enter noidle */
-	} else if (prev == idle && next != idle) {
-		/* if the sibling is also nonidle, there is smt interference */
-		if (si->is_noidle) {
-			ci->noidle_enter_time = now;
-			si->noidle_enter_time = now;
-		}
+	/* idle => non-idle */
+	if (prev == idle) {
+		ifs_smt_lock(&itf->lock);
+		/* if sibling is also noidle, mark smt interference start */
+		if (si->is_noidle)
+			itf->enter_time = now;
 		ci->is_noidle = true;
-	/* cgroup changed */
-	} else if (task_ifs(prev) != task_ifs(next))
-		account_smttime(prev);
+		ifs_smt_unlock(&itf->lock);
+	/* non-idle => idle */
+	} else if (next == idle) {
+		ifs_smt_lock(&itf->lock);
+		if (itf->enter_time) { /* in smt interference */
+			delta = now - itf->enter_time;
+			if (delta > 0)
+				itf->total_time += delta;
+			/* leave smt interference */
+			itf->enter_time = 0;
+		}
+		total_time = itf->total_time;
+		ci->is_noidle = false;
+		ifs_smt_unlock(&itf->lock);
+
+		account_smttime(task_ifs(prev), ci, total_time);
+	/* non-idle => non-idle */
+	} else {
+		ifs_smt_lock(&itf->lock);
+		if (itf->enter_time) { /* in smt interference */
+			delta = now - itf->enter_time;
+			if (delta > 0) {
+				itf->total_time += delta;
+				itf->enter_time = now;
+			}
+		}
+		total_time = itf->total_time;
+		ifs_smt_unlock(&itf->lock);
+
+		account_smttime(task_ifs(prev), ci, total_time);
+	}
 }
 
 int cgroup_ifs_alloc(struct cgroup *cgrp)
