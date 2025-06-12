@@ -7282,7 +7282,7 @@ int init_auto_affinity(struct task_group *tg)
 	return 0;
 }
 
-static void destroy_auto_affinity(struct task_group *tg)
+void offline_auto_affinity(struct task_group *tg)
 {
 	struct auto_affinity *auto_affi = tg->auto_affinity;
 
@@ -7294,11 +7294,21 @@ static void destroy_auto_affinity(struct task_group *tg)
 
 	if (auto_affi->period_active)
 		smart_grid_usage_dec();
+}
+
+static void destroy_auto_affinity(struct task_group *tg)
+{
+	struct auto_affinity *auto_affi = tg->auto_affinity;
+
+	if (!smart_grid_enabled())
+		return;
+
+	if (unlikely(!auto_affi))
+		return;
 
 	hrtimer_cancel(&auto_affi->period_timer);
 	sched_grid_zone_del_af(auto_affi);
 	free_affinity_domains(&auto_affi->ad);
-
 	kfree(tg->auto_affinity);
 	tg->auto_affinity = NULL;
 }
@@ -9176,22 +9186,25 @@ static void set_task_select_cpus(struct task_struct *p, int *idlest_cpu,
 #ifdef CONFIG_SCHED_SOFT_DOMAIN
 static int wake_soft_domain(struct task_struct *p, int target)
 {
-	struct cpumask *mask = NULL;
+	struct cpumask *mask = this_cpu_cpumask_var_ptr(select_rq_mask);
 	struct soft_domain_ctx *ctx = NULL;
 
-	rcu_read_lock();
 	ctx = task_group(p)->sf_ctx;
 	if (!ctx || ctx->policy == 0)
-		goto unlock;
+		goto out;
 
-	mask = to_cpumask(ctx->span);
-	if (cpumask_test_cpu(target, mask))
-		goto unlock;
+#ifdef CONFIG_QOS_SCHED_DYNAMIC_AFFINITY
+	cpumask_and(mask, to_cpumask(ctx->span), p->select_cpus);
+#else
+	cpumask_and(mask, to_cpumask(ctx->span), p->cpus_ptr);
+#endif
+	cpumask_and(mask, mask, cpu_active_mask);
+	if (cpumask_empty(mask) || cpumask_test_cpu(target, mask))
+		goto out;
 	else
 		target = cpumask_any_distribute(mask);
 
-unlock:
-	rcu_read_unlock();
+out:
 
 	return target;
 }
@@ -9251,11 +9264,6 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
 			new_cpu = prev_cpu;
 		}
 
-#ifdef CONFIG_SCHED_SOFT_DOMAIN
-		if (sched_feat(SOFT_DOMAIN))
-			new_cpu = prev_cpu = wake_soft_domain(p, prev_cpu);
-#endif
-
 #ifdef CONFIG_QOS_SCHED_DYNAMIC_AFFINITY
 		want_affine = !wake_wide(p) && cpumask_test_cpu(cpu, p->select_cpus);
 #else
@@ -9264,6 +9272,11 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
 	}
 
 	rcu_read_lock();
+
+#ifdef CONFIG_SCHED_SOFT_DOMAIN
+	if (sched_feat(SOFT_DOMAIN))
+		new_cpu = prev_cpu = wake_soft_domain(p, prev_cpu);
+#endif
 #ifdef CONFIG_BPF_SCHED
 	if (bpf_sched_enabled()) {
 		ctx.task = p;
@@ -14846,22 +14859,6 @@ void free_fair_sched_group(struct task_group *tg)
 	kfree(tg->se);
 }
 
-#ifdef CONFIG_SCHED_SOFT_DOMAIN
-int init_soft_domain(struct task_group *tg)
-{
-	struct soft_domain_ctx *sf_ctx = NULL;
-
-	sf_ctx = kzalloc(sizeof(*sf_ctx) + cpumask_size(), GFP_KERNEL);
-	if (!sf_ctx)
-		return -ENOMEM;
-
-	sf_ctx->policy = 0;
-	tg->sf_ctx = sf_ctx;
-
-	return 0;
-}
-#endif
-
 int alloc_fair_sched_group(struct task_group *tg, struct task_group *parent)
 {
 	struct sched_entity *se;
@@ -14882,7 +14879,7 @@ int alloc_fair_sched_group(struct task_group *tg, struct task_group *parent)
 	if (ret)
 		goto err;
 
-	ret = init_soft_domain(tg);
+	ret = init_soft_domain(tg, parent);
 	if (ret)
 		goto err;
 
@@ -14908,6 +14905,7 @@ err_free_rq:
 	kfree(cfs_rq);
 err:
 	destroy_auto_affinity(tg);
+	destroy_soft_domain(tg);
 	return 0;
 }
 
@@ -14937,6 +14935,7 @@ void unregister_fair_sched_group(struct task_group *tg)
 
 	destroy_cfs_bandwidth(tg_cfs_bandwidth(tg));
 	destroy_auto_affinity(tg);
+	destroy_soft_domain(tg);
 
 	for_each_possible_cpu(cpu) {
 		if (tg->se[cpu])
