@@ -180,7 +180,7 @@ static void uacce_free_dma_buffers(struct uacce_queue *q)
 		return;
 
 	while (i < qfr->dma_list[0].total_num) {
-		WARN_ON(!qfr->dma_list[i].size || !qfr->dma_list[i].dma);
+		WARN_ON_ONCE(!qfr->dma_list[i].size || !qfr->dma_list[i].dma);
 		dev_dbg(pdev, "free dma qfr (index = %d)\n", i);
 		dma_free_coherent(pdev, qfr->dma_list[i].size,
 				  qfr->dma_list[i].kaddr,
