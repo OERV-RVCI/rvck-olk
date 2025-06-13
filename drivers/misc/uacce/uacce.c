@@ -122,31 +122,29 @@ static long uacce_get_ss_dma(struct uacce_queue *q, void __user *arg)
 	unsigned long slice_idx = 0;
 	unsigned long dma, size;
 	unsigned int max_idx;
-	long ret = -EFAULT;
+	long ret = -EINVAL;
 
+	if (copy_from_user(&slice_idx, arg, sizeof(unsigned long))) {
+		dev_err(&uacce->dev, "copy_from_user fail!\n");
+		return -EFAULT;
+	}
+
+	mutex_lock(&q->mutex);
 	if (q->state == UACCE_Q_ZOMBIE) {
 		dev_err(&uacce->dev, "queue is zombie!\n");
-		ret = -EINVAL;
-		goto param_check;
+		goto unlock;
 	}
 
 	if (!q->qfrs[UACCE_QFRT_SS]) {
 		dev_err(&uacce->dev, "no ss dma region!\n");
-		ret = -EINVAL;
-		goto param_check;
+		goto unlock;
 	}
 
 	slice = q->qfrs[UACCE_QFRT_SS]->dma_list;
-	if (copy_from_user(&slice_idx, arg, sizeof(unsigned long))) {
-		dev_err(&uacce->dev, "copy_from_user fail!\n");
-		goto param_check;
-	}
-
 	if (slice[0].total_num - 1 < slice_idx) {
 		dev_err(&uacce->dev, "no ss slice idx %lu err, total %u!\n",
 			slice_idx, slice[0].total_num);
-		ret = -EINVAL;
-		goto param_check;
+		goto unlock;
 	}
 
 	dma = slice[slice_idx].dma;
@@ -156,17 +154,21 @@ static long uacce_get_ss_dma(struct uacce_queue *q, void __user *arg)
 		dev_err(&uacce->dev, "%luth ss region[size = %lu] no exist, range[[0](size = %llu) -> [%u](size = %llu)]\n",
 			slice_idx, size, slice[0].size, max_idx, slice[max_idx].size);
 		ret = -ENODEV;
-		goto param_check;
+		goto unlock;
 	}
 	dma = dma | ((size >> UACCE_GRAN_SHIFT) & UACCE_GRAN_NUM_MASK);
+	ret = (long)(slice[0].total_num - 1 - slice_idx);
+	mutex_unlock(&q->mutex);
+
 	if (copy_to_user(arg, &dma, sizeof(unsigned long))) {
 		dev_err(&uacce->dev, "copy_to_user fail!\n");
-		goto param_check;
+		return -EFAULT;
 	}
 
-	ret = (long)(slice[0].total_num - 1 - slice_idx);
+	return ret;
 
-param_check:
+unlock:
+	mutex_unlock(&q->mutex);
 	return ret;
 }
 
