@@ -29,7 +29,6 @@
 #include <asm/kvm_mmu.h>
 #include <asm/kvm_nested.h>
 #include <asm/virt.h>
-#include <asm/kvm_tmi.h>
 
 /* Maximum phys_shift supported for any VM on this host */
 static u32 __ro_after_init kvm_ipa_limit;
@@ -140,12 +139,6 @@ int kvm_arm_vcpu_finalize(struct kvm_vcpu *vcpu, int feature)
 			return -EPERM;
 
 		return kvm_vcpu_finalize_sve(vcpu);
-#ifdef CONFIG_HISI_VIRTCCA_HOST
-	case KVM_ARM_VCPU_TEC:
-		if (!kvm_is_virtcca_cvm(vcpu->kvm))
-			return -EINVAL;
-		return kvm_finalize_vcpu_tec(vcpu);
-#endif
 	}
 
 	return -EINVAL;
@@ -170,10 +163,6 @@ void kvm_arm_vcpu_destroy(struct kvm_vcpu *vcpu)
 		kvm_unshare_hyp(sve_state, sve_state + vcpu_sve_state_size(vcpu));
 	kfree(sve_state);
 	kfree(vcpu->arch.ccsidr);
-#ifdef CONFIG_HISI_VIRTCCA_HOST
-	if (vcpu_is_tec(vcpu))
-		kvm_destroy_tec(vcpu);
-#endif
 
 #ifdef CONFIG_ARM64_HDBSS
 	if (vcpu->arch.hdbss.br_el2) {
