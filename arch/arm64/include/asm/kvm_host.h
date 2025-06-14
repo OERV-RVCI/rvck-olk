@@ -27,6 +27,7 @@
 #include <asm/fpsimd.h>
 #include <asm/kvm.h>
 #include <asm/kvm_asm.h>
+#include <asm/kvm_rme.h>
 #ifdef CONFIG_HISI_VIRTCCA_HOST
 #include <asm/kvm_tmm.h>
 #endif
@@ -285,6 +286,8 @@ struct kvm_arch {
 	 */
 	struct kvm_protected_vm pkvm;
 
+	bool is_realm;
+	struct realm realm;
 #ifdef CONFIG_KVM_HISI_VIRT
 	spinlock_t sched_lock;
 	cpumask_var_t sched_cpus;	/* Union of all vcpu's cpus_ptr */
