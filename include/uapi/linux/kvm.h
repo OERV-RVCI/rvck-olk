@@ -1206,6 +1206,7 @@ struct kvm_ppc_resize_hpt {
 #define KVM_CAP_COUNTER_OFFSET 227
 #define KVM_CAP_ARM_EAGER_SPLIT_CHUNK_SIZE 228
 #define KVM_CAP_ARM_SUPPORTED_BLOCK_SIZES 229
+#define KVM_CAP_ARM_RME 240
 
 #define KVM_CAP_SEV_ES_GHCB 500
 #define KVM_CAP_HYGON_COCO_EXT 501
@@ -2437,5 +2438,14 @@ struct kvm_csv3_handle_memory {
 
 /* get tmi version */
 #define KVM_GET_TMI_VERSION	_IOR(KVMIO, 0xd2, u64)
+
+/* Available with KVM_CAP_ARM_RME, only for VMs with KVM_VM_TYPE_ARM_REALM  */
+struct kvm_arm_rmm_psci_complete {
+	__u64 target_mpidr;
+	__u32 psci_status;
+	__u32 padding[3];
+};
+
+#define KVM_ARM_VCPU_RMM_PSCI_COMPLETE	_IOW(KVMIO, 0xd6, struct kvm_arm_rmm_psci_complete)
 
 #endif /* __LINUX_KVM_H */
