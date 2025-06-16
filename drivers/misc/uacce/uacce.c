@@ -17,10 +17,6 @@ static const struct class uacce_class = {
 	.name = UACCE_NAME,
 };
 
-static struct uacce_qfile_region noiommu_ss_default_qfr = {
-	.type	=	UACCE_QFRT_SS,
-};
-
 /*
  * If the parent driver or the device disappears, the queue state is invalid and
  * ops are not usable anymore.
@@ -67,52 +63,6 @@ static void uacce_put_queue(struct uacce_queue *q)
 
 	if (uacce->ops->put_queue)
 		uacce->ops->put_queue(q);
-}
-
-static long uacce_cmd_share_qfr(struct uacce_queue *src, int fd)
-{
-	struct device *dev = &src->uacce->dev;
-	struct file *filep = fget(fd);
-	struct uacce_queue *tgt;
-	int ret = -EINVAL;
-
-	if (!filep) {
-		dev_err(dev, "filep is NULL!\n");
-		return ret;
-	}
-
-	if (filep->f_op != &uacce_fops) {
-		dev_err(dev, "file ops mismatch!\n");
-		goto out_with_fd;
-	}
-
-	tgt = filep->private_data;
-	if (!tgt) {
-		dev_err(dev, "target queue is not exist!\n");
-		goto out_with_fd;
-	}
-
-	mutex_lock(&src->mutex);
-	if (tgt->state == UACCE_Q_ZOMBIE || src->state == UACCE_Q_ZOMBIE) {
-		dev_err(dev, "target or source queue is zombie!\n");
-		goto out_with_fd;
-	}
-
-	if (!src->qfrs[UACCE_QFRT_SS] || tgt->qfrs[UACCE_QFRT_SS]) {
-		dev_err(dev, "src q's SS not exists or target q's SS exists!\n");
-		goto out_with_fd;
-	}
-
-	/* In No-IOMMU mode, taget queue uses default SS qfr */
-	tgt->qfrs[UACCE_QFRT_SS] = &noiommu_ss_default_qfr;
-
-	ret = 0;
-
-out_with_fd:
-	mutex_unlock(&src->mutex);
-	fput(filep);
-
-	return ret;
 }
 
 static long uacce_get_ss_dma(struct uacce_queue *q, void __user *arg)
@@ -232,9 +182,6 @@ static long uacce_fops_unl_ioctl(struct file *filep,
 	case UACCE_CMD_PUT_Q:
 		ret = uacce_stop_queue(q);
 		break;
-	case UACCE_CMD_SHARE_SVAS:
-		ret = uacce_cmd_share_qfr(q, (int)arg);
-		break;
 	case UACCE_CMD_GET_SS_DMA:
 		ret = uacce_get_ss_dma(q, (void __user *)(uintptr_t)arg);
 		break;
@@ -352,7 +299,7 @@ static int uacce_fops_release(struct inode *inode, struct file *filep)
 	uacce_put_queue(q);
 	uacce_unbind_queue(q);
 	ss = q->qfrs[UACCE_QFRT_SS];
-	if (ss && ss != &noiommu_ss_default_qfr) {
+	if (ss) {
 		uacce_free_dma_buffers(q);
 		kfree(ss);
 	}
@@ -392,8 +339,7 @@ static void uacce_vma_close(struct vm_area_struct *vma)
 		q->qfrs[vma->vm_pgoff] = NULL;
 		mutex_unlock(&q->mutex);
 		mutex_unlock(&uacce->mutex);
-		if (qfr != &noiommu_ss_default_qfr)
-			kfree(qfr);
+		kfree(qfr);
 	} else if (vma->vm_pgoff != UACCE_QFRT_SS) {
 		mutex_lock(&q->mutex);
 		qfr = q->qfrs[vma->vm_pgoff];
@@ -1063,7 +1009,7 @@ void uacce_remove(struct uacce_device *uacce)
 		 * access the mmaped area while parent device is already removed
 		 */
 		unmap_mapping_range(q->mapping, 0, 0, 1);
-		if (ss && ss != &noiommu_ss_default_qfr)
+		if (ss)
 			uacce_free_dma_buffers(q);
 	}
 
