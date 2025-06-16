@@ -997,11 +997,6 @@ static int do_dentry_open(struct file *f,
 		}
 	}
 
-	/*
-	 * Once we return a file with FMODE_OPENED, __fput() will call
-	 * fsnotify_close(), so we need fsnotify_open() here for symmetry.
-	 */
-	fsnotify_open(f);
 	return 0;
 
 cleanup_all:
@@ -1078,8 +1073,19 @@ EXPORT_SYMBOL(file_path);
  */
 int vfs_open(const struct path *path, struct file *file)
 {
+	int ret;
+
 	file->f_path = *path;
-	return do_dentry_open(file, d_backing_inode(path->dentry), NULL);
+	ret = do_dentry_open(file, d_backing_inode(path->dentry), NULL);
+	if (!ret) {
+		/*
+		 * Once we return a file with FMODE_OPENED, __fput() will call
+		 * fsnotify_close(), so we need fsnotify_open() here for
+		 * symmetry.
+		 */
+		fsnotify_open(file);
+	}
+	return ret;
 }
 
 struct file *dentry_open(const struct path *path, int flags,
@@ -1171,8 +1177,10 @@ struct file *kernel_file_open(const struct path *path, int flags,
 	error = do_dentry_open(f, inode, NULL);
 	if (error) {
 		fput(f);
-		f = ERR_PTR(error);
+		return ERR_PTR(error);
 	}
+
+	fsnotify_open(f);
 	return f;
 }
 EXPORT_SYMBOL_GPL(kernel_file_open);
