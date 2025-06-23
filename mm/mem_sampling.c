@@ -278,6 +278,9 @@ static void numa_balancing_mem_sampling_cb_unregister(void)
 }
 static void set_numabalancing_mem_sampling_state(bool enabled)
 {
+	if (!mem_sampling_ops.sampling_start || !mm_spe_enabled())
+		return;
+
 	if (enabled) {
 		numa_balancing_mem_sampling_cb_register();
 		static_branch_enable(&sched_numabalancing_mem_sampling);
@@ -341,6 +344,9 @@ static void damon_mem_sampling_record_cb_unregister(void)
 
 static void set_damon_mem_sampling_state(bool enabled)
 {
+	if (!mem_sampling_ops.sampling_start || !mm_spe_enabled())
+		return;
+
 	if (enabled) {
 		damon_mem_sampling_record_cb_register();
 		static_branch_enable(&mm_damon_mem_sampling);
@@ -411,14 +417,15 @@ static void __set_mem_sampling_state(bool enabled)
 
 void set_mem_sampling_state(bool enabled)
 {
+	if (!mem_sampling_ops.sampling_start || !mm_spe_enabled())
+		return;
+
 	if (mem_sampling_saved_state != MEM_SAMPLING_STATE_EMPTY) {
 		mem_sampling_saved_state = enabled ? MEM_SAMPLING_STATE_ENABLE :
 					    MEM_SAMPLING_STATE_DISABLE;
 		return;
 	}
 
-	if (!mem_sampling_ops.sampling_start || !mm_spe_enabled())
-		return;
 	if (enabled)
 		sysctl_mem_sampling_mode = MEM_SAMPLING_NORMAL;
 	else
