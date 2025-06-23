@@ -3257,7 +3257,9 @@ static const struct ethtool_ops rnp500_ethtool_ops = {
 	.get_ethtool_stats = rnp500_get_ethtool_stats,
 	.get_coalesce = rnpgbe_get_coalesce,
 	.set_coalesce = rnpgbe_set_coalesce,
-	.supported_coalesce_params = ETHTOOL_COALESCE_USECS,
+	.supported_coalesce_params = ETHTOOL_COALESCE_USECS |
+				     ETHTOOL_COALESCE_MAX_FRAMES_IRQ |
+				     ETHTOOL_COALESCE_MAX_FRAMES,
 	.get_rxnfc = rnpgbe_get_rxnfc,
 	.set_rxnfc = rnpgbe_set_rxnfc,
 	.get_eee = rnpgbe_get_eee,
