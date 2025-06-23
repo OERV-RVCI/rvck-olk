@@ -49,6 +49,7 @@ struct mem_sampling_record {
 	u64				context_id;
 	u64				boost_spe_addr[8];
 	u64				rem_addr;
+	u16				boost_spe_idx;
 	u16				source;
 };
 
@@ -57,7 +58,7 @@ struct mem_sampling_ops_struct {
 	void (*sampling_stop)(void);
 	void (*sampling_continue)(void);
 	void (*sampling_decoding)(void);
-	struct mm_spe_buf* (*mm_spe_getbuf_addr)(void);
+	void* (*mm_spe_getbuf_addr)(void);
 	int (*mm_spe_getnum_record)(void);
 
 };
@@ -83,7 +84,7 @@ void mm_spe_stop(void);
 void mm_spe_continue(void);
 void mm_spe_decoding(void);
 int mm_spe_getnum_record(void);
-struct mm_spe_buf *mm_spe_getbuf_addr(void);
+void *mm_spe_getbuf_addr(void);
 int mm_spe_enabled(void);
 void arm_spe_set_probe_status(int status);
 #else
@@ -93,7 +94,7 @@ static inline void mm_spe_decoding(void) { }
 static inline void arm_spe_set_probe_status(int status) { }
 static inline int mm_spe_start(void) { return 0; }
 static inline int mm_spe_getnum_record(void) { return 0; }
-static inline struct mm_spe_buf *mm_spe_getbuf_addr(void) { return NULL; }
+static inline void *mm_spe_getbuf_addr(void) { return NULL; }
 static inline int mm_spe_enabled(void) { return 0; }
 #endif /* CONFIG_ARM_SPE_MEM_SAMPLING */
 
