@@ -523,6 +523,27 @@ TRACE_EVENT(mm_mem_sampling_access_record,
 		__entry->cpuid, __entry->pid)
 );
 #endif /* CONFIG_NUMABALANCING_MEM_SAMPLING */
+
+#ifdef CONFIG_DAMON_MEM_SAMPLING
+TRACE_EVENT(mm_mem_sampling_damon_record,
+
+	TP_PROTO(u64 vaddr, int pid),
+
+	TP_ARGS(vaddr, pid),
+
+	TP_STRUCT__entry(
+		__field(u64, vaddr)
+		__field(int, pid)
+	),
+
+	TP_fast_assign(
+		__entry->vaddr = vaddr;
+		__entry->pid = pid;
+	),
+
+	TP_printk("vaddr=%llx pid=%d", __entry->vaddr, __entry->pid)
+);
+#endif /* CONFIG_DAMON_MEM_SAMPLING */
 #endif /* _TRACE_KMEM_H */
 
 /* This part must be outside protection */
