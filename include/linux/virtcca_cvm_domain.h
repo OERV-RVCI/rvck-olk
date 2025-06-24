@@ -14,7 +14,7 @@ static inline bool virtcca_cvm_domain(void)
 	return is_virtcca_cvm_world();
 }
 
-extern void enable_swiotlb_for_cvm_dev(struct device *dev, bool enable);
+void enable_swiotlb_for_cvm_dev(struct device *dev, bool enable);
 
 #else
 static inline bool virtcca_cvm_domain(void)
