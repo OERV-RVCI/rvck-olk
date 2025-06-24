@@ -14,7 +14,7 @@ static inline bool virtcca_cvm_domain(void)
 	return is_virtcca_cvm_world();
 }
 
-void enable_swiotlb_for_cvm_dev(struct device *dev, bool enable);
+extern void enable_swiotlb_for_cvm_dev(struct device *dev, bool enable);
 
 #else
 static inline bool virtcca_cvm_domain(void)
@@ -23,6 +23,16 @@ static inline bool virtcca_cvm_domain(void)
 }
 
 static inline void enable_swiotlb_for_cvm_dev(struct device *dev, bool enable) {}
+
+static inline void virtcca_its_init(void) {}
+
+static inline struct page *virtcca_its_alloc_shared_pages_node(int node, gfp_t gfp,
+			unsigned int order)
+{
+	return NULL;
+}
+
+static inline void virtcca_its_free_shared_pages(void *addr, int order) {}
 
 #endif
 

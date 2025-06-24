@@ -32,6 +32,7 @@
 #include <linux/set_memory.h>
 #include <linux/slab.h>
 #include <linux/syscore_ops.h>
+#include <linux/virtcca_cvm_domain.h>
 
 #include <linux/irqchip.h>
 #include <linux/irqchip/arm-gic-v3.h>
@@ -393,6 +394,9 @@ static struct page *its_alloc_pages_node(int node, gfp_t gfp,
 	struct page *page;
 	int ret = 0;
 
+	if (virtcca_cvm_domain())
+		return virtcca_its_alloc_shared_pages_node(node, gfp, order);
+
 	page = alloc_pages_node(node, gfp, order);
 
 	if (!page)
@@ -418,6 +422,11 @@ static struct page *its_alloc_pages(gfp_t gfp, unsigned int order)
 
 static void its_free_pages(void *addr, unsigned int order)
 {
+	if (virtcca_cvm_domain()) {
+		virtcca_its_free_shared_pages(addr, order);
+		return;
+	}
+
 	/*
 	 * If the memory cannot be encrypted again then we must leak the pages.
 	 * set_memory_encrypted() will already have WARNed.
@@ -6226,6 +6235,8 @@ int __init its_init(struct fwnode_handle *handle, struct rdists *rdists,
 	bool has_vtimer_irqbypass = false;
 #endif
 	int err;
+
+	virtcca_its_init();
 
 	itt_pool = gen_pool_create(get_order(ITS_ITT_ALIGN), -1);
 	if (!itt_pool)
