@@ -234,6 +234,9 @@ reclaimer(void *ptr)
 	u32 nsmstate;
 	struct net *net = host->net;
 
+#if IS_ENABLED(CONFIG_ENFS)
+	host->h_last_reclaim_time = ktime_to_ms(ktime_get());
+#endif
 	req = kmalloc(sizeof(*req), GFP_KERNEL);
 	if (!req)
 		return 0;

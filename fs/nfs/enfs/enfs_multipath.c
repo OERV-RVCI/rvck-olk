@@ -1003,6 +1003,7 @@ static void enfs_create_xprt_ctx(struct rpc_xprt *xprt)
 
 static void enfs_set_transport(struct rpc_task *task, struct rpc_clnt *clnt)
 {
+#ifdef ENFS_SUPPORT_NFSV4
 	if (enfs_is_singularr_route(clnt) && clnt->cl_vers == 4) {
 		failover_reselect_transport(task, clnt);
 		return;
@@ -1010,8 +1011,14 @@ static void enfs_set_transport(struct rpc_task *task, struct rpc_clnt *clnt)
 
 	if (enfs_is_rr_route(clnt) && clnt->cl_vers == 3) {
 		shard_set_transport(task, clnt);
-		return;
 	}
+#else
+	if (clnt->cl_vers == 4)
+		return;
+
+	if (enfs_is_rr_route(clnt))
+		shard_set_transport(task, clnt);
+#endif
 }
 
 static void enfs_inc_queuelen(struct rpc_xprt *xprt)

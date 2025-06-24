@@ -62,7 +62,7 @@ struct enfs_xprt_context {
 	uint32_t cpuId;
 	u32 protocol; // TCP or UDP or RDMA
 	int64_t lastTime;
-	u32 reverse[4];
+	u32 reverse[40];
 };
 
 static inline bool enfs_is_main_xprt(struct rpc_xprt *xprt)

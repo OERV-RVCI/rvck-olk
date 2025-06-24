@@ -828,62 +828,6 @@ static int sockaddr_ip_to_str(struct sockaddr *addr, char *buf, int len)
 	return 1;
 }
 
-static void update_server_enfs_capability(struct rpc_clnt *clnt, int flag)
-{
-	int ret = 0;
-	struct nfs_net *nn = NULL;
-	struct net *net;
-	struct nfs_server *pos = NULL;
-	char remoteip[64] = { "*" };
-	char serverip[64] = { "*" };
-
-	rcu_read_lock();
-	for_each_net_rcu(net) {
-		nn = net_generic(net, nfs_net_id);
-		if (nn == NULL)
-			continue;
-
-		spin_lock(&nn->nfs_client_lock);
-		list_for_each_entry(pos, &nn->nfs_volume_list, master_link) {
-			if (!pos->nlm_host)
-				continue;
-
-			if (!pos->client)
-				continue;
-
-			if (pos->nlm_host == NULL)
-				continue;
-
-			ret = sockaddr_ip_to_str(
-				(struct sockaddr *)&clnt->cl_xprt->addr,
-				remoteip, sizeof(remoteip));
-			if (ret != 0) {
-				enfs_log_error("remoteip to str err:%d.\n",
-						   ret);
-				continue;
-			}
-
-			ret = sockaddr_ip_to_str(
-				(struct sockaddr *)&pos->client->cl_xprt->addr,
-				serverip, sizeof(serverip));
-			if (ret != 0) {
-				enfs_log_error("remoteip to str err:%d.\n",
-						   ret);
-				continue;
-			}
-
-			if (!strcmp(remoteip, serverip)) {
-				pos->nlm_host->enfs_flag |= flag;
-				pos->nlm_host->enfs_flag &= flag;
-			}
-		}
-		spin_unlock(&nn->nfs_client_lock);
-		break;
-	}
-	rcu_read_unlock();
-
-}
-
 static int query_and_update_shard(struct rpc_clnt *clnt, struct enfs_file_uuid *file_uuid,
 				  struct shard_work *work)
 {
@@ -901,18 +845,11 @@ static int query_and_update_shard(struct rpc_clnt *clnt, struct enfs_file_uuid *
 	kfree(fsshard_view);
 
 	ret = dorado_query_lsId(clnt, &ls_view);
-	if (ret == -EOPNOTSUPP || ret == -ENFS_NOT_SUPPORT) {
-		update_server_enfs_capability(clnt,
-						  ENFS_CAPABILITY_LSID_NOTSUPPORT);
-		return 0;
-	}
-
 	if (ret) {
 		enfs_log_error("update lsId err:%d.\n", ret);
 		return ret;
 	}
 
-	update_server_enfs_capability(clnt, ENFS_CAPABILITY_LSID_SUPPORT);
 	enfs_update_lsinfo(GET_DEVID_FROM_UUID(file_uuid), ls_view, &flag);
 	kfree(ls_view);
 
@@ -1676,37 +1613,33 @@ static int EnfsChooseNewNlmXprt(struct rpc_clnt *clnt, struct rpc_xprt *xprt,
 	return -1;
 }
 
-static int TraverseNlmXprt(struct rpc_clnt *clnt, struct rpc_xprt *xprt,
-			   void *data)
+static int enfs_traverse_nlm_xprt(struct nfs_server *server)
 {
 	char remoteip[IP_ADDRESS_LEN_MAX] = { "*" };
-	struct nfs_server *server = (struct nfs_server *)data;
+	struct rpc_xprt *xprt = server->nlm_host->h_rpcclnt->cl_xprt;
 	struct enfs_xprt_context *ctx = NULL;
 
-	if (pm_get_path_state(xprt) == PM_STATE_FAULT) {
-		rpc_clnt_iterate_for_each_xprt(server->nfs_client->cl_rpcclient,
-						   EnfsChooseNewNlmXprt,
-						   (void *)xprt);
+	server->nlm_host->enfs_flag |= ENFS_NEED_REBUILD_NLM_XPRT;
+	rpc_clnt_iterate_for_each_xprt(server->nfs_client->cl_rpcclient,
+						EnfsChooseNewNlmXprt,
+						(void *)xprt);
 
-		sockaddr_ip_to_str((struct sockaddr *)&xprt->addr, remoteip,
-				   sizeof(remoteip));
-		strscpy(server->nlm_host->h_name, remoteip, IP_ADDRESS_LEN_MAX);
-		strscpy(server->nlm_host->h_addrbuf, remoteip, NSM_ADDRBUF);
+	sockaddr_ip_to_str((struct sockaddr *)&xprt->addr, remoteip,
+				sizeof(remoteip));
+	strscpy(server->nlm_host->h_name, remoteip, IP_ADDRESS_LEN_MAX);
+	strscpy(server->nlm_host->h_addrbuf, remoteip, NSM_ADDRBUF);
 
-		ctx =
-			(struct enfs_xprt_context *)xprt_get_reserve_context(xprt);
-		if (ctx == NULL) {
-			enfs_log_error
-				("The xprt multipath ctx is not valid.\n");
-			return 0;
-		}
-		memcpy((struct sockaddr *)&server->nlm_host->h_addr,
-			   (struct sockaddr *)&xprt->addr, sizeof(xprt->addr));
-		memcpy((struct sockaddr *)&server->nlm_host->h_srcaddr,
-			   (struct sockaddr *)&ctx->srcaddr, sizeof(ctx->srcaddr));
-
-		return -1;
+	ctx =
+		(struct enfs_xprt_context *)xprt_get_reserve_context(xprt);
+	if (ctx == NULL) {
+		enfs_log_error
+			("The xprt multipath ctx is not valid.\n");
+		return 0;
 	}
+	memcpy((struct sockaddr *)&server->nlm_host->h_addr,
+			(struct sockaddr *)&xprt->addr, sizeof(xprt->addr));
+	memcpy((struct sockaddr *)&server->nlm_host->h_srcaddr,
+			(struct sockaddr *)&ctx->srcaddr, sizeof(ctx->srcaddr));
 
 	return 0;
 }
@@ -1756,11 +1689,20 @@ static int enfs_recovery_nlm_lock(struct rpc_clnt *clnt)
 			}
 
 			if (!strcmp(remoteip, serverip)) {
-				rpc_clnt_iterate_for_each_xprt(pos->nlm_host->h_rpcclnt,
-								   TraverseNlmXprt,
-								   (void *)pos);
+				enfs_traverse_nlm_xprt(pos);
+				if (!list_empty(&pos->nlm_host->h_lockowners)) {
+					if (pos->nlm_host->h_last_reclaim_time != 0 &&
+					    (ktime_to_ms(ktime_get()) -
+						     pos->nlm_host
+							     ->h_last_reclaim_time <
+					     (SHARD_VIEW_UPDATE_INTERVAL_UNDER_LOCK *
+					      SECOND_TO_MILLISECOND)))
+						continue;
 
-				nlmclnt_recovery(pos->nlm_host);
+					enfs_log_info("reclaiming lock:%s.\n",
+						      serverip);
+					nlmclnt_recovery(pos->nlm_host);
+				}
 			}
 		}
 		spin_unlock(&nn->nfs_client_lock);
