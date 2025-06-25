@@ -2802,7 +2802,7 @@ static int hns_roce_v2_get_reset_page(struct hns_roce_dev *hr_dev)
 	return 0;
 
 err_with_vmap:
-	put_page(hr_dev->reset_page);
+	__free_page(hr_dev->reset_page);
 	return -ENOMEM;
 }
 
@@ -2810,7 +2810,7 @@ static void hns_roce_v2_put_reset_page(struct hns_roce_dev *hr_dev)
 {
 	vunmap(hr_dev->reset_kaddr);
 	hr_dev->reset_kaddr = NULL;
-	put_page(hr_dev->reset_page);
+	__free_page(hr_dev->reset_page);
 	hr_dev->reset_page = NULL;
 }
 
