@@ -5036,13 +5036,6 @@ static void arm_smmu_device_iidr_probe(struct arm_smmu_device *smmu)
 		}
 		break;
 	}
-
-#ifdef CONFIG_HISILICON_ERRATUM_162100602
-	reg = readl_relaxed(smmu->base + ARM_SMMU_IIDR);
-	if (FIELD_GET(IIDR_VARIANT, reg) == 0x3 &&
-	    FIELD_GET(IIDR_REVISION, reg) == 0x2)
-		smmu->options |= ARM_SMMU_OPT_SYNC_MAP;
-#endif
 }
 
 #ifdef CONFIG_HISILICON_ERRATUM_162100602
@@ -5052,8 +5045,6 @@ static void hisi_smmu_check_errata(struct arm_smmu_device *smmu)
 
 	if (!(smmu->options & ARM_SMMU_OPT_SYNC_MAP))
 		return;
-
-	smmu->options |= ARM_SMMU_OPT_SYNC_MAP;
 
 	reg = readl_relaxed(smmu->base + ARM_SMMU_USER_CFG1);
 	reg = reg & GENMASK(15, 0);
