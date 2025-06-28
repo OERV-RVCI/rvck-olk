@@ -405,6 +405,7 @@
 		dma-noncoherent;
 		ranges;
 
+
 		clint0: clint@e4000000 {
 			compatible = "riscv,clint0";
 			interrupts-extended = <
