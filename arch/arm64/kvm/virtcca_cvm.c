@@ -759,6 +759,42 @@ static int tmi_check_version(void)
 	return 0;
 }
 
+struct cpumask cvm_wfx_no_trap_mask;
+static DEFINE_SPINLOCK(cvm_wfx_config_lock);
+
+static ssize_t cvm_wfx_trap_config_store(struct kobject *kobj,
+								struct kobj_attribute *attr,
+								const char *buf, size_t count)
+{
+	spin_lock(&cvm_wfx_config_lock);
+	if (cpumask_parse(buf, &cvm_wfx_no_trap_mask) < 0)
+		return -EINVAL;
+	spin_unlock(&cvm_wfx_config_lock);
+
+	return count;
+}
+
+static ssize_t cvm_wfx_trap_config_show(struct kobject *kobj,
+								struct kobj_attribute *attr,
+								char *buf)
+{
+	int ret;
+
+	ret = scnprintf(buf, PAGE_SIZE, "%*pb\n", cpumask_pr_args(&cvm_wfx_no_trap_mask));
+
+	return ret;
+}
+
+static struct kobj_attribute cvm_wfx_trap_config_attr = __ATTR_RW(cvm_wfx_trap_config);
+
+static int __init cvm_wfx_trap_config_init(void)
+{
+	cpumask_clear(&cvm_wfx_no_trap_mask);
+
+	return sysfs_create_file(kernel_kobj, &cvm_wfx_trap_config_attr.attr);
+}
+late_initcall(cvm_wfx_trap_config_init);
+
 int kvm_tec_enter(struct kvm_vcpu *vcpu)
 {
 	struct tmi_tec_run *run;
@@ -770,12 +806,14 @@ int kvm_tec_enter(struct kvm_vcpu *vcpu)
 		return -EINVAL;
 
 	/* set/clear TWI TWE flags */
-	if (vcpu->arch.hcr_el2 & HCR_TWI)
+	if ((vcpu->arch.hcr_el2 & HCR_TWI) &&
+		!cpumask_test_cpu(vcpu->vcpu_id, &cvm_wfx_no_trap_mask))
 		run->enter.flags |= TEC_ENTRY_FLAG_TRAP_WFI;
 	else
 		run->enter.flags &= ~TEC_ENTRY_FLAG_TRAP_WFI;
 
-	if (vcpu->arch.hcr_el2 & HCR_TWE)
+	if ((vcpu->arch.hcr_el2 & HCR_TWE) &&
+		!cpumask_test_cpu(vcpu->vcpu_id, &cvm_wfx_no_trap_mask))
 		run->enter.flags |= TEC_ENTRY_FLAG_TRAP_WFE;
 	else
 		run->enter.flags &= ~TEC_ENTRY_FLAG_TRAP_WFE;
