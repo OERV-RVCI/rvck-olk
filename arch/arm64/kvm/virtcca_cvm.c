@@ -759,7 +759,7 @@ static int tmi_check_version(void)
 	return 0;
 }
 
-struct cpumask cvm_wfx_no_trap_mask;
+static struct cpumask cvm_wfx_no_trap_mask;
 static DEFINE_SPINLOCK(cvm_wfx_config_lock);
 
 static ssize_t cvm_wfx_trap_config_store(struct kobject *kobj,
