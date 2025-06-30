@@ -2,6 +2,8 @@
 #ifndef _ASM_X86_PARAVIRT_TYPES_H
 #define _ASM_X86_PARAVIRT_TYPES_H
 
+#include <linux/kabi.h>
+
 #ifndef __ASSEMBLY__
 /* These all sit in the .parainstructions section to tell us what to patch. */
 struct paravirt_patch_site {
@@ -131,8 +133,8 @@ struct pv_irq_ops {
 	struct paravirt_callee_save irq_disable;
 	struct paravirt_callee_save irq_enable;
 #endif
-	void (*safe_halt)(void);
-	void (*halt)(void);
+	KABI_EXTEND(void (*safe_halt)(void))
+	KABI_EXTEND(void (*halt)(void))
 } __no_randomize_layout;
 
 struct pv_mmu_ops {
@@ -241,9 +243,10 @@ struct pv_lock_ops {
  * what to patch. */
 struct paravirt_patch_template {
 	struct pv_cpu_ops	cpu;
-	struct pv_irq_ops	irq;
+	KABI_BROKEN_REMOVE(struct pv_irq_ops irq)
 	struct pv_mmu_ops	mmu;
 	struct pv_lock_ops	lock;
+	KABI_EXTEND(struct pv_irq_ops irq)
 } __no_randomize_layout;
 
 extern struct pv_info pv_info;
