@@ -323,7 +323,7 @@ extern unsigned int kobjsize(const void *objp);
 #define VM_MERGEABLE	0x80000000	/* KSM may merge identical pages */
 
 #ifdef CONFIG_USERSWAP
-# define VM_USWAP_BIT	62
+# define VM_USWAP_BIT	61
 #define VM_USWAP	BIT(VM_USWAP_BIT)
 #else /* !CONFIG_USERSWAP */
 #define VM_USWAP	VM_NONE
