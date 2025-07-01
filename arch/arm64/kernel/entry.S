@@ -238,14 +238,14 @@ alternative_cb_end
 	 * Ensure MDSCR_EL1.SS is clear, since we can unmask debug exceptions
 	 * when scheduling.
 	 */
-	.if \fast_mode == std
 	ldr	x19, [tsk, #TSK_TI_FLAGS]
+	.if \fast_mode == std
 	disable_step_tsk x19, x20
 	.endif
 
 	/* Check for asynchronous tag check faults in user space */
-	.if \fast_mode == std
 	ldr	x0, [tsk, THREAD_SCTLR_USER]
+	.if \fast_mode == std
 	check_mte_async_tcf x22, x23, x0
 	.endif
 
@@ -288,11 +288,11 @@ alternative_if ARM64_MTE
 	isb
 	b	1f
 alternative_else_nop_endif
+	.endif
 alternative_if ARM64_HAS_ADDRESS_AUTH
 	isb
 alternative_else_nop_endif
 1:
-	.endif
 
 	scs_load_current
 	.else
@@ -409,8 +409,8 @@ alternative_else_nop_endif
 	scs_save tsk
 
 	/* Ignore asynchronous tag check faults in the uaccess routines */
-	.if \fast_mode == std
 	ldr	x0, [tsk, THREAD_SCTLR_USER]
+	.if \fast_mode == std
 	clear_mte_async_tcf x0
 	.endif
 
