@@ -2506,9 +2506,7 @@ static void arm_smmu_tlb_inv_walk(unsigned long iova, size_t size,
 				  size_t granule, void *cookie)
 {
 #ifdef CONFIG_HISILICON_ERRATUM_162100602
-	struct arm_smmu_domain *smmu_domain = cookie;
-
-	if (!size && smmu_domain->smmu->options & ARM_SMMU_OPT_SYNC_BATCH) {
+	if (!size) {
 		arm_smmu_tlb_inv_range_domain(iova, granule, granule, true, cookie);
 		return;
 	}
@@ -2729,6 +2727,9 @@ static int arm_smmu_domain_finalise(struct arm_smmu_domain *smmu_domain,
 		pgtbl_cfg.quirks |= IO_PGTABLE_QUIRK_ARM_BBML1;
 	else if (smmu->features & ARM_SMMU_FEAT_BBML2)
 		pgtbl_cfg.quirks |= IO_PGTABLE_QUIRK_ARM_BBML2;
+
+	if (smmu->options & ARM_SMMU_OPT_SYNC_BATCH)
+		pgtbl_cfg.quirks |= IO_PGTABLE_QUIRK_HISI_ERRATA;
 
 	pgtbl_ops = alloc_io_pgtable_ops(fmt, &pgtbl_cfg, smmu_domain);
 	if (!pgtbl_ops)
@@ -5035,13 +5036,6 @@ static void arm_smmu_device_iidr_probe(struct arm_smmu_device *smmu)
 		}
 		break;
 	}
-
-#ifdef CONFIG_HISILICON_ERRATUM_162100602
-	reg = readl_relaxed(smmu->base + ARM_SMMU_IIDR);
-	if (FIELD_GET(IIDR_VARIANT, reg) == 0x3 &&
-	    FIELD_GET(IIDR_REVISION, reg) == 0x2)
-		smmu->options |= ARM_SMMU_OPT_SYNC_MAP;
-#endif
 }
 
 #ifdef CONFIG_HISILICON_ERRATUM_162100602
@@ -5051,8 +5045,6 @@ static void hisi_smmu_check_errata(struct arm_smmu_device *smmu)
 
 	if (!(smmu->options & ARM_SMMU_OPT_SYNC_MAP))
 		return;
-
-	smmu->options |= ARM_SMMU_OPT_SYNC_MAP;
 
 	reg = readl_relaxed(smmu->base + ARM_SMMU_USER_CFG1);
 	reg = reg & GENMASK(15, 0);
