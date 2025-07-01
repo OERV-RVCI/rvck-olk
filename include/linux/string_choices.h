@@ -42,6 +42,11 @@ static inline const char *str_yes_no(bool v)
 	return v ? "yes" : "no";
 }
 
+static inline const char *str_up_down(bool v)
+{
+	return v ? "up" : "down";
+}
+
 static inline const char *str_true_false(bool v)
 {
 	return v ? "true" : "false";
