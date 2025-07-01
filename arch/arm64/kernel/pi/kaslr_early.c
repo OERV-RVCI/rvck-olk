@@ -32,12 +32,35 @@ static char *__strstr(const char *s1, const char *s2)
 	}
 	return NULL;
 }
+
+/*
+ * nokaslr is valid start?
+ * Only the first cmd or characters before nokaslr is ' ' are valid.
+ */
+static bool nokaslr_valid_starts(const char *str, const char *cmdline)
+{
+	return str == cmdline || (str > cmdline && *(str - 1) == ' ');
+}
+
+/* nokaslr is valid end? */
+static bool nokaslr_valid_ends(const char *str)
+{
+	size_t len = strlen("nokaslr");
+	const char *after = str + len;
+
+	/* End with ' ', '\0' */
+	if (*after == ' ' || *after == '\0')
+		return true;
+
+	return false;
+}
+
 static bool cmdline_contains_nokaslr(const u8 *cmdline)
 {
 	const u8 *str;
 
 	str = __strstr(cmdline, "nokaslr");
-	return str == cmdline || (str > cmdline && *(str - 1) == ' ');
+	return nokaslr_valid_starts(str, cmdline) && nokaslr_valid_ends(str);
 }
 
 static bool is_kaslr_disabled_cmdline(void *fdt)
