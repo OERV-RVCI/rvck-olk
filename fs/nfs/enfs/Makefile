@@ -1,4 +1,4 @@
-obj-m   += enfs.o
+obj-$(CONFIG_ENFS) += enfs.o
 
 #EXTRA_CFLAGS += -I$(PWD)/..
 
