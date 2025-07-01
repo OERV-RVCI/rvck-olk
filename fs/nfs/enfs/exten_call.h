@@ -11,9 +11,6 @@
 #define MAX_GLOBAL_CTRL_NODE_NUM 2048
 #define INVALID_CPU_ID 2147483647
 
-#define ENFS_CAPABILITY_LSID_NOTSUPPORT 0x0001 /* lsversion query capability */
-#define ENFS_CAPABILITY_LSID_SUPPORT 0x0002 /* lsversion query capability */
-
 enum {
 	NFS3_GET_FSINFO_OP = 0,
 	NFS3_GET_LIF_VIEW_OP,

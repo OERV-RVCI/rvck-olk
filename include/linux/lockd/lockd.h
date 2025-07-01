@@ -37,6 +37,9 @@
  */
 #define LOCKD_DFLT_TIMEO	10
 
+#if IS_ENABLED(CONFIG_ENFS)
+#define ENFS_NEED_REBUILD_NLM_XPRT 0x0001
+#endif
 /*
  * Lockd host handle (used both by the client and server personality).
  */
@@ -74,7 +77,8 @@ struct nlm_host {
 	char			nodename[UNX_MAXNODENAME + 1];
 	const struct nlmclnt_operations	*h_nlmclnt_ops;	/* Callback ops for NLM users */
 #if IS_ENABLED(CONFIG_ENFS)
-	int enfs_flag; /* enfs falgs */
+	int enfs_flag; /* ENFS_NEED_REBUILD_NLM_XPRT etc */
+	long h_last_reclaim_time;
 #endif
 };
 
