@@ -114,8 +114,8 @@ void mm_spe_buffer_free(void)
 			continue;
 		mm_spe_percpu_buffer_free(cpu);
 	}
-	spe_probe_status -= 1;
 	set_mem_sampling_state(false);
+	spe_probe_status -= 1;
 }
 EXPORT_SYMBOL_GPL(mm_spe_buffer_free);
 
@@ -366,11 +366,11 @@ void mm_spe_decoding(void)
 	arm_spe_decode_buf(spe_buf->cur, spe_buf->size);
 }
 
-struct mm_spe_buf *mm_spe_getbuf_addr(void)
+void *mm_spe_getbuf_addr(void)
 {
 	struct mm_spe_buf *spe_buf = this_cpu_ptr(&per_cpu_spe_buf);
 
-	return spe_buf;
+	return spe_buf->record_base;
 }
 
 int mm_spe_getnum_record(void)
