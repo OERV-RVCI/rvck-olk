@@ -27,6 +27,13 @@ DEFINE_STATIC_KEY_FALSE(virtcca_cvm_is_available);
 #define UEFI_MAX_SIZE 0x8000000
 #define UEFI_DTB_START 0x40000000
 #define DTB_MAX_SIZE 0x200000
+
+bool is_virtcca_available(void)
+{
+	return static_key_enabled(&virtcca_cvm_is_available);
+}
+EXPORT_SYMBOL_GPL(is_virtcca_available);
+
 int kvm_enable_virtcca_cvm(struct kvm *kvm)
 {
 	if (!static_key_enabled(&virtcca_cvm_is_available))

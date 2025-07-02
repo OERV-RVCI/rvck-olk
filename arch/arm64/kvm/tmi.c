@@ -377,3 +377,13 @@ u64 tmi_kae_enable(u64 rd, u64 numa_set, u64 is_enable)
 	arm_smccc_1_1_smc(TMI_TMM_KAE_ENABLE, rd, numa_set, is_enable, &res);
 	return res.a1;
 }
+
+u64 tmi_tmm_info_show(u64 option, u64 tmm_info_addr)
+{
+	struct arm_smccc_res res;
+
+	arm_smccc_1_1_smc(TMI_TMM_INFO_SHOW, option, tmm_info_addr, &res);
+	return res.a1;
+}
+EXPORT_SYMBOL_GPL(tmi_tmm_info_show);
+
