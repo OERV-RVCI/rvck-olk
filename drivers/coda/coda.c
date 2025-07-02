@@ -71,9 +71,10 @@ static int get_root_bd(struct device *dev)
  * @devs: All child devices under input dev
  * @max_devs: Max num of devs
  * @ndev: Num of child devices
+ * @pdevs: All child pci_dev under input dev
  */
 static void get_child_devices_rec(struct pci_dev *dev, uint16_t *devs,
-	int max_devs, int *ndev)
+	int max_devs, int *ndev, struct pci_dev **pdevs)
 {
 	struct pci_bus *bus = dev->subordinate;
 
@@ -81,7 +82,7 @@ static void get_child_devices_rec(struct pci_dev *dev, uint16_t *devs,
 		struct pci_dev *child;
 
 		list_for_each_entry(child, &bus->devices, bus_list) {
-			get_child_devices_rec(child, devs, max_devs, ndev);
+			get_child_devices_rec(child, devs, max_devs, ndev, pdevs);
 		}
 	} else { /* dev is a regular device */
 		uint16_t bdf = pci_dev_id(dev);
@@ -97,6 +98,7 @@ static void get_child_devices_rec(struct pci_dev *dev, uint16_t *devs,
 			return;
 		}
 		devs[*ndev] = bdf;
+		pdevs[*ndev] = dev;
 		*ndev = *ndev + 1;
 	}
 }
@@ -105,12 +107,14 @@ static void get_child_devices_rec(struct pci_dev *dev, uint16_t *devs,
  * get_sibling_devices - Get all devices which share the same root_bd as dev
  * @dev: Device for which to get child devices
  * @devs: All child devices under input dev
+ * @pdevs: All child pci_dev under input dev
  * @max_devs: Max num of devs
  *
  * Returns:
  * %0 if get child devices failure
  */
-static int get_sibling_devices(struct device *dev, uint16_t *devs, int max_devs)
+static int get_sibling_devices(struct device *dev, uint16_t *devs,
+							   struct pci_dev **pdevs, int max_devs)
 {
 	struct pci_dev *pdev;
 	int ndev = 0;
@@ -129,6 +133,7 @@ static int get_sibling_devices(struct device *dev, uint16_t *devs, int max_devs)
 	 */
 	if (pdev->is_virtfn) {
 		devs[ndev] = pci_dev_id(pdev);
+		pdevs[ndev] = pdev;
 		ndev = ndev + 1;
 		pdev = pci_physfn(pdev);
 	}
@@ -136,7 +141,7 @@ static int get_sibling_devices(struct device *dev, uint16_t *devs, int max_devs)
 	while (!pci_is_root_bus(pdev->bus))
 		pdev = pci_upstream_bridge(pdev);
 
-	get_child_devices_rec(pdev, devs, max_devs, &ndev);
+	get_child_devices_rec(pdev, devs, max_devs, &ndev, pdevs);
 	return ndev;
 }
 
@@ -800,18 +805,20 @@ static bool virtcca_check_dev_is_assigned_to_nvm(struct tmi_dev_delegate_params 
  * virtcca_get_all_cc_dev_info - Retrieve all devices under the root port
  * @dev: CC device
  * @params: Delegate device parameters
+ * @pdevs: CC struct pci_dev pointers
  *
  * Returns:
  * %0 if get all devices under the root port successful
  * %-EINVAL if the total number of devices under the root port exceeds the maximum
  */
-static int virtcca_get_all_cc_dev_info(struct device *dev, struct tmi_dev_delegate_params *params)
+static int virtcca_get_all_cc_dev_info(struct device *dev,
+	struct tmi_dev_delegate_params *params, struct pci_dev **pdevs)
 {
 	int ret = 0;
 	uint16_t root_bd = get_root_bd(dev);
 
 	params->root_bd = root_bd;
-	params->num_dev = get_sibling_devices(dev, params->devs, MAX_DEV_PER_PORT);
+	params->num_dev = get_sibling_devices(dev, params->devs, pdevs, MAX_DEV_PER_PORT);
 	if (params->num_dev >= MAX_DEV_PER_PORT) {
 		ret = -EINVAL;
 		return ret;
@@ -834,6 +841,7 @@ static void virtcca_destroy_devices(struct tmi_dev_delegate_params *params)
  * virtcca_create_cc_dev_ste - Traverse the devices under the root port and set the
  * secure SMMU STE table for them
  * @smmu: An SMMUv3 instance
+ * @pdevs: CC struct pci_dev pointers
  * @dev: CC device
  * @params: Delegate device parameters
  * @s2vmid: SMMU STE s2vmid
@@ -842,7 +850,7 @@ static void virtcca_destroy_devices(struct tmi_dev_delegate_params *params)
  * %0 if set STE success
  * %-EINVAL set STE config content failed or does not find corresponding master info
  */
-static int virtcca_create_cc_dev_ste(struct arm_smmu_device *smmu,
+static int virtcca_create_cc_dev_ste(struct arm_smmu_device *smmu, struct pci_dev **pdevs,
 	struct device *dev, struct tmi_dev_delegate_params *params, uint16_t *s2vmid)
 {
 	int ret = 0;
@@ -850,7 +858,7 @@ static int virtcca_create_cc_dev_ste(struct arm_smmu_device *smmu,
 
 	if (!is_cc_root_bd(root_bd)) {
 		/* Get all devices information under the same root port */
-		ret = virtcca_get_all_cc_dev_info(dev, params);
+		ret = virtcca_get_all_cc_dev_info(dev, params, pdevs);
 		if (ret)
 			return ret;
 
@@ -871,6 +879,22 @@ static int virtcca_create_cc_dev_ste(struct arm_smmu_device *smmu,
 			return ret;
 	}
 	return ret;
+}
+
+/* Unbind the VF's driver before switching to secure state */
+static int virtcca_unbind_vf_driver(struct pci_dev **pdevs, uint16_t nr)
+{
+	for (uint16_t i = 0; i < nr; i++) {
+		if (!pdevs[i])
+			return -EINVAL;
+		/* Only unbind the VF with its own driver */
+		if (pdevs[i] == pci_physfn(pdevs[i]) ||
+		    !pdevs[i]->driver ||
+		    !strcmp(pdevs[i]->driver->name, "vfio-pci"))
+			continue;
+		device_release_driver(&pdevs[i]->dev);
+	}
+	return 0;
 }
 
 /**
@@ -896,6 +920,7 @@ static int virtcca_attach_each_dev_to_cvm(struct device *dev, void *domain)
 	struct arm_smmu_domain *smmu_domain = NULL;
 	struct arm_smmu_master *master = NULL;
 	struct tmi_dev_delegate_params *params = NULL;
+	struct pci_dev **pdevs;
 
 	if (!is_virtcca_cvm_enable())
 		return 0;
@@ -916,7 +941,9 @@ static int virtcca_attach_each_dev_to_cvm(struct device *dev, void *domain)
 	params = kzalloc(sizeof(*params), GFP_KERNEL);
 	if (!params)
 		return -ENOMEM;
-
+	pdevs = kcalloc(MAX_DEV_PER_PORT, sizeof(struct pci_dev *), GFP_KERNEL);
+	if (!pdevs)
+		return -ENOMEM;
 	/*
 	 * When enabling the PCIPC function, setting the secure SMMU page table for all devices
 	 * under the root port and adding to the linked list require atomic operations. This is
@@ -929,7 +956,12 @@ static int virtcca_attach_each_dev_to_cvm(struct device *dev, void *domain)
 	 * Obtain device information under the root port
 	 * and set security SMMU STE table for it
 	 */
-	ret = virtcca_create_cc_dev_ste(smmu, dev, params, s2vmid);
+	ret = virtcca_create_cc_dev_ste(smmu, pdevs, dev, params, s2vmid);
+	if (ret)
+		goto out;
+
+	if (!is_cc_root_bd(get_root_bd(dev)))
+		ret = virtcca_unbind_vf_driver(pdevs, params->num_dev);
 	if (ret)
 		goto out;
 
@@ -947,6 +979,7 @@ out:
 		virtcca_destroy_devices(params);
 
 	spin_unlock(&pcipc_enable_lock);
+	kfree(pdevs);
 	kfree(params);
 	return ret;
 }
