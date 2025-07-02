@@ -117,7 +117,7 @@ config SUNRPC_XPRT_RDMA
 	  hardware platform, say N.
 
 config SUNRPC_ENFS
-	tristate "sunrpc support ENFS"
+	bool "sunrpc support ENFS"
 	depends on SUNRPC
 	depends on X86 || X86_64 || ARM64
 	default n
