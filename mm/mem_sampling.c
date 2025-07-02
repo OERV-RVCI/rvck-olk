@@ -319,6 +319,7 @@ static void damon_mem_sampling_record_cb(struct mem_sampling_record *record)
 	mmput(mm);
 
 	domon_record.vaddr = record->virt_addr;
+	trace_mm_mem_sampling_damon_record(record->virt_addr, (pid_t)record->context_id);
 
 	/* only the proc under monitor now has damon_fifo */
 	if (damon_fifo) {
