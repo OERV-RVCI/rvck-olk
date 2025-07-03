@@ -191,8 +191,13 @@ static inline void virtcca_smmu_set_stage(struct iommu_domain *domain,
 	if (!is_virtcca_cvm_enable())
 		return;
 
-	if (domain->secure)
-		smmu_domain->stage = ARM_SMMU_DOMAIN_S2;
+	/*
+	 * In the virtCCA SR-IOV scenario, the secure SMMU only supports stage 2 translation.
+	 * If a secure device needs to be used on the host driver side, it must adopt the
+	 * stage 2 mapping method. Therefore, stage 2 translation is enforced here
+	 */
+	smmu_domain->stage = ARM_SMMU_DOMAIN_S2;
 }
-#endif
+
+#endif /* CONFIG_HISI_VIRTCCA_CODA */
 #endif /* _ARM_S_SMMU_V3_H */

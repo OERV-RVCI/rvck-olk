@@ -28,6 +28,7 @@
 #include <linux/pm_runtime.h>
 #include <linux/pinctrl/devinfo.h>
 #include <linux/slab.h>
+#include <linux/virtcca_cvm_domain.h>
 
 #include "base.h"
 #include "power/power.h"
@@ -606,6 +607,10 @@ static int really_probe(struct device *dev, struct device_driver *drv)
 			   !drv->suppress_bind_attrs;
 	int ret, link_ret;
 
+	/* Prevent seure VF probe its own driver */
+	if (is_virtcca_secure_vf(dev, drv))
+		return 0;
+
 	if (defer_all_probes) {
 		/*
 		 * Value of defer_all_probes can be set only by
@@ -642,6 +647,17 @@ re_probe:
 			goto pinctrl_bind_failed;
 	}
 
+	if (is_virtcca_pci_cc_dev(dev)) {
+		/*
+		 * In the SR-IOV scenario, if a new VF (Virtual Function) is created on a root port
+		 * where the PCIPC function has been enabled, the new VF will call
+		 * virtcca_vdev_create to set the security ste configuration and add VF info to the
+		 * CoDA management linked list.
+		 */
+		ret = virtcca_create_vdev(dev);
+		if (ret)
+			goto pinctrl_bind_failed;
+	}
 	ret = driver_sysfs_add(dev);
 	if (ret) {
 		pr_err("%s: driver_sysfs_add(%s) failed\n",

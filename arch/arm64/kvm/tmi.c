@@ -16,7 +16,7 @@
  * physical address of the virtual address of the mmio space
  * @addr:	MMIO virtual address
  */
-u64 mmio_va_to_pa(void *addr)
+u64 mmio_va_to_pa(const void __iomem *addr)
 {
 	uint64_t pa, par_el1;
 
@@ -387,3 +387,18 @@ u64 tmi_tmm_info_show(u64 option, u64 tmm_info_addr)
 }
 EXPORT_SYMBOL_GPL(tmi_tmm_info_show);
 
+u64 tmi_dev_create(u64 params)
+{
+	struct arm_smccc_res res;
+
+	arm_smccc_1_1_smc(TMI_TMM_DEV_CREATE, params, &res);
+	return res.a1;
+}
+
+u64 tmi_dev_destroy(u64 dev_num, u64 clean)
+{
+	struct arm_smccc_res res;
+
+	arm_smccc_1_1_smc(TMI_TMM_DEV_DESTROY, dev_num, clean, &res);
+	return res.a1;
+}

@@ -3,6 +3,7 @@
  * Copyright (C) 2024. Huawei Technologies Co., Ltd. All rights reserved.
  */
 #include <linux/kvm_host.h>
+#include <linux/virtcca_cvm_domain.h>
 #include <asm/virtcca_coda.h>
 
 #include "../drivers/pci/msi/msi.h"
@@ -27,7 +28,8 @@ void virtcca_pci_read_msi_msg(struct pci_dev *dev, struct msi_msg *msg,
 }
 
 /**
- * virtcca_pci_write_msi_msg - secure dev write msi msg
+ * virtcca_pci_write_msi_msg - The secure device triggers an interrupt by writing
+ * to a specific memory address via TMM
  * @desc: MSI-X description
  * @msg: Msg information
  *
@@ -49,7 +51,11 @@ bool virtcca_pci_write_msg_msi(struct msi_desc *desc, struct msi_msg *msg)
 
 	u64 addr = (u64)msg->address_lo | ((u64)msg->address_hi << 32);
 
-	if (addr) {
+	/*
+	 * In the SR-IOV scenario, secure devices can be used on the host driver side. Therefore,
+	 * only the secure devices assigned to the CVM need to have their MSI addresses modified
+	 */
+	if (addr && get_g_coda_dev_vm_type(pci_dev_id(pdev)) == CC_DEV_CVM_TYPE) {
 		/* Get the offset of the its register of a specific device */
 		u64 offset = addr - CVM_MSI_ORIG_IOVA;
 
@@ -193,13 +199,31 @@ bool is_virtcca_pci_io_rw(struct vfio_pci_core_device *vdev)
 }
 EXPORT_SYMBOL_GPL(is_virtcca_pci_io_rw);
 
+void virtcca_pci_mmio_write(struct pci_dev *pdev, u64 val,
+	u64 size, void __iomem *io)
+{
+	u16 pci_id = pci_dev_id(pdev);
+
+	WARN_ON(tmi_mmio_write(mmio_va_to_pa(io), val, size, pci_id));
+}
+EXPORT_SYMBOL_GPL(virtcca_pci_mmio_write);
+
+u64 virtcca_pci_mmio_read(struct pci_dev *pdev,
+	u64 size, void __iomem *io)
+{
+	u16 pci_id = pci_dev_id(pdev);
+
+	return tmi_mmio_read(mmio_va_to_pa(io), size, pci_id);
+}
+EXPORT_SYMBOL_GPL(virtcca_pci_mmio_read);
+
 /* Transfer to tmm write io value */
 void virtcca_pci_io_write(struct vfio_pci_core_device *vdev, u64 val,
 	u64 size, void __iomem *io)
 {
 	struct pci_dev *pdev = vdev->pdev;
 
-	WARN_ON(tmi_mmio_write(mmio_va_to_pa(io), val, size, pci_dev_id(pdev)));
+	virtcca_pci_mmio_write(pdev, val, size, io);
 }
 EXPORT_SYMBOL_GPL(virtcca_pci_io_write);
 
@@ -209,7 +233,7 @@ u64 virtcca_pci_io_read(struct vfio_pci_core_device *vdev,
 {
 	struct pci_dev *pdev = vdev->pdev;
 
-	return tmi_mmio_read(mmio_va_to_pa(io), size, pci_dev_id(pdev));
+	return virtcca_pci_mmio_read(pdev, size, io);
 }
 EXPORT_SYMBOL_GPL(virtcca_pci_io_read);
 
@@ -273,4 +297,38 @@ size_t virtcca_pci_get_rom_size(void *p, void __iomem *rom, size_t size)
 	/* there are known ROMs that get the size wrong */
 	return min((size_t)(image - rom), size);
 }
-EXPORT_SYMBOL_GPL(virtcca_pci_get_rom_size);
+
+bool is_virtcca_cc_dev(u32 sid)
+{
+	return is_virtcca_cvm_enable() && is_cc_dev(sid);
+}
+
+int virtcca_add_coda_pci_dev(struct pci_dev *pdev)
+{
+	return add_coda_pci_dev(pdev);
+}
+
+
+void virtcca_dev_destroy(u64 dev_num, u64 clean)
+{
+	(void)tmi_dev_destroy(dev_num, clean);
+}
+
+bool is_virtcca_pci_cc_dev(struct device *dev)
+{
+	return dev_is_pci(dev) && is_virtcca_cc_dev(pci_dev_id(to_pci_dev(dev)));
+}
+
+int virtcca_create_vdev(struct device *dev)
+{
+	return virtcca_vdev_create(to_pci_dev(dev));
+}
+
+bool is_virtcca_secure_vf(struct device *dev, struct device_driver *drv)
+{
+	if (is_virtcca_pci_cc_dev(dev) &&
+	    strcmp(drv->name, "vfio-pci") &&
+	    to_pci_dev(dev) != pci_physfn(to_pci_dev(dev)))
+		return true;
+	return false;
+}
