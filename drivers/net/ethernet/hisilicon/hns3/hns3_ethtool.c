@@ -436,7 +436,7 @@ static void hns3_self_test(struct net_device *ndev,
 		data[i] = HNS3_NIC_LB_TEST_UNEXECUTED;
 
 	if (hns3_nic_resetting(ndev)) {
-		netdev_err(ndev, "dev resetting!\n");
+		netdev_err(ndev, "dev resetting!");
 		goto failure;
 	}
 
@@ -880,7 +880,7 @@ static int hns3_get_link_ksettings(struct net_device *netdev,
 		break;
 	default:
 
-		netdev_warn(netdev, "Unknown media type\n");
+		netdev_warn(netdev, "Unknown media type");
 		return 0;
 	}
 
@@ -928,7 +928,7 @@ static int hns3_check_ksettings_param(const struct net_device *netdev,
 	if (cmd->base.duplex == DUPLEX_HALF &&
 	    media_type != HNAE3_MEDIA_TYPE_COPPER) {
 		netdev_err(netdev,
-			   "only copper port supports half duplex!\n");
+			   "only copper port supports half duplex!");
 		return -EINVAL;
 	}
 
@@ -1389,7 +1389,7 @@ static int hns3_nway_reset(struct net_device *netdev)
 		return 0;
 
 	if (hns3_nic_resetting(netdev)) {
-		netdev_err(netdev, "dev resetting!\n");
+		netdev_err(netdev, "dev resetting!");
 		return -EBUSY;
 	}
 
