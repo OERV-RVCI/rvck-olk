@@ -1030,11 +1030,9 @@ static bool xint_transform(int irqno, enum xint_op op)
 	switch (op) {
 	case IRQ_TO_XINT:
 		set_bit(hwirq, irqnr_xint_map);
-		xint_add_debugfs_entry(irqno);
 		return true;
 	case XINT_TO_IRQ:
 		clear_bit(hwirq, irqnr_xint_map);
-		xint_remove_debugfs_entry(irqno);
 		return false;
 	case XINT_SET_CHECK:
 		return test_bit(hwirq, irqnr_xint_map);
@@ -1049,6 +1047,7 @@ static ssize_t xint_proc_write(struct file *file,
 		const char __user *buffer, size_t count, loff_t *pos)
 {
 	int irq = (int)(long)pde_data(file_inode(file));
+	enum xint_op switch_type;
 	bool xint_state = false;
 	unsigned long val;
 	char *buf = NULL;
@@ -1071,13 +1070,21 @@ static ssize_t xint_proc_write(struct file *file,
 		return -EBUSY;
 	}
 
-	local_irq_disable();
+	if (xint_state) {
+		switch_type = XINT_TO_IRQ;
+		xint_remove_debugfs_entry(irq);
+	} else {
+		switch_type = IRQ_TO_XINT;
+		xint_add_debugfs_entry(irq);
+	}
+
 	disable_irq(irq);
+	local_irq_disable();
 
-	xint_transform(irq, xint_state ? XINT_TO_IRQ : IRQ_TO_XINT);
+	xint_transform(irq, switch_type);
 
-	enable_irq(irq);
 	local_irq_enable();
+	enable_irq(irq);
 
 	kfree(buf);
 
