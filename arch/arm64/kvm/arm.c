@@ -566,6 +566,18 @@ int kvm_arch_vcpu_precreate(struct kvm *kvm, unsigned int id)
 	return 0;
 }
 
+int kvm_arch_rec_init(struct kvm_vcpu_arch *vcpu_arch)
+{
+	struct realm_rec *rec;
+
+	rec = kzalloc(sizeof(struct realm_rec), GFP_KERNEL_ACCOUNT);
+	if (!rec)
+		return -ENOMEM;
+	rec->mpidr = INVALID_HWID;
+	vcpu_arch->rec = rec;
+	return 0;
+}
+
 int kvm_arch_vcpu_create(struct kvm_vcpu *vcpu)
 {
 	int err;
@@ -583,8 +595,6 @@ int kvm_arch_vcpu_create(struct kvm_vcpu *vcpu)
 	/* Force users to call KVM_ARM_VCPU_INIT */
 	vcpu_clear_flag(vcpu, VCPU_INITIALIZED);
 	bitmap_zero(vcpu->arch.features, KVM_VCPU_MAX_FEATURES);
-
-	vcpu->arch.rec.mpidr = INVALID_HWID;
 
 	vcpu->arch.mmu_page_cache.gfp_zero = __GFP_ZERO;
 
@@ -607,11 +617,26 @@ int kvm_arch_vcpu_create(struct kvm_vcpu *vcpu)
 
 	err = kvm_sched_affinity_vcpu_init(vcpu);
 	if (err)
-		return err;
+		goto vgic_vcpu_destroy;
 
 	err = kvm_share_hyp(vcpu, vcpu + 1);
 	if (err)
-		kvm_vgic_vcpu_destroy(vcpu);
+		goto sched_affinity_vcpu_destroy;
+
+	err = kvm_arch_rec_init(&vcpu->arch);
+	if (err)
+		goto unshare_hyp;
+
+	return err;
+
+unshare_hyp:
+	kvm_unshare_hyp(vcpu, vcpu + 1);
+
+sched_affinity_vcpu_destroy:
+	kvm_sched_affinity_vcpu_destroy(vcpu);
+
+vgic_vcpu_destroy:
+	kvm_vgic_vcpu_destroy(vcpu);
 
 	return err;
 }

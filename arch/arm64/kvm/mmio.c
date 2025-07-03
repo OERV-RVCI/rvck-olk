@@ -140,7 +140,7 @@ int kvm_handle_mmio_return(struct kvm_vcpu *vcpu)
 		data = vcpu_data_host_to_guest(vcpu, data, len);
 
 		if (_vcpu_is_rec(vcpu))
-			vcpu->arch.rec.run->enter.gprs[0] = data;
+			vcpu->arch.rec->run->enter.gprs[0] = data;
 #ifdef CONFIG_HISI_VIRTCCA_HOST
 		else if (vcpu_is_tec(vcpu))
 			vcpu->arch.tec.run->enter.gprs[0] = data;
@@ -154,7 +154,7 @@ int kvm_handle_mmio_return(struct kvm_vcpu *vcpu)
 	 * in the guest.
 	 */
 	if (_vcpu_is_rec(vcpu))
-		vcpu->arch.rec.run->enter.flags |= REC_ENTER_FLAG_EMULATED_MMIO;
+		vcpu->arch.rec->run->enter.flags |= REC_ENTER_FLAG_EMULATED_MMIO;
 #ifdef CONFIG_HISI_VIRTCCA_HOST
 	else if (vcpu_is_tec(vcpu))
 		vcpu->arch.tec.run->enter.flags |= REC_ENTER_FLAG_EMULATED_MMIO;

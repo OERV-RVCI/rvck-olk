@@ -188,8 +188,8 @@ int _realm_psci_complete(struct kvm_vcpu *source, struct kvm_vcpu *target,
 {
 	int ret;
 
-	ret = rmi_psci_complete(virt_to_phys(source->arch.rec.rec_page),
-				virt_to_phys(target->arch.rec.rec_page),
+	ret = rmi_psci_complete(virt_to_phys(source->arch.rec->rec_page),
+				virt_to_phys(target->arch.rec->rec_page),
 				status);
 	if (ret)
 		return -EINVAL;
@@ -1125,7 +1125,7 @@ static int realm_set_ipa_state(struct kvm_vcpu *vcpu,
 {
 	struct kvm *kvm = vcpu->kvm;
 	struct realm *realm = &kvm->arch.realm;
-	struct realm_rec *rec = &vcpu->arch.rec;
+	struct realm_rec *rec = vcpu->arch.rec;
 	phys_addr_t rd_phys = virt_to_phys(realm->rd);
 	phys_addr_t rec_phys = virt_to_phys(rec->rec_page);
 	struct kvm_mmu_memory_cache *memcache = &vcpu->arch.mmu_page_cache;
@@ -1447,7 +1447,7 @@ void _kvm_destroy_realm(struct kvm *kvm)
 static void kvm_complete_ripas_change(struct kvm_vcpu *vcpu)
 {
 	struct kvm *kvm = vcpu->kvm;
-	struct realm_rec *rec = &vcpu->arch.rec;
+	struct realm_rec *rec = vcpu->arch.rec;
 	unsigned long base = rec->run->exit.ripas_base;
 	unsigned long top = rec->run->exit.ripas_top;
 	unsigned long ripas = rec->run->exit.ripas_value;
@@ -1472,7 +1472,7 @@ static void kvm_complete_ripas_change(struct kvm_vcpu *vcpu)
 
 int _kvm_rec_enter(struct kvm_vcpu *vcpu)
 {
-	struct realm_rec *rec = &vcpu->arch.rec;
+	struct realm_rec *rec = vcpu->arch.rec;
 
 	switch (rec->run->exit.exit_reason) {
 	case RMI_EXIT_HOST_CALL:
@@ -1566,7 +1566,7 @@ int _kvm_create_rec(struct kvm_vcpu *vcpu)
 	struct user_pt_regs *vcpu_regs = vcpu_gp_regs(vcpu);
 	unsigned long mpidr = kvm_vcpu_get_mpidr_aff(vcpu);
 	struct realm *realm = &vcpu->kvm->arch.realm;
-	struct realm_rec *rec = &vcpu->arch.rec;
+	struct realm_rec *rec = vcpu->arch.rec;
 	unsigned long rec_page_phys;
 	struct rec_params *params;
 	int r, i;
@@ -1647,7 +1647,7 @@ out_free_pages:
 void _kvm_destroy_rec(struct kvm_vcpu *vcpu)
 {
 	struct realm *realm = &vcpu->kvm->arch.realm;
-	struct realm_rec *rec = &vcpu->arch.rec;
+	struct realm_rec *rec = vcpu->arch.rec;
 	unsigned long rec_page_phys;
 
 	if (!vcpu_is_rec(vcpu))

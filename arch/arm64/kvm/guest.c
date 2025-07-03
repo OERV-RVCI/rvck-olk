@@ -946,11 +946,11 @@ int __kvm_arm_vcpu_set_events(struct kvm_vcpu *vcpu,
 			 * Can only inject SEA into a Realm if the previous exit
 			 * was due to a data abort of an Unprotected IPA.
 			 */
-			if (!(vcpu->arch.rec.run->enter.flags & REC_ENTER_FLAG_EMULATED_MMIO))
+			if (!(vcpu->arch.rec->run->enter.flags & REC_ENTER_FLAG_EMULATED_MMIO))
 				return -EINVAL;
 
-			vcpu->arch.rec.run->enter.flags &= ~REC_ENTER_FLAG_EMULATED_MMIO;
-			vcpu->arch.rec.run->enter.flags |= REC_ENTER_FLAG_INJECT_SEA;
+			vcpu->arch.rec->run->enter.flags &= ~REC_ENTER_FLAG_EMULATED_MMIO;
+			vcpu->arch.rec->run->enter.flags |= REC_ENTER_FLAG_INJECT_SEA;
 		}
 
 		return 0;

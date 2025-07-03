@@ -343,7 +343,7 @@ static u64 kvm_pmu_overflow_status(struct kvm_vcpu *vcpu)
 	u64 reg = 0;
 
 	if (_vcpu_is_rec(vcpu))
-		return vcpu->arch.rec.run->exit.pmu_ovf_status;
+		return vcpu->arch.rec->run->exit.pmu_ovf_status;
 #ifdef CONFIG_HISI_VIRTCCA_HOST
 	if (vcpu_is_tec(vcpu))
 		return vcpu->arch.tec.run->exit.pmu_ovf_status;

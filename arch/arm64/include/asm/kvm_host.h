@@ -19,6 +19,7 @@
 #include <linux/maple_tree.h>
 #include <linux/percpu.h>
 #include <linux/psci.h>
+#include <linux/kabi.h>
 #include <asm/arch_gicv3.h>
 #include <asm/barrier.h>
 #include <asm/cpufeature.h>
@@ -28,9 +29,7 @@
 #include <asm/kvm.h>
 #include <asm/kvm_asm.h>
 #include <asm/kvm_rme.h>
-#ifdef CONFIG_HISI_VIRTCCA_HOST
 #include <asm/kvm_tmm.h>
-#endif
 
 #define __KVM_HAVE_ARCH_INTC_INITIALIZED
 
@@ -42,6 +41,7 @@
 
 #define KVM_MAX_VCPUS VGIC_V3_MAX_CPUS
 
+#define KVM_VCPU_MAX_FEATURES_KABI_BASELINE 7
 #define KVM_VCPU_MAX_FEATURES 10
 #define KVM_VCPU_VALID_FEATURES	(BIT(KVM_VCPU_MAX_FEATURES) - 1)
 
@@ -251,8 +251,19 @@ struct kvm_arch {
 #define KVM_ARCH_FLAG_ID_REGS_INITIALIZED		8
 	unsigned long flags;
 
-	/* VM-wide vCPU feature set */
-	DECLARE_BITMAP(vcpu_features, KVM_VCPU_MAX_FEATURES);
+	/* VM-wide vCPU feature set
+	 * When calculating kabi CRC baseline by KVM_VCPU_MAX_FEATURES (old value is 7),
+	 * the member variable here is
+	 * unsigned long vcpu_features[(((7) + ((sizeof(long) * 8)) - 1) / ((sizeof(long) * 8)))]
+	 * Now add ARM CCA vcpu feature, KVM_VCPU_MAX_FEATURES should increase to 10
+	 * the member variable here changes to
+	 * unsigned long vcpu_features[(((10) + ((sizeof(long) * 8)) - 1) / ((sizeof(long) * 8)))]
+	 * kabi CRC calculate by the expression, not the value of expression, causes kabi changes.
+	 * Because the real size of vcpu_features[] is unchanged, we can use KABI_REPLACE
+	 * to fix kabi conflict.
+	 */
+	KABI_REPLACE(DECLARE_BITMAP(vcpu_features, KVM_VCPU_MAX_FEATURES_KABI_BASELINE),
+		DECLARE_BITMAP(vcpu_features, KVM_VCPU_MAX_FEATURES))
 
 	/*
 	 * VM-wide PMU filter, implemented as a bitmap and big enough for
@@ -262,9 +273,6 @@ struct kvm_arch {
 	struct arm_pmu *arm_pmu;
 
 	cpumask_var_t supported_cpus;
-
-	/* PMCR_EL0.N value for the guest */
-	u8 pmcr_n;
 
 	/* Hypercall features firmware registers' descriptor */
 	struct kvm_smccc_features smccc_feat;
@@ -289,21 +297,28 @@ struct kvm_arch {
 	 */
 	struct kvm_protected_vm pkvm;
 
-	bool is_realm;
-	struct realm realm;
 #ifdef CONFIG_KVM_HISI_VIRT
 	spinlock_t sched_lock;
 	cpumask_var_t sched_cpus;	/* Union of all vcpu's cpus_ptr */
 	u64 tlbi_dvmbm;
 #endif
 
-#ifdef CONFIG_HISI_VIRTCCA_HOST
-	union {
-		struct cvm cvm;
-		struct virtcca_cvm *virtcca_cvm;
-	};
-	bool is_virtcca_cvm;
-#endif
+	KABI_REPLACE(union {
+			struct cvm cvm;
+			struct virtcca_cvm *virtcca_cvm;
+		},
+		union {
+			struct cvm cvm;
+			struct virtcca_cvm *virtcca_cvm;
+			struct realm realm;
+		})
+	KABI_REPLACE(bool is_virtcca_cvm,
+		union {
+			bool is_virtcca_cvm;
+			bool is_realm;
+		})
+	/* PMCR_EL0.N value for the guest */
+	KABI_EXTEND(u8 pmcr_n)
 };
 
 struct kvm_vcpu_fault_info {
@@ -613,8 +628,17 @@ struct kvm_vcpu_arch {
 	/* Cache some mmu pages needed inside spinlock regions */
 	struct kvm_mmu_memory_cache mmu_page_cache;
 
-	/* feature flags */
-	DECLARE_BITMAP(features, KVM_VCPU_MAX_FEATURES);
+	/* feature flags
+	 * When calculating kabi CRC baseline by KVM_VCPU_MAX_FEATURES (old value is 7), the member variable here is
+	 * unsigned long features[(((7) + ((sizeof(long) * 8)) - 1) / ((sizeof(long) * 8)))]
+	 * Now add ARM CCA vcpu feature, KVM_VCPU_MAX_FEATURES should increase to 10
+	 * the member variable here changes to
+	 * unsigned long features[(((10) + ((sizeof(long) * 8)) - 1) / ((sizeof(long) * 8)))]
+	 * kabi CRC calculate by the expression, not the value of expression, causes kabi changes.
+	 * Because the real size of features[] is unchanged, we can use KABI_REPLACE to fix kabi conflict.
+	 */
+	KABI_REPLACE(DECLARE_BITMAP(features, KVM_VCPU_MAX_FEATURES_KABI_BASELINE),
+		DECLARE_BITMAP(features, KVM_VCPU_MAX_FEATURES))
 
 	/* Virtual SError ESR to restore when HCR_EL2.VSE is set */
 	u64 vsesr_el2;
@@ -638,18 +662,18 @@ struct kvm_vcpu_arch {
 	/* Per-vcpu CCSIDR override or NULL */
 	u32 *ccsidr;
 
-	/* Realm meta data */
-	struct realm_rec rec;
-
 #ifdef CONFIG_KVM_HISI_VIRT
 	/* pCPUs this vCPU can be scheduled on. Pure copy of current->cpus_ptr */
 	cpumask_var_t sched_cpus;
 	cpumask_var_t pre_sched_cpus;
 #endif
 
-#ifdef CONFIG_HISI_VIRTCCA_HOST
-	struct virtcca_cvm_tec tec;
-#endif
+	KABI_REPLACE(struct virtcca_cvm_tec tec,
+		union {
+				struct virtcca_cvm_tec tec;
+				/* Realm meta data */
+				struct realm_rec *rec;
+			})
 
 #ifdef CONFIG_ARM64_HDBSS
 	/* HDBSS registers info */

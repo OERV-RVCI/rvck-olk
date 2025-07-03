@@ -690,7 +690,7 @@ static inline bool _vcpu_is_rec(struct kvm_vcpu *vcpu)
 
 static inline bool kvm_arm_rec_finalized(struct kvm_vcpu *vcpu)
 {
-	return vcpu->arch.rec.mpidr != INVALID_HWID;
+	return vcpu->arch.rec->mpidr != INVALID_HWID;
 }
 
 #ifdef CONFIG_HISI_VIRTCCA_HOST

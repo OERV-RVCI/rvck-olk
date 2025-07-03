@@ -7,24 +7,6 @@
 
 #include <uapi/linux/kvm.h>
 #include <asm/rmi_smc.h>
-
-/*
- * There is a conflict with the internal iova of CVM,
- * so it is necessary to offset the msi iova.
- * According to qemu file(hw/arm/virt.c), 0x0a001000 - 0x0b000000
- * iova is not being used, so it is used as the iova range for msi
- * mapping.
- */
-#define CVM_MSI_ORIG_IOVA      0x8000000
-#define CVM_MSI_MIN_IOVA       0x0a001000
-#define CVM_MSI_MAX_IOVA       0x0b000000
-#define CVM_MSI_IOVA_OFFSET    0x1000
-
-#define CVM_RW_8_BIT	0x8
-#define CVM_RW_16_BIT	0x10
-#define CVM_RW_32_BIT	0x20
-#define CVM_RW_64_BIT	0x40
-
 enum virtcca_cvm_state {
 	CVM_STATE_NONE = 1,
 	CVM_STATE_NEW,
@@ -102,8 +84,26 @@ struct virtcca_cvm {
 struct virtcca_cvm_tec {
 	u64 tec;
 	bool tec_created;
-	struct tmi_tec_run *run;
+	KABI_REPLACE(void *tec_run, struct tmi_tec_run *run)
 };
+
+#ifdef CONFIG_HISI_VIRTCCA_HOST
+/*
+ * There is a conflict with the internal iova of CVM,
+ * so it is necessary to offset the msi iova.
+ * According to qemu file(hw/arm/virt.c), 0x0a001000 - 0x0b000000
+ * iova is not being used, so it is used as the iova range for msi
+ * mapping.
+ */
+#define CVM_MSI_ORIG_IOVA      0x8000000
+#define CVM_MSI_MIN_IOVA       0x0a001000
+#define CVM_MSI_MAX_IOVA       0x0b000000
+#define CVM_MSI_IOVA_OFFSET    0x1000
+
+#define CVM_RW_8_BIT	0x8
+#define CVM_RW_16_BIT	0x10
+#define CVM_RW_32_BIT	0x20
+#define CVM_RW_64_BIT	0x40
 
 struct cvm_ttt_addr {
 	struct list_head list;
@@ -157,5 +157,6 @@ static inline unsigned long cvm_ttt_level_mapsize(int level)
 
 	return (1UL << CVM_TTT_LEVEL_SHIFT(level));
 }
+#endif
 
 #endif

@@ -16,7 +16,7 @@ typedef int (*exit_handler_fn)(struct kvm_vcpu *vcpu);
 
 static int rec_exit_reason_notimpl(struct kvm_vcpu *vcpu)
 {
-	struct realm_rec *rec = &vcpu->arch.rec;
+	struct realm_rec *rec = vcpu->arch.rec;
 
 	vcpu_err(vcpu, "Unhandled exit reason from realm (ESR: %#llx)\n",
 		 rec->run->exit.esr);
@@ -25,7 +25,7 @@ static int rec_exit_reason_notimpl(struct kvm_vcpu *vcpu)
 
 static int rec_exit_sync_dabt(struct kvm_vcpu *vcpu)
 {
-	struct realm_rec *rec = &vcpu->arch.rec;
+	struct realm_rec *rec = vcpu->arch.rec;
 
 	/*
 	 * In the case of a write, copy over gprs[0] to the target GPR,
@@ -44,7 +44,7 @@ static int rec_exit_sync_dabt(struct kvm_vcpu *vcpu)
 
 static int rec_exit_sync_iabt(struct kvm_vcpu *vcpu)
 {
-	struct realm_rec *rec = &vcpu->arch.rec;
+	struct realm_rec *rec = vcpu->arch.rec;
 
 	vcpu_err(vcpu, "Unhandled instruction abort (ESR: %#llx).\n",
 		 rec->run->exit.esr);
@@ -53,7 +53,7 @@ static int rec_exit_sync_iabt(struct kvm_vcpu *vcpu)
 
 static int rec_exit_sys_reg(struct kvm_vcpu *vcpu)
 {
-	struct realm_rec *rec = &vcpu->arch.rec;
+	struct realm_rec *rec = vcpu->arch.rec;
 	unsigned long esr = kvm_vcpu_get_esr(vcpu);
 	int rt = kvm_vcpu_sys_get_rt(vcpu);
 	bool is_write = !(esr & 1);
@@ -78,7 +78,7 @@ static exit_handler_fn rec_exit_handlers[] = {
 
 static int rec_exit_psci(struct kvm_vcpu *vcpu)
 {
-	struct realm_rec *rec = &vcpu->arch.rec;
+	struct realm_rec *rec = vcpu->arch.rec;
 	int i;
 
 	for (i = 0; i < REC_RUN_GPRS; i++)
@@ -91,7 +91,7 @@ static int rec_exit_ripas_change(struct kvm_vcpu *vcpu)
 {
 	struct kvm *kvm = vcpu->kvm;
 	struct realm *realm = &kvm->arch.realm;
-	struct realm_rec *rec = &vcpu->arch.rec;
+	struct realm_rec *rec = vcpu->arch.rec;
 	unsigned long base = rec->run->exit.ripas_base;
 	unsigned long top = rec->run->exit.ripas_top;
 	unsigned long ripas = rec->run->exit.ripas_value;
@@ -109,7 +109,7 @@ static int rec_exit_ripas_change(struct kvm_vcpu *vcpu)
 static int rec_exit_host_call(struct kvm_vcpu *vcpu)
 {
 	int i;
-	struct realm_rec *rec = &vcpu->arch.rec;
+	struct realm_rec *rec = vcpu->arch.rec;
 
 	vcpu->stat.hvc_exit_stat++;
 
@@ -121,7 +121,7 @@ static int rec_exit_host_call(struct kvm_vcpu *vcpu)
 
 static void update_arch_timer_irq_lines(struct kvm_vcpu *vcpu)
 {
-	struct realm_rec *rec = &vcpu->arch.rec;
+	struct realm_rec *rec = vcpu->arch.rec;
 
 	__vcpu_sys_reg(vcpu, CNTV_CTL_EL0) = rec->run->exit.cntv_ctl;
 	__vcpu_sys_reg(vcpu, CNTV_CVAL_EL0) = rec->run->exit.cntv_cval;
@@ -137,7 +137,7 @@ static void update_arch_timer_irq_lines(struct kvm_vcpu *vcpu)
  */
 int _handle_rec_exit(struct kvm_vcpu *vcpu, int rec_run_ret)
 {
-	struct realm_rec *rec = &vcpu->arch.rec;
+	struct realm_rec *rec = vcpu->arch.rec;
 	u8 esr_ec = ESR_ELx_EC(rec->run->exit.esr);
 	unsigned long status, index;
 
