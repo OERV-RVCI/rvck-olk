@@ -91,14 +91,6 @@
 	/* save pt_regs */
 	ldi	$sp, -PT_REGS_SIZE($sp)
 	stl	$0, PT_REGS_R0($sp)
-	stl	$1, PT_REGS_R1($sp)
-	stl	$2, PT_REGS_R2($sp)
-	stl	$3, PT_REGS_R3($sp)
-	stl	$4, PT_REGS_R4($sp)
-	stl	$5, PT_REGS_R5($sp)
-	stl	$6, PT_REGS_R6($sp)
-	stl	$7, PT_REGS_R7($sp)
-	stl	$8, PT_REGS_R8($sp)
 	stl	$9, PT_REGS_R9($sp)
 	stl	$10, PT_REGS_R10($sp)
 	stl	$11, PT_REGS_R11($sp)
@@ -122,19 +114,15 @@
 	stl	$29, PT_REGS_GP($sp)
 	ldi	$0, PT_REGS_SIZE($sp)
 	stl	$0, PT_REGS_R30($sp)
+
+	/* save direct caller reg */
+	ldi	$2, 0($31)
+	stl	$2, PT_REGS_R2($sp)
 	.endm
 
 	.macro RESTORE_PT_REGS
 	/* restore pt_regs */
 	ldl	$0, PT_REGS_R0($sp)
-	ldl	$1, PT_REGS_R1($sp)
-	ldl	$2, PT_REGS_R2($sp)
-	ldl	$3, PT_REGS_R3($sp)
-	ldl	$4, PT_REGS_R4($sp)
-	ldl	$5, PT_REGS_R5($sp)
-	ldl	$6, PT_REGS_R6($sp)
-	ldl	$7, PT_REGS_R7($sp)
-	ldl	$8, PT_REGS_R8($sp)
 	ldl	$9, PT_REGS_R9($sp)
 	ldl	$10, PT_REGS_R10($sp)
 	ldl	$11, PT_REGS_R11($sp)
@@ -173,14 +161,16 @@
 
 	/* save return value regs*/
 	.macro save_return_regs
-	subl	$sp, 0x8, $sp
-	stl	$0, 0x0($sp)
+	subl	$sp, 16, $sp
+	stl	$0, 0($sp)
+	stl	$15, 8($sp)
 	.endm
 
 	/* restore return value regs*/
 	.macro restore_return_regs
-	ldl	$0, 0x0($sp)
-	addl	$sp, 0x8, $sp
+	ldl	$15, 8($sp)
+	ldl	$0, 0($sp)
+	addl	$sp, 16, $sp
 	.endm
 
 
@@ -231,7 +221,7 @@ ENTRY(return_to_handler)
 	br	$27, 1f
 1:	ldgp	$29, 0($27)
 	save_return_regs
-	bis	$31, $15, $16	/* parent's fp */
+	bis	$31, $sp, $16	/* ret_regs */
 	ldi	$27, ftrace_return_to_handler
 	call	$26, ($27)
 	bis	$31, $0, $26
@@ -352,7 +342,10 @@ ftrace_regs_call:
 	call    ftrace_graph_caller
 #endif
 	RESTORE_PT_REGS
-	ret $31, ($28), 1
+	bne	$2, .Ldirect
+	ret	$31, ($28), 1
+.Ldirect:
+	ret	$31, ($2), 1
 	.end ftrace_regs_caller
 #endif /* CONFIG_DYNAMIC_FTRACE_WITH_REGS */
 

@@ -5,7 +5,7 @@
 #include "../perf_regs.h"
 #include "../../../arch/sw_64/include/uapi/asm/perf_regs.h"
 
-const char *__perf_reg_name_sw_64(int id)
+const char *__perf_reg_name_sw64(int id)
 {
 	switch (id) {
 	case PERF_REG_SW64_R0:
@@ -79,12 +79,12 @@ const char *__perf_reg_name_sw_64(int id)
 	return NULL;
 }
 
-uint64_t __perf_reg_ip_sw_64(void)
+uint64_t __perf_reg_ip_sw64(void)
 {
 	return PERF_REG_SW64_PC;
 }
 
-uint64_t __perf_reg_sp_sw_64(void)
+uint64_t __perf_reg_sp_sw64(void)
 {
 	return PERF_REG_SW64_SP;
 }
