@@ -6491,7 +6491,9 @@ CONFIG_VFIO_PLATFORM=m
 # end of VFIO platform reset drivers
 # end of VFIO support for platform devices
 
-# CONFIG_VIRT_DRIVERS is not set
+CONFIG_VIRT_DRIVERS=y
+# CONFIG_VMGENID is not set
+# CONFIG_NITRO_ENCLAVES is not set
 CONFIG_VIRTIO_ANCHOR=y
 CONFIG_VIRTIO=m
 CONFIG_VIRTIO_PCI_LIB=m
