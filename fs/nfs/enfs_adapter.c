@@ -15,7 +15,7 @@
 #include "enfs_adapter.h"
 #include "iostat.h"
 
-struct enfs_adapter_ops __rcu *enfs_adapter;
+static struct enfs_adapter_ops __rcu *enfs_adapter;
 
 static DEFINE_MUTEX(enfs_module_mutex);
 static void *enfs_adapter_data;

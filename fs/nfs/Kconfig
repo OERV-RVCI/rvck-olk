@@ -215,8 +215,9 @@ config NFS_V4_2_READ_PLUS
 
 config ENFS
 	tristate "NFS client support for ENFS"
-	depends on NFS_FS && SUNRPC_ENFS
+	depends on NFS_FS
 	depends on X86 || X86_64 || ARM64
+	select SUNRPC_ENFS
 	default n
 	help
 	 This option enables support multipath of the NFS protocol

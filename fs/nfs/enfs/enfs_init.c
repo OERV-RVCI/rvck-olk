@@ -27,7 +27,7 @@ unsigned int enfs_debug;
 module_param_named(enfs_debug, enfs_debug, uint, 0600);
 MODULE_PARM_DESC(enfs_debug, "enfs debugging mask");
 
-struct enfs_adapter_ops enfs_adapter = {
+static struct enfs_adapter_ops enfs_adapter = {
 	.name = "enfs",
 	.owner = THIS_MODULE,
 	.parse_mount_options = nfs_multipath_parse_options,
