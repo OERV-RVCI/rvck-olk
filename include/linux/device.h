@@ -655,6 +655,8 @@ struct device_physical_location {
  * @dma_io_tlb_pools:	List of transient swiotlb memory pools.
  * @dma_io_tlb_lock:	Protects changes to the list of active pools.
  * @dma_uses_io_tlb: %true if device has used the software IO TLB.
+ * @dma_p_io_tlb_mem: Phytium Software IO TLB allocator.  Not for driver use.
+ * @dma_uses_p_io_tlb: %true if device has used the Phytium software IO TLB.
  * @archdata:	For arch-specific additions.
  * @of_node:	Associated device tree node.
  * @fwnode:	Associated device node supplied by platform firmware.
@@ -806,9 +808,21 @@ struct device {
 	bool			dma_ops_bypass : 1;
 #endif
 
+#ifdef CONFIG_PSWIOTLB
+	KABI_USE(1, struct p_io_tlb_mem *dma_p_io_tlb_mem)
+	KABI_USE(2, const struct dma_map_ops *orig_dma_ops)
+	KABI_USE(3, struct{
+#ifdef CONFIG_NUMA
+				int local_node;
+#endif
+				bool dma_uses_p_io_tlb;
+				bool can_use_pswiotlb;
+				})
+#else
 	KABI_RESERVE(1)
 	KABI_RESERVE(2)
 	KABI_RESERVE(3)
+#endif
 	KABI_RESERVE(4)
 	KABI_RESERVE(5)
 	KABI_RESERVE(6)

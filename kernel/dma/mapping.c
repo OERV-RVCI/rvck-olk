@@ -16,7 +16,9 @@
 #include <linux/vmalloc.h>
 #include "debug.h"
 #include "direct.h"
+#if defined(CONFIG_PSWIOTLB) && !defined(__GENKSYMS__)
 #include "./phytium/pswiotlb-dma.h"
+#endif
 
 #if defined(CONFIG_ARCH_HAS_SYNC_DMA_FOR_DEVICE) || \
 	defined(CONFIG_ARCH_HAS_SYNC_DMA_FOR_CPU) || \
