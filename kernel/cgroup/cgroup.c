@@ -4017,14 +4017,16 @@ struct cftype cgroup_v1_psi_files[] = {
 		.release = cgroup_pressure_release,
 	},
 #endif
+#ifdef CONFIG_PSI_FINE_GRAINED
 	{
 		.name = "pressure.stat",
 		.flags = CFTYPE_NO_PREFIX,
 		.seq_show = cgroup_psi_stat_show,
 	},
+#endif /*CONFIG_PSI_FINE_GRAINED*/
 	{ }	/* terminate */
 };
-#endif
+#endif /*CONFIG_PSI_CGROUP_V1*/
 #else /* CONFIG_PSI */
 bool cgroup_psi_enabled(void)
 {

@@ -376,8 +376,8 @@ static void record_stat_times(struct psi_group_cpu *groupc, u32 delta)
 #ifdef CONFIG_QOS_SCHED
 		else if (groupc->prev_throttle == QOS_THROTTLED)
 			groupc->fine_grained_times[PSI_CPU_QOS_FULL] += delta;
-	}
 #endif
+	}
 #endif
 }
 
