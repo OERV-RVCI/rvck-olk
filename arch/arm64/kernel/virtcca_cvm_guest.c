@@ -154,3 +154,27 @@ void swiotlb_unmap_notify(unsigned long paddr, unsigned long size)
 
 	arm_smccc_1_1_smc(SMC_TSI_SEC_MEM_UNMAP, paddr, size, &res);
 }
+
+static struct device cvm_alloc_device;
+
+void __init virtcca_its_init(void)
+{
+	if (is_virtcca_cvm_world()) {
+		device_initialize(&cvm_alloc_device);
+		enable_swiotlb_for_cvm_dev(&cvm_alloc_device, true);
+	}
+}
+
+struct page *virtcca_its_alloc_shared_pages_node(int node, gfp_t gfp,
+			unsigned int order)
+{
+	return swiotlb_alloc(&cvm_alloc_device, (1 << order) * PAGE_SIZE);
+}
+
+void virtcca_its_free_shared_pages(void *addr, int order)
+{
+	if (order < 0)
+		return;
+
+	swiotlb_free(&cvm_alloc_device, (struct page *)addr, (1 << order) * PAGE_SIZE);
+}
