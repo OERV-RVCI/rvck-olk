@@ -148,7 +148,8 @@ int kvm_arm_vcpu_finalize(struct kvm_vcpu *vcpu, int feature)
 
 		return kvm_vcpu_finalize_sve(vcpu);
 	case KVM_ARM_VCPU_REC:
-		if (!kvm_is_realm(vcpu->kvm) || !vcpu_is_rec(vcpu))
+		if (!kvm_is_realm(vcpu->kvm) ||
+		   (kvm_get_cvm_type() == ARMCCA_CVM && !vcpu_is_rec(vcpu)))
 			return -EINVAL;
 
 		return kvm_create_rec(vcpu);

@@ -644,6 +644,7 @@ static __always_inline void kvm_reset_cptr_el2(struct kvm_vcpu *vcpu)
 	kvm_write_cptr_el2(val);
 }
 
+/* kvm of virtCCA or CCA */
 static inline bool kvm_is_realm(struct kvm *kvm)
 {
 	if (static_branch_unlikely(&kvm_rme_is_available) && kvm)
@@ -651,6 +652,7 @@ static inline bool kvm_is_realm(struct kvm *kvm)
 	return false;
 }
 
+/* kvm of CCA only */
 static inline bool _kvm_is_realm(struct kvm *kvm)
 {
 	return kvm_is_realm(kvm) && (kvm_get_cvm_type() == ARMCCA_CVM);
@@ -676,13 +678,16 @@ static inline gpa_t kvm_gpa_from_fault(struct kvm *kvm, phys_addr_t ipa)
 	return ipa;
 }
 
+/* vcpu of virtCCA or CCA */
 static inline bool vcpu_is_rec(struct kvm_vcpu *vcpu)
 {
 	if (static_branch_unlikely(&kvm_rme_is_available))
-		return vcpu_has_feature(vcpu, KVM_ARM_VCPU_REC);
+		return vcpu_has_feature(vcpu, KVM_ARM_VCPU_REC) ||
+			   (vcpu->arch.tec.run != NULL);
 	return false;
 }
 
+/* vcpu of CCA only */
 static inline bool _vcpu_is_rec(struct kvm_vcpu *vcpu)
 {
 	return vcpu_is_rec(vcpu) && (kvm_get_cvm_type() == ARMCCA_CVM);
