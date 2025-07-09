@@ -758,7 +758,6 @@ static void la_iommu_remove_device(struct device *dev)
 {
 	struct la_iommu_dev_data *dev_data;
 
-	iommu_group_remove_device(dev);
 	dev_data = dev->archdata.iommu;
 	dev->archdata.iommu = NULL;
 	kfree(dev_data);
