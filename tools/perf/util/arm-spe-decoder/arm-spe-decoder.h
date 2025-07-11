@@ -68,20 +68,20 @@ enum arm_spe_neoverse_data_source {
 };
 
 enum arm_spe_hisi_hip_data_source {
-	ARM_SPE_HISI_HIP_PEER_CPU		= 0,
-	ARM_SPE_HISI_HIP_PEER_CPU_HITM		= 1,
-	ARM_SPE_HISI_HIP_L3			= 2,
-	ARM_SPE_HISI_HIP_L3_HITM		= 3,
-	ARM_SPE_HISI_HIP_PEER_CLUSTER		= 4,
-	ARM_SPE_HISI_HIP_PEER_CLUSTER_HITM	= 5,
-	ARM_SPE_HISI_HIP_REMOTE_SOCKET		= 6,
-	ARM_SPE_HISI_HIP_REMOTE_SOCKET_HITM	= 7,
-	ARM_SPE_HISI_HIP_LOCAL			= 8,
-	ARM_SPE_HISI_HIP_REMOTE			= 9,
-	ARM_SPE_HISI_HIP_NC_DEV			= 13,
-	ARM_SPE_HISI_HIP_L2			= 16,
-	ARM_SPE_HISI_HIP_L2_HITM		= 17,
-	ARM_SPE_HISI_HIP_L1			= 18,
+	ARM_SPE_HISI_HIP_PEER_CPU               = 0,
+	ARM_SPE_HISI_HIP_PEER_CPU_HITM          = 1,
+	ARM_SPE_HISI_HIP_L3                     = 2,
+	ARM_SPE_HISI_HIP_L3_HITM                = 3,
+	ARM_SPE_HISI_HIP_PEER_CLUSTER           = 4,
+	ARM_SPE_HISI_HIP_PEER_CLUSTER_HITM      = 5,
+	ARM_SPE_HISI_HIP_REMOTE_SOCKET          = 6,
+	ARM_SPE_HISI_HIP_REMOTE_SOCKET_HITM     = 7,
+	ARM_SPE_HISI_HIP_LOCAL_MEM              = 8,
+	ARM_SPE_HISI_HIP_REMOTE_MEM             = 9,
+	ARM_SPE_HISI_HIP_NC_DEV                 = 13,
+	ARM_SPE_HISI_HIP_L2                     = 16,
+	ARM_SPE_HISI_HIP_L2_HITM                = 17,
+	ARM_SPE_HISI_HIP_L1                     = 18,
 };
 
 struct arm_spe_record {

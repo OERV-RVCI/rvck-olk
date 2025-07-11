@@ -531,32 +531,29 @@ static void arm_spe__synth_data_source_hisi_hip(const struct arm_spe_record *rec
 
 	switch (record->source) {
 	case ARM_SPE_HISI_HIP_PEER_CPU:
-		data_src->mem_lvl = PERF_MEM_LVL_L3 | PERF_MEM_LVL_HIT;
-		data_src->mem_lvl_num = PERF_MEM_LVLNUM_L3;
-		data_src->mem_snoop = PERF_MEM_SNOOP_NONE;
+		data_src->mem_lvl = PERF_MEM_LVL_L2 | PERF_MEM_LVL_HIT;
+		data_src->mem_lvl_num = PERF_MEM_LVLNUM_L2;
 		data_src->mem_snoopx = PERF_MEM_SNOOPX_PEER;
 		break;
 	case ARM_SPE_HISI_HIP_PEER_CPU_HITM:
-		data_src->mem_lvl = PERF_MEM_LVL_L3 | PERF_MEM_LVL_HIT;
-		data_src->mem_lvl_num = PERF_MEM_LVLNUM_L3;
+		data_src->mem_lvl = PERF_MEM_LVL_L2 | PERF_MEM_LVL_HIT;
+		data_src->mem_lvl_num = PERF_MEM_LVLNUM_L2;
 		data_src->mem_snoop = PERF_MEM_SNOOP_HITM;
 		data_src->mem_snoopx = PERF_MEM_SNOOPX_PEER;
 		break;
 	case ARM_SPE_HISI_HIP_L3:
 		data_src->mem_lvl = PERF_MEM_LVL_L3 | PERF_MEM_LVL_HIT;
 		data_src->mem_lvl_num = PERF_MEM_LVLNUM_L3;
-		data_src->mem_snoop = PERF_MEM_SNOOP_NONE;
+		data_src->mem_snoop = PERF_MEM_SNOOP_HIT;
 		break;
 	case ARM_SPE_HISI_HIP_L3_HITM:
 		data_src->mem_lvl = PERF_MEM_LVL_L3 | PERF_MEM_LVL_HIT;
 		data_src->mem_lvl_num = PERF_MEM_LVLNUM_L3;
 		data_src->mem_snoop = PERF_MEM_SNOOP_HITM;
-		data_src->mem_snoopx = PERF_MEM_SNOOPX_PEER;
 		break;
 	case ARM_SPE_HISI_HIP_PEER_CLUSTER:
 		data_src->mem_lvl = PERF_MEM_LVL_REM_CCE1 | PERF_MEM_LVL_HIT;
 		data_src->mem_lvl_num = PERF_MEM_LVLNUM_L3;
-		data_src->mem_snoop = PERF_MEM_SNOOP_NONE;
 		data_src->mem_snoopx = PERF_MEM_SNOOPX_PEER;
 		break;
 	case ARM_SPE_HISI_HIP_PEER_CLUSTER_HITM:
@@ -578,15 +575,14 @@ static void arm_spe__synth_data_source_hisi_hip(const struct arm_spe_record *rec
 		data_src->mem_remote = PERF_MEM_REMOTE_REMOTE;
 		data_src->mem_snoopx = PERF_MEM_SNOOPX_PEER;
 		break;
-	case ARM_SPE_HISI_HIP_LOCAL:
+	case ARM_SPE_HISI_HIP_LOCAL_MEM:
 		data_src->mem_lvl = PERF_MEM_LVL_LOC_RAM | PERF_MEM_LVL_HIT;
 		data_src->mem_lvl_num = PERF_MEM_LVLNUM_RAM;
 		data_src->mem_snoop = PERF_MEM_SNOOP_NONE;
 		break;
-	case ARM_SPE_HISI_HIP_REMOTE:
+	case ARM_SPE_HISI_HIP_REMOTE_MEM:
 		data_src->mem_lvl = PERF_MEM_LVL_REM_RAM1 | PERF_MEM_LVL_HIT;
 		data_src->mem_lvl_num = PERF_MEM_LVLNUM_RAM;
-		data_src->mem_snoop = PERF_MEM_SNOOP_NONE;
 		data_src->mem_remote = PERF_MEM_REMOTE_REMOTE;
 		break;
 	case ARM_SPE_HISI_HIP_NC_DEV:
@@ -603,7 +599,6 @@ static void arm_spe__synth_data_source_hisi_hip(const struct arm_spe_record *rec
 		data_src->mem_lvl = PERF_MEM_LVL_L2 | PERF_MEM_LVL_HIT;
 		data_src->mem_lvl_num = PERF_MEM_LVLNUM_L2;
 		data_src->mem_snoop = PERF_MEM_SNOOP_HITM;
-		data_src->mem_snoopx = PERF_MEM_SNOOPX_PEER;
 		break;
 	case ARM_SPE_HISI_HIP_L1:
 		data_src->mem_lvl = PERF_MEM_LVL_L1 | PERF_MEM_LVL_HIT;
