@@ -9911,15 +9911,12 @@ static void set_or_clear_apicv_inhibit(unsigned long *inhibits,
 
 static void kvm_apicv_init(struct kvm *kvm)
 {
-	unsigned long *inhibits = &kvm->arch.apicv_inhibit_reasons;
+	enum kvm_apicv_inhibit reason = enable_apicv ? APICV_INHIBIT_REASON_ABSENT :
+						       APICV_INHIBIT_REASON_DISABLE;
+
+	set_or_clear_apicv_inhibit(&kvm->arch.apicv_inhibit_reasons, reason, true);
 
 	init_rwsem(&kvm->arch.apicv_update_lock);
-
-	set_or_clear_apicv_inhibit(inhibits, APICV_INHIBIT_REASON_ABSENT, true);
-
-	if (!enable_apicv)
-		set_or_clear_apicv_inhibit(inhibits,
-					   APICV_INHIBIT_REASON_DISABLE, true);
 }
 
 static void kvm_sched_yield(struct kvm_vcpu *vcpu, unsigned long dest_id)
@@ -10566,11 +10563,11 @@ void __kvm_set_or_clear_apicv_inhibit(struct kvm *kvm,
 	if (!!old != !!new) {
 		/*
 		 * Kick all vCPUs before setting apicv_inhibit_reasons to avoid
-		 * false positives in the sanity check WARN in svm_vcpu_run().
+		 * false positives in the sanity check WARN in vcpu_enter_guest().
 		 * This task will wait for all vCPUs to ack the kick IRQ before
 		 * updating apicv_inhibit_reasons, and all other vCPUs will
 		 * block on acquiring apicv_update_lock so that vCPUs can't
-		 * redo svm_vcpu_run() without seeing the new inhibit state.
+		 * redo vcpu_enter_guest() without seeing the new inhibit state.
 		 *
 		 * Note, holding apicv_update_lock and taking it in the read
 		 * side (handling the request) also prevents other vCPUs from
