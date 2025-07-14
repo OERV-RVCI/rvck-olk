@@ -309,19 +309,8 @@ static void *resctrl_arch_mon_ctx_alloc_no_wait(struct rdt_resource *r,
 	if (!ret)
 		return ERR_PTR(-ENOMEM);
 
-	switch (evtid) {
-	case QOS_L3_OCCUP_EVENT_ID:
-	case QOS_L3_MBM_LOCAL_EVENT_ID:
-	case QOS_L3_MBM_TOTAL_EVENT_ID:
-	case QOS_L2_OCCUP_EVENT_ID:
-	case QOS_L2_MBM_CORE_EVENT_ID:
-		*ret = __mon_is_rmid_idx;
-		return ret;
-
-	default:
-		kfree(ret);
-		return ERR_PTR(-EOPNOTSUPP);
-	}
+	*ret = __mon_is_rmid_idx;
+	return ret;
 }
 
 void *resctrl_arch_mon_ctx_alloc(struct rdt_resource *r, int evtid)
@@ -371,7 +360,6 @@ int resctrl_arch_rmid_read(struct rdt_resource	*r, struct rdt_domain *d,
 	struct mon_cfg cfg;
 	struct mpam_resctrl_dom *dom;
 	struct mpam_resctrl_res *res;
-	u32 mon = *(u32 *)arch_mon_ctx;
 	enum mpam_device_features type;
 
 	resctrl_arch_rmid_read_context_check();
@@ -392,20 +380,15 @@ int resctrl_arch_rmid_read(struct rdt_resource	*r, struct rdt_domain *d,
 		return -EINVAL;
 	}
 
-	cfg.mon = mon;
-	if (cfg.mon == USE_RMID_IDX) {
-		/*
-		 * The number of mbwu monitors can't support free run mode,
-		 * adapt the remainder of rmid to the num_mon as compromise.
-		 */
-		res = container_of(r, struct mpam_resctrl_res, resctrl_res);
-		if (type == mpam_feat_msmon_mbwu)
-			num_mon = res->class->props.num_mbwu_mon;
-		else
-			num_mon = res->class->props.num_csu_mon;
-
-		cfg.mon = closid % num_mon;
-	}
+	/*
+	 * The number of mbwu monitors can't support free run mode,
+	 * adapt the remainder of rmid to the num_mon as compromise.
+	 */
+	res = container_of(r, struct mpam_resctrl_res, resctrl_res);
+	if (type == mpam_feat_msmon_mbwu)
+		num_mon = res->class->props.num_mbwu_mon;
+	else
+		num_mon = res->class->props.num_csu_mon;
 
 	cfg.match_pmg = true;
 	cfg.pmg = rmid;
@@ -413,11 +396,13 @@ int resctrl_arch_rmid_read(struct rdt_resource	*r, struct rdt_domain *d,
 
 	if (cdp_enabled) {
 		cfg.partid = resctrl_get_config_index(closid, CDP_DATA);
+		cfg.mon = cfg.partid % num_mon;
 		err = mpam_msmon_read(dom->comp, &cfg, type, val);
 		if (err)
 			return err;
 
 		cfg.partid = resctrl_get_config_index(closid, CDP_CODE);
+		cfg.mon = cfg.partid % num_mon;
 		err = mpam_msmon_read(dom->comp, &cfg, type, &cdp_val);
 		if (!err) {
 			pr_debug("read monitor rmid %u %s:%u CODE/DATA: %lld/%lld\n",
@@ -427,6 +412,7 @@ int resctrl_arch_rmid_read(struct rdt_resource	*r, struct rdt_domain *d,
 		}
 	} else {
 		cfg.partid = closid;
+		cfg.mon = cfg.partid % num_mon;
 		err = mpam_msmon_read(dom->comp, &cfg, type, val);
 	}
 
