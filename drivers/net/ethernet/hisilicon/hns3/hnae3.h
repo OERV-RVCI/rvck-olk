@@ -632,6 +632,8 @@ typedef int (*read_func)(struct seq_file *s, void *data);
  *   Get wake on lan info
  * set_wol
  *   Config wake on lan
+ * dbg_get_read_func
+ *   Return the read func for debugfs seq file
  */
 struct hnae3_ae_ops {
 	int (*init_ae_dev)(struct hnae3_ae_dev *ae_dev);
@@ -839,6 +841,9 @@ struct hnae3_ae_ops {
 			struct ethtool_wolinfo *wol);
 	int (*set_wol)(struct hnae3_handle *handle,
 		       struct ethtool_wolinfo *wol);
+	int (*dbg_get_read_func)(struct hnae3_handle *handle,
+				 enum hnae3_dbg_cmd cmd,
+				 read_func *func);
 	int (*priv_ops)(struct hnae3_handle *handle, int opcode,
 			void *data, size_t length);
 };
