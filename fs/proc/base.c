@@ -3587,7 +3587,7 @@ static const struct pid_entry tgid_base_stuff[] = {
 	REG("sched",      S_IRUGO|S_IWUSR, proc_pid_sched_operations),
 #endif
 #ifdef CONFIG_QOS_SCHED_SMART_GRID
-	REG("smart_grid_level", 0644, proc_pid_sg_level_operations),
+	REG("smart_grid_level", 0640, proc_pid_sg_level_operations),
 #endif
 #ifdef CONFIG_FAST_SYSCALL
 	REG("xcall", 0644, proc_pid_xcall_operations),
