@@ -1012,7 +1012,7 @@ static inline void cgroup_ifs_account_hardirq(u64 delta)
 	cgroup_ifs_account_delta(ifsc, IFS_HARDIRQ, delta);
 }
 
-void cgroup_ifs_enable_irq_account(void);
+void cgroup_ifs_enable_irq_account(bool enable);
 #endif
 
 #ifdef CONFIG_SCHEDSTATS
@@ -1045,7 +1045,7 @@ static inline void cgroup_ifs_account_throttle(struct cgroup *cgrp, int cpu, u64
 #ifdef CONFIG_IRQ_TIME_ACCOUNTING
 static inline void cgroup_ifs_account_softirq(u64 delta) {}
 static inline void cgroup_ifs_account_hardirq(u64 delta) {}
-static inline void cgroup_ifs_enable_irq_account(void) {}
+static inline void cgroup_ifs_enable_irq_account(bool enable) {}
 #endif
 #ifdef CONFIG_SCHEDSTATS
 static inline void cgroup_ifs_account_sleep(struct task_struct *task, u64 delta) {}

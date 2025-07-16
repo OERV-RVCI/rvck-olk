@@ -370,8 +370,8 @@ void cgroup_ifs_enable_sleep_account(void)
 #endif
 
 #ifdef CONFIG_IRQ_TIME_ACCOUNTING
-void cgroup_ifs_enable_irq_account(void)
+void cgroup_ifs_enable_irq_account(bool enable)
 {
-	ifs_irq_enable = true;
+	ifs_irq_enable = enable;
 }
 #endif
