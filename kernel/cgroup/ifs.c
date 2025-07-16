@@ -201,6 +201,9 @@ static const char *ifs_type_name(int type)
 	case IFS_SPINLOCK:
 		name = "spinlock";
 		break;
+	case IFS_MUTEX:
+		name = "mutex";
+		break;
 	case IFS_SMT:
 		name = "smt";
 		break;
