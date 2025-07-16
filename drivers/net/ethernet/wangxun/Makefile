@@ -5,3 +5,5 @@
 
 obj-$(CONFIG_LIBWX) += libwx/
 obj-$(CONFIG_NGBE) += ngbe/
+obj-$(CONFIG_TXGBE) += txgbe/
+
