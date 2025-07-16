@@ -8,6 +8,21 @@
 #include <linux/sched/clock.h>
 #include "cgroup-internal.h"
 
+#define TDESC_MAX_SLOT	64
+#define TDESC_BUF_SIZE	32
+
+enum {
+	IFS_TIMER_CLK,
+	IFS_TIMER_TSC,
+	IFS_TIMER_NUM,
+};
+
+/* time range description, for printing */
+struct ifs_tdesc {
+	char tdesc_str[TDESC_MAX_SLOT][TDESC_BUF_SIZE];
+	int tdesc_num;
+};
+
 /* smt interference */
 struct smt_itf {
 	u64 total_time; /* total time of all smt interferences */
@@ -25,6 +40,8 @@ static DEFINE_PER_CPU(u64, ifs_tsc_freq);
 static DEFINE_PER_CPU(struct smt_itf, smt_itf);
 static DEFINE_PER_CPU(struct smt_info, smt_info);
 static DEFINE_PER_CPU_READ_MOSTLY(int, smt_sibling) = -1;
+
+static struct ifs_tdesc ifs_tdesc[IFS_TIMER_NUM];
 
 static DEFINE_PER_CPU(struct cgroup_ifs_cpu, cgrp_root_ifs_cpu);
 struct cgroup_ifs cgroup_root_ifs = {
@@ -237,6 +254,70 @@ static const char *ifs_type_name(int type)
 	return name;
 }
 
+static int tdesc_print(char *buf, int size, u64 nsecs)
+{
+	int ret;
+
+	if (nsecs < NSEC_PER_USEC)
+		ret = snprintf(buf, size, "%llu ns", nsecs);
+	else if (nsecs < NSEC_PER_MSEC)
+		ret = snprintf(buf, size, "%llu.%02llu us",
+			       nsecs / NSEC_PER_USEC,
+			       (nsecs % NSEC_PER_USEC) / 10);
+	else if (nsecs < NSEC_PER_SEC)
+		ret = snprintf(buf, size, "%llu.%02llu ms",
+			       nsecs / NSEC_PER_MSEC,
+			       (nsecs % NSEC_PER_MSEC) / 10000);
+	else
+		ret = snprintf(buf, size, "%llu.%02llu s",
+			       nsecs / NSEC_PER_SEC,
+			       (nsecs % NSEC_PER_SEC) / 10000000);
+	return ret;
+}
+
+static void tdesc_init(struct ifs_tdesc *desc, u64 freq)
+{
+	u64 start = 1, end;
+	u64 left, right;
+	int len, size;
+	int i = 0;
+	char *buf;
+
+	do {
+		end = start << 1;
+		if (freq == NSEC_PER_SEC)
+			left = start;
+		else
+			left = (((u64)NSEC_PER_SEC << 5) / freq * start) >> 5;
+		right = left << 1;
+
+		len = 0;
+		size = TDESC_BUF_SIZE;
+
+		buf = &desc->tdesc_str[TDESC_MAX_SLOT - 1 - i][0];
+		len += snprintf(buf, size, "[");
+		len += tdesc_print(buf + len, size - len, left);
+
+		/* less than 1 hour*/
+		if (left <  (u64)NSEC_PER_SEC * 3600ULL) {
+			len += snprintf(buf + len, size - len, ", ");
+			len += tdesc_print(buf + len, size - len, right);
+			len += snprintf(buf + len, size - len, ")");
+		} else {
+			snprintf(buf + len, size - len, " .... )");
+			desc->tdesc_num = TDESC_MAX_SLOT - 1 - i;
+			break;
+		}
+		start = end;
+	} while (++i < TDESC_MAX_SLOT);
+}
+
+static void cgroup_ifs_tdesc_init(void)
+{
+	tdesc_init(&ifs_tdesc[IFS_TIMER_CLK], NSEC_PER_SEC);
+	tdesc_init(&ifs_tdesc[IFS_TIMER_TSC], this_cpu_read(ifs_tsc_freq));
+}
+
 static u64 tsc_cycles_to_nsec(u64 tsc_cycles)
 {
 #if defined(__aarch64__) || defined(__x86_64__)
@@ -305,6 +386,77 @@ static int print_sum_time(struct cgroup_ifs *ifs, struct seq_file *seq)
 		seq_printf(seq, "%-18s%llu\n", ifs_type_name(i), time[i]);
 	}
 
+	seq_puts(seq, "\n");
+
+	return 0;
+}
+
+static int print_hist_count(struct cgroup_ifs *ifs, struct seq_file *seq)
+{
+	struct cgroup_ifs_hist *h;
+	struct ifs_tdesc *desc;
+	bool is_print_title;
+	const char *name;
+	u64 start;
+	int count;
+	int i, j;
+	int cpu;
+
+	h = kzalloc(sizeof(struct cgroup_ifs_hist), GFP_KERNEL);
+	if (!h)
+		return -ENOMEM;
+
+	for_each_possible_cpu(cpu) {
+		struct cgroup_ifs_cpu *ifsc = per_cpu_ptr(ifs->pcpu, cpu);
+
+		for (i = 0; i < NR_IFS_TYPES; i++) {
+			if (!should_print(i))
+				continue;
+			for (j = 0; j < CGROUP_IFS_HIST_SLOTS; j++)
+				h->counts[i][j] += ifsc->hist.counts[i][j];
+		}
+	}
+
+	for (i = 0; i < NR_IFS_TYPES; i++) {
+		name = ifs_type_name(i);
+		is_print_title = false;
+		start = 1ULL << 63;
+
+		if (!should_print(i))
+			continue;
+
+		if (i == IFS_SPINLOCK || i == IFS_MUTEX)
+			desc = &ifs_tdesc[IFS_TIMER_TSC];
+		else
+			desc = &ifs_tdesc[IFS_TIMER_CLK];
+
+		count = 0;
+		for (j = 0; j < CGROUP_IFS_HIST_SLOTS; j++) {
+			if (j < desc->tdesc_num) {
+				count += h->counts[i][j];
+				continue;
+			} else if (j == desc->tdesc_num) {
+				count += h->counts[i][j];
+			} else {
+				count = h->counts[i][j];
+			}
+
+			if (count) {
+				if (unlikely(!is_print_title)) {
+					is_print_title = true;
+					seq_printf(seq, "%s distribution\n", name);
+				}
+				seq_printf(seq, "%-24s: %d\n",
+					   desc->tdesc_str[j], count);
+			}
+			start /= 2;
+		}
+
+		if (is_print_title)
+			seq_puts(seq, "\n");
+	}
+
+	kfree(h);
 	return 0;
 }
 
@@ -320,6 +472,10 @@ static int cgroup_ifs_show(struct seq_file *seq, void *v)
 	}
 
 	ret = print_sum_time(ifs, seq);
+	if (ret)
+		return ret;
+
+	ret = print_hist_count(ifs, seq);
 	if (ret)
 		return ret;
 
@@ -345,6 +501,7 @@ static ssize_t cgroup_ifs_write(struct kernfs_open_file *of, char *buf,
 		for_each_possible_cpu(cpu) {
 			ifsc = per_cpu_ptr(ifs->pcpu, cpu);
 			memset(ifsc->time, 0, sizeof(ifsc->time));
+			memset(ifsc->hist.counts, 0, sizeof(ifsc->hist.counts));
 		}
 	}
 
@@ -379,6 +536,7 @@ void cgroup_ifs_init(void)
 		return;
 
 	BUG_ON(cgroup_init_cftypes(NULL, cgroup_ifs_files));
+	cgroup_ifs_tdesc_init();
 
 	static_branch_enable(&cgrp_ifs_enabled);
 }

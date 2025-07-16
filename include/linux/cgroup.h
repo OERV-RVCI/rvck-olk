@@ -880,7 +880,14 @@ enum ifs_types {
 
 #ifdef CONFIG_CGROUP_IFS
 
+#define CGROUP_IFS_HIST_SLOTS	64
+
+struct cgroup_ifs_hist {
+	u64 counts[NR_IFS_TYPES][CGROUP_IFS_HIST_SLOTS];
+};
+
 struct cgroup_ifs_cpu {
+	struct cgroup_ifs_hist hist;
 	/* total time for each interference, in ns */
 	u64 time[NR_IFS_TYPES];
 };
@@ -926,8 +933,12 @@ static inline void cgroup_ifs_account_delta(struct cgroup_ifs_cpu *ifsc,
 	if (!cgroup_ifs_enabled())
 		return;
 
-	if (delta > 0)
+	if (delta > 0) {
+		int idx = __builtin_clzll(delta);
+
+		ifsc->hist.counts[type][idx]++;
 		ifsc->time[type] += delta;
+	}
 }
 
 static inline u64 cgroup_ifs_time_counter(void)
