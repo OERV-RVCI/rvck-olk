@@ -932,7 +932,19 @@ static inline void cgroup_ifs_account_delta(struct cgroup_ifs_cpu *ifsc,
 
 static inline u64 cgroup_ifs_time_counter(void)
 {
+#if defined(__aarch64__)
+	u64 counter;
+
+	asm volatile("mrs %0, cntvct_el0" : "=r" (counter) :: "memory");
+	return counter;
+#elif defined(__x86_64__)
+	unsigned int lo, hi;
+
+	asm volatile("rdtsc" : "=a"(lo), "=d"(hi) :: "memory");
+	return ((u64)hi << 32) | lo;
+#else
 	return sched_clock();
+#endif
 }
 
 static inline void cgroup_ifs_enter_lock(u64 *clock)

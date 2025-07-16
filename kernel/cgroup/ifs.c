@@ -21,6 +21,7 @@ struct smt_info {
 	bool is_noidle;
 };
 
+static DEFINE_PER_CPU(u64, ifs_tsc_freq);
 static DEFINE_PER_CPU(struct smt_itf, smt_itf);
 static DEFINE_PER_CPU(struct smt_info, smt_info);
 static DEFINE_PER_CPU_READ_MOSTLY(int, smt_sibling) = -1;
@@ -236,6 +237,37 @@ static const char *ifs_type_name(int type)
 	return name;
 }
 
+static u64 tsc_cycles_to_nsec(u64 tsc_cycles)
+{
+#if defined(__aarch64__) || defined(__x86_64__)
+	return (((u64)NSEC_PER_SEC << 5) / this_cpu_read(ifs_tsc_freq) * tsc_cycles) >> 5;
+#else
+	return tsc_cycles;
+#endif
+}
+
+static int cgroup_ifs_tsc_init(void)
+{
+	u64 freq = 0;
+	int cpu;
+
+#if defined(__aarch64__)
+	asm volatile ("MRS %0, CNTFRQ_EL0" : "=r" (freq));
+#elif defined(__x86_64__)
+	if (likely(boot_cpu_has(X86_FEATURE_CONSTANT_TSC)))
+		freq = tsc_khz * 1000;
+#endif
+	if (!freq) {
+		pr_warn("Disable CGROUP IFS: no constant tsc\n");
+		return -1;
+	}
+
+	for_each_possible_cpu(cpu)
+		per_cpu(ifs_tsc_freq, cpu) = freq;
+
+	return 0;
+}
+
 static bool should_print(int type)
 {
 #ifdef CONFIG_SCHEDSTATS
@@ -268,6 +300,8 @@ static int print_sum_time(struct cgroup_ifs *ifs, struct seq_file *seq)
 	for (i = 0; i < NR_IFS_TYPES; i++) {
 		if (!should_print(i))
 			continue;
+		if (i == IFS_SPINLOCK || i == IFS_MUTEX)
+			time[i] = tsc_cycles_to_nsec(time[i]);
 		seq_printf(seq, "%-18s%llu\n", ifs_type_name(i), time[i]);
 	}
 
@@ -339,6 +373,9 @@ struct cftype cgroup_v1_ifs_files[] = {
 void cgroup_ifs_init(void)
 {
 	if (!ifs_enable)
+		return;
+
+	if (cgroup_ifs_tsc_init() < 0)
 		return;
 
 	BUG_ON(cgroup_init_cftypes(NULL, cgroup_ifs_files));
