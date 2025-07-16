@@ -862,6 +862,7 @@ void cgroup_move_task_to_root(struct task_struct *tsk);
 #endif
 
 enum ifs_types {
+	IFS_SPINLOCK,
 	IFS_SMT,
 	IFS_RUNDELAY,
 	IFS_WAKELAT,

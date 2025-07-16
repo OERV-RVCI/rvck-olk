@@ -198,6 +198,9 @@ static const char *ifs_type_name(int type)
 	char *name = NULL;
 
 	switch (type) {
+	case IFS_SPINLOCK:
+		name = "spinlock";
+		break;
 	case IFS_SMT:
 		name = "smt";
 		break;

@@ -16,6 +16,7 @@
 #include <linux/smp.h>
 #include <linux/bug.h>
 #include <linux/cpumask.h>
+#include <linux/cgroup.h>
 #include <linux/percpu.h>
 #include <linux/hardirq.h>
 #include <linux/mutex.h>
@@ -348,6 +349,7 @@ void __lockfunc queued_spin_lock_slowpath(struct qspinlock *lock, u32 val)
 {
 	struct mcs_spinlock *prev, *next, *node;
 	u32 old, tail;
+	u64 ifs_clock;
 	int idx;
 
 	BUILD_BUG_ON(CONFIG_NR_CPUS >= (1U << _Q_TAIL_CPU_BITS));
@@ -434,6 +436,7 @@ pv_queue:
 	tail = encode_tail(smp_processor_id(), idx);
 
 	trace_contention_begin(lock, LCB_F_SPIN);
+	cgroup_ifs_enter_lock(&ifs_clock);
 
 	/*
 	 * 4 nodes are allocated based on the assumption that there will
@@ -588,6 +591,7 @@ locked:
 	pv_kick_node(lock, next);
 
 release:
+	cgroup_ifs_leave_lock(ifs_clock, IFS_SPINLOCK);
 	trace_contention_end(lock, 0);
 
 	/*
