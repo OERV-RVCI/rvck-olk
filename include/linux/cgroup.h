@@ -10,6 +10,7 @@
  */
 
 #include <linux/sched.h>
+#include <linux/sched/clock.h>
 #include <linux/cpumask.h>
 #include <linux/nodemask.h>
 #include <linux/rculist.h>
@@ -860,8 +861,6 @@ static inline void cgroup_bpf_put(struct cgroup *cgrp) {}
 void cgroup_move_task_to_root(struct task_struct *tsk);
 #endif
 
-#ifdef CONFIG_CGROUP_IFS
-
 enum ifs_types {
 	IFS_SMT,
 	IFS_RUNDELAY,
@@ -876,6 +875,8 @@ enum ifs_types {
 #endif
 	NR_IFS_TYPES,
 };
+
+#ifdef CONFIG_CGROUP_IFS
 
 struct cgroup_ifs_cpu {
 	/* total time for each interference, in ns */
@@ -925,6 +926,40 @@ static inline void cgroup_ifs_account_delta(struct cgroup_ifs_cpu *ifsc,
 
 	if (delta > 0)
 		ifsc->time[type] += delta;
+}
+
+static inline u64 cgroup_ifs_time_counter(void)
+{
+	return sched_clock();
+}
+
+static inline void cgroup_ifs_enter_lock(u64 *clock)
+{
+	struct cgroup_ifs *ifs;
+
+	if (!cgroup_ifs_enabled())
+		return;
+
+	ifs = current_ifs();
+	if (ifs)
+		*clock = cgroup_ifs_time_counter();
+}
+
+static inline void cgroup_ifs_leave_lock(u64 clock, enum ifs_types t)
+{
+	u64 delta;
+	struct cgroup_ifs *ifs;
+	struct cgroup_ifs_cpu *ifsc;
+
+	if (!cgroup_ifs_enabled())
+		return;
+
+	ifs = current_ifs();
+	if (ifs) {
+		ifsc = this_cpu_ptr(ifs->pcpu);
+		delta = cgroup_ifs_time_counter() - clock;
+		cgroup_ifs_account_delta(ifsc, t, delta);
+	}
 }
 
 void cgroup_ifs_account_smttime(struct task_struct *prev,
@@ -1035,6 +1070,8 @@ void cgroup_ifs_enable_sleep_account(void);
 #endif
 
 #else /* !CONFIG_CGROUP_IFS */
+static inline void cgroup_ifs_enter_lock(u64 *clock) {}
+static inline void cgroup_ifs_leave_lock(u64 clock, enum ifs_types t) {}
 static inline void cgroup_ifs_account_smttime(struct task_struct *prev,
 					      struct task_struct *next,
 					      struct task_struct *idle) {}
