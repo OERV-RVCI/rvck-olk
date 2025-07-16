@@ -24,6 +24,7 @@
 #include <linux/sched/rt.h>
 #include <linux/sched/wake_q.h>
 #include <linux/sched/debug.h>
+#include <linux/cgroup.h>
 #include <linux/export.h>
 #include <linux/spinlock.h>
 #include <linux/interrupt.h>
@@ -572,6 +573,7 @@ __mutex_lock_common(struct mutex *lock, unsigned int state, unsigned int subclas
 {
 	struct mutex_waiter waiter;
 	struct ww_mutex *ww;
+	u64 ifs_clock;
 	int ret;
 
 	if (!use_ww_ctx)
@@ -647,6 +649,7 @@ __mutex_lock_common(struct mutex *lock, unsigned int state, unsigned int subclas
 
 	set_current_state(state);
 	trace_contention_begin(lock, LCB_F_MUTEX);
+	cgroup_ifs_enter_lock(&ifs_clock);
 	for (;;) {
 		bool first;
 
@@ -719,6 +722,7 @@ acquired:
 skip_wait:
 	/* got the lock - cleanup and rejoice! */
 	lock_acquired(&lock->dep_map, ip);
+	cgroup_ifs_leave_lock(ifs_clock, IFS_MUTEX);
 	trace_contention_end(lock, 0);
 
 	if (ww_ctx)
@@ -732,6 +736,7 @@ err:
 	__set_current_state(TASK_RUNNING);
 	__mutex_remove_waiter(lock, &waiter);
 err_early_kill:
+	cgroup_ifs_leave_lock(ifs_clock, IFS_MUTEX);
 	trace_contention_end(lock, ret);
 	raw_spin_unlock(&lock->wait_lock);
 	debug_mutex_free_waiter(&waiter);

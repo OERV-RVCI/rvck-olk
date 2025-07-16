@@ -27,12 +27,13 @@ static int sched_clock_irqtime;
 void enable_sched_clock_irqtime(void)
 {
 	sched_clock_irqtime = 1;
-	cgroup_ifs_enable_irq_account();
+	cgroup_ifs_enable_irq_account(true);
 }
 
 void disable_sched_clock_irqtime(void)
 {
 	sched_clock_irqtime = 0;
+	cgroup_ifs_enable_irq_account(false);
 }
 
 static void irqtime_account_delta(struct irqtime *irqtime, u64 delta,
