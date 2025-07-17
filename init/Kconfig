@@ -1028,6 +1028,20 @@ config MEMCG_KMEM
 	depends on MEMCG
 	default y
 
+config MEMCG_KMEM_STOCK
+	bool "Enable kmem stock"
+	depends on MEMCG_KMEM
+	default n
+	help
+	This option enables a per-CPU cache (stock) for kernel memory (kmem)
+	charge/uncharge operations. When multiple memory cgroups (memcgs)
+	frequently charge/uncharge kernel memory, they may contend on atomic
+	operations in shared parent memcgs, causing performance degradation.
+
+	The per-CPU stock reduces contention by batching charges locally
+	before flushing to the shared parent, improving scalability for
+	high-frequency kmem allocations.
+
 config BLK_CGROUP
 	bool "IO controller"
 	depends on BLOCK
