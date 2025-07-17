@@ -2282,6 +2282,96 @@ static DEFINE_PER_CPU(struct memcg_stock_pcp, memcg_stock) = {
 static DEFINE_MUTEX(percpu_charge_mutex);
 
 #ifdef CONFIG_MEMCG_KMEM
+#ifdef CONFIG_MEMCG_KMEM_STOCK
+struct kmem_stock_pcp {
+	local_lock_t stock_lock;
+	struct mem_cgroup *cached; /* this never be root cgroup */
+	unsigned int nr_pages;
+};
+static DEFINE_PER_CPU(struct kmem_stock_pcp, kmem_stock) = {
+	.stock_lock = INIT_LOCAL_LOCK(stock_lock),
+};
+
+static bool consume_kmem(struct mem_cgroup *memcg, unsigned int nr_pages)
+{
+	struct kmem_stock_pcp *stock;
+	unsigned long flags;
+	bool ret = false;
+
+	if (nr_pages > MEMCG_CHARGE_BATCH)
+		return ret;
+
+	local_lock_irqsave(&kmem_stock.stock_lock, flags);
+
+	stock = this_cpu_ptr(&kmem_stock);
+	if (memcg == READ_ONCE(stock->cached) && stock->nr_pages >= nr_pages) {
+		stock->nr_pages -= nr_pages;
+		ret = true;
+	}
+
+	local_unlock_irqrestore(&kmem_stock.stock_lock, flags);
+
+	return ret;
+}
+
+static void drain_kmem(struct kmem_stock_pcp *stock)
+{
+	struct mem_cgroup *old = READ_ONCE(stock->cached);
+
+	if (!old)
+		return;
+
+	if (stock->nr_pages) {
+		page_counter_uncharge(&old->kmem, stock->nr_pages);
+		stock->nr_pages = 0;
+	}
+
+	css_put(&old->css);
+	WRITE_ONCE(stock->cached, NULL);
+}
+
+static void refill_kmem(struct mem_cgroup *memcg, unsigned int nr_pages)
+{
+	unsigned long flags;
+	struct kmem_stock_pcp *stock;
+
+	local_lock_irqsave(&kmem_stock.stock_lock, flags);
+	stock = this_cpu_ptr(&kmem_stock);
+	if (READ_ONCE(stock->cached) != memcg) { /* reset if necessary */
+		drain_kmem(stock);
+		css_get(&memcg->css);
+		WRITE_ONCE(stock->cached, memcg);
+	}
+	stock->nr_pages += nr_pages;
+
+	if (stock->nr_pages > MEMCG_CHARGE_BATCH)
+		drain_kmem(stock);
+	local_unlock_irqrestore(&kmem_stock.stock_lock, flags);
+}
+
+static bool uncharge_to_kmem_stock(struct mem_cgroup *memcg, unsigned int nr_pages)
+{
+	struct kmem_stock_pcp *stock;
+	unsigned long flags;
+	bool ret = false;
+
+	if (nr_pages >= MEMCG_CHARGE_BATCH)
+		return ret;
+
+	local_irq_save(flags);
+
+	stock = this_cpu_ptr(&kmem_stock);
+	if (memcg == stock->cached && stock->nr_pages + nr_pages <= MEMCG_CHARGE_BATCH) {
+		stock->nr_pages += nr_pages;
+		ret = true;
+	}
+
+	local_irq_restore(flags);
+
+	return ret;
+}
+#endif
+
 static struct obj_cgroup *drain_obj_stock(struct memcg_stock_pcp *stock);
 static bool obj_stock_flush_required(struct memcg_stock_pcp *stock,
 				     struct mem_cgroup *root_memcg);
@@ -3295,6 +3385,30 @@ struct obj_cgroup *get_obj_cgroup_from_folio(struct folio *folio)
 	return objcg;
 }
 
+#ifdef CONFIG_MEMCG_KMEM_STOCK
+static void memcg_account_kmem(struct mem_cgroup *memcg, int nr_pages)
+{
+	unsigned int batch = MEMCG_CHARGE_BATCH;
+
+	mod_memcg_state(memcg, MEMCG_KMEM, nr_pages);
+	if (cgroup_subsys_on_dfl(memory_cgrp_subsys))
+		return;
+
+	if (nr_pages > 0) {
+		if (consume_kmem(memcg, nr_pages))
+			return;
+		if (batch < nr_pages)
+			batch = nr_pages;
+		page_counter_charge(&memcg->kmem, batch);
+
+		if (batch > nr_pages)
+			refill_kmem(memcg, batch - nr_pages);
+	} else {
+		if (!uncharge_to_kmem_stock(memcg, -nr_pages))
+			page_counter_uncharge(&memcg->kmem, -nr_pages);
+	}
+}
+#else
 static void memcg_account_kmem(struct mem_cgroup *memcg, int nr_pages)
 {
 	mod_memcg_state(memcg, MEMCG_KMEM, nr_pages);
@@ -3305,7 +3419,7 @@ static void memcg_account_kmem(struct mem_cgroup *memcg, int nr_pages)
 			page_counter_uncharge(&memcg->kmem, -nr_pages);
 	}
 }
-
+#endif
 
 /*
  * obj_cgroup_uncharge_pages: uncharge a number of kernel pages from a objcg
