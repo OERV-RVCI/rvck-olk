@@ -160,7 +160,6 @@ int nfs_multipath_client_info_init(void **data,
 				   const struct nfs_client_initdata *cl_init)
 {
 	int rc;
-	struct multipath_client_info *info;
 	struct multipath_client_info **enfs_info;
 	/* no multi path info, no need do multipath init */
 	if (cl_init->enfs_option == NULL)
@@ -176,11 +175,11 @@ int nfs_multipath_client_info_init(void **data,
 	if (*enfs_info == NULL)
 		return -ENOMEM;
 
-	info = (struct multipath_client_info *)*enfs_info;
-	enfs_log_info("init client info %p.\n", info);
-	rc = nfs_multipath_client_mount_info_init(info, cl_init);
+	enfs_log_info("init client info %p.\n", *enfs_info);
+	rc = nfs_multipath_client_mount_info_init(*enfs_info, cl_init);
 	if (rc) {
-		nfs_multipath_client_info_free((void *)info);
+		nfs_multipath_client_info_free(*enfs_info);
+		*enfs_info = NULL;
 		return rc;
 	}
 	return rc;
