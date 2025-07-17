@@ -9149,7 +9149,7 @@ static void set_task_select_cpus(struct task_struct *p, int *idlest_cpu,
 
 	/* manual mode */
 	tg = task_group(p);
-	for_each_cpu(cpu, p->prefer_cpus) {
+	for_each_cpu_and(cpu, p->prefer_cpus, cpu_online_mask) {
 		if (idlest_cpu && (available_idle_cpu(cpu) || sched_idle_cpu(cpu))) {
 			*idlest_cpu = cpu;
 		} else if (idlest_cpu) {
@@ -9174,8 +9174,7 @@ static void set_task_select_cpus(struct task_struct *p, int *idlest_cpu,
 	}
 	rcu_read_unlock();
 
-	if (tg_capacity > cpumask_weight(p->prefer_cpus) &&
-	    util_avg_sum * 100 <= tg_capacity * sysctl_sched_util_low_pct) {
+	if (util_avg_sum * 100 < tg_capacity * sysctl_sched_util_low_pct) {
 		p->select_cpus = p->prefer_cpus;
 		if (sd_flag & SD_BALANCE_WAKE)
 			schedstat_inc(p->stats.nr_wakeups_preferred_cpus);
