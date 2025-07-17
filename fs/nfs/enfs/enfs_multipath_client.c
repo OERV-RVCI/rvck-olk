@@ -148,9 +148,7 @@ int nfs_multipath_client_info_init(void **data,
 {
 	int rc;
 	struct multipath_client_info **enfs_info;
-	/* no multi path info, no need do multipath init */
-	if (cl_init->enfs_option == NULL)
-		return 0;
+
 	enfs_info = (struct multipath_client_info **)data;
 	if (enfs_info == NULL)
 		return -EINVAL;
