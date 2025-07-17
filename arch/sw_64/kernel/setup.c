@@ -674,6 +674,8 @@ setup_arch(char **cmdline_p)
 	 */
 	trap_init();
 
+	early_paging_init();
+
 	setup_cpu_features();
 
 	apply_alternatives_all();
@@ -700,8 +702,6 @@ setup_arch(char **cmdline_p)
 	atomic_notifier_chain_register(&panic_notifier_list,
 			&sw64_panic_block);
 
-	callback_init();
-
 	/*
 	 * Process command-line arguments.
 	 */
@@ -723,6 +723,10 @@ setup_arch(char **cmdline_p)
 
 	sw64_memblock_init();
 
+	paging_init();
+
+	callback_init();
+
 	/* Try to upgrade ACPI tables via initrd */
 	acpi_table_upgrade();
 
@@ -741,8 +745,6 @@ setup_arch(char **cmdline_p)
 	sparse_init();
 
 	zone_sizes_init();
-
-	paging_init();
 
 	kexec_control_page_init();
 
