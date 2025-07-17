@@ -9128,6 +9128,7 @@ static void set_task_select_cpus(struct task_struct *p, int *idlest_cpu,
 	struct task_group *tg;
 	long spare;
 	int cpu, mode;
+	int nr_cpus_valid = 0;
 
 	p->select_cpus = p->cpus_ptr;
 	if (!prefer_cpus_valid(p))
@@ -9171,10 +9172,18 @@ static void set_task_select_cpus(struct task_struct *p, int *idlest_cpu,
 
 		util_avg_sum += taskgroup_cpu_util(tg, cpu);
 		tg_capacity += capacity_of(cpu);
+		nr_cpus_valid++;
 	}
 	rcu_read_unlock();
 
-	if (util_avg_sum * 100 < tg_capacity * sysctl_sched_util_low_pct) {
+	/*
+	 * Follow cases should select cpus_ptr, checking by condition of
+	 * tg_capacity > nr_cpus_valid:
+	 * 1. all prefer_cpus offline;
+	 * 2. all prefer_cpus has no cfs capaicity(tg_capacity = nr_cpus_valid * 1)
+	 */
+	if (tg_capacity > nr_cpus_valid &&
+	    util_avg_sum * 100 <= tg_capacity * sysctl_sched_util_low_pct) {
 		p->select_cpus = p->prefer_cpus;
 		if (sd_flag & SD_BALANCE_WAKE)
 			schedstat_inc(p->stats.nr_wakeups_preferred_cpus);
