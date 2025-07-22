@@ -332,7 +332,7 @@ int mm_spe_start(void)
 	isb();
 	write_sysreg_s(reg, SYS_PMSCR_EL1);
 
-	if (spe->support_boost_spe) {
+	if (spe->support_boost_spe && mm_spe_boost_enable) {
 		reg = arm_spe_to_htpg();
 		isb();
 		write_sysreg_s(reg, SYS_OMHTPG_EL1);
@@ -344,6 +344,12 @@ int mm_spe_start(void)
 void mm_spe_continue(void)
 {
 	int reg;
+
+	if (spe->support_boost_spe && mm_spe_boost_enable) {
+		reg = arm_spe_to_htpg();
+		isb();
+		write_sysreg_s(reg, SYS_OMHTPG_EL1);
+	}
 
 	mm_spe_buffer_init();
 
@@ -445,7 +451,7 @@ static void mm_spe_sample_para_init(void)
 
 	spe->min_latency = 120;
 
-	if (spe->support_boost_spe)
+	if (spe->support_boost_spe && mm_spe_boost_enable)
 		arm_spe_boost_spe_para_init();
 }
 
