@@ -414,7 +414,7 @@ static void arm_spe_boost_spe_para_init(void)
 {
 	struct boost_spe_contol *boost_spe = &spe->boost_spe;
 
-	boost_spe->record_sel = 1;
+	boost_spe->record_sel = 0;
 	boost_spe->pop_uop_sel = 0;
 	boost_spe->rmt_acc_pa_flt_en = 0;
 	boost_spe->rmt_acc_en = 1;
