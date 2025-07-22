@@ -332,7 +332,7 @@ int mm_spe_start(void)
 	isb();
 	write_sysreg_s(reg, SYS_PMSCR_EL1);
 
-	if (spe->support_boost_spe) {
+	if (spe->support_boost_spe && mm_spe_boost_enable) {
 		reg = arm_spe_to_htpg();
 		isb();
 		write_sysreg_s(reg, SYS_OMHTPG_EL1);
@@ -344,6 +344,12 @@ int mm_spe_start(void)
 void mm_spe_continue(void)
 {
 	int reg;
+
+	if (spe->support_boost_spe && mm_spe_boost_enable) {
+		reg = arm_spe_to_htpg();
+		isb();
+		write_sysreg_s(reg, SYS_OMHTPG_EL1);
+	}
 
 	mm_spe_buffer_init();
 
@@ -408,7 +414,7 @@ static void arm_spe_boost_spe_para_init(void)
 {
 	struct boost_spe_contol *boost_spe = &spe->boost_spe;
 
-	boost_spe->record_sel = 1;
+	boost_spe->record_sel = 0;
 	boost_spe->pop_uop_sel = 0;
 	boost_spe->rmt_acc_pa_flt_en = 0;
 	boost_spe->rmt_acc_en = 1;
@@ -445,7 +451,7 @@ static void mm_spe_sample_para_init(void)
 
 	spe->min_latency = 120;
 
-	if (spe->support_boost_spe)
+	if (spe->support_boost_spe && mm_spe_boost_enable)
 		arm_spe_boost_spe_para_init();
 }
 
