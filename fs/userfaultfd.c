@@ -976,7 +976,7 @@ static int userfaultfd_release(struct inode *inode, struct file *file)
 				 new_flags, vma->anon_vma,
 				 vma->vm_file, vma->vm_pgoff,
 				 vma_policy(vma),
-				 NULL_VM_UFFD_CTX, anon_vma_name(vma));
+				 NULL_VM_UFFD_CTX, anon_vma_name(vma), false);
 		if (prev) {
 			vma = prev;
 		} else {
@@ -1547,7 +1547,7 @@ static int userfaultfd_register(struct userfaultfd_ctx *ctx,
 				 vma->anon_vma, vma->vm_file, pgoff,
 				 vma_policy(vma),
 				 ((struct vm_userfaultfd_ctx){ ctx }),
-				 anon_vma_name(vma));
+				 anon_vma_name(vma), false);
 		if (prev) {
 			/* vma_merge() invalidated the mas */
 			vma = prev;
@@ -1732,7 +1732,7 @@ static int userfaultfd_unregister(struct userfaultfd_ctx *ctx,
 		prev = vma_merge(&vmi, mm, prev, start, vma_end, new_flags,
 				 vma->anon_vma, vma->vm_file, pgoff,
 				 vma_policy(vma),
-				 NULL_VM_UFFD_CTX, anon_vma_name(vma));
+				 NULL_VM_UFFD_CTX, anon_vma_name(vma), false);
 		if (prev) {
 			vma = prev;
 			goto next;
