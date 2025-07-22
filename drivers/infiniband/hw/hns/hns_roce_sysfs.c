@@ -5,7 +5,6 @@
 
 #include <rdma/ib_sysfs.h>
 
-#include "hnae3.h"
 #include "hns_roce_device.h"
 #include "hns_roce_hw_v2.h"
 
