@@ -844,7 +844,7 @@ static int mbind_range(struct vma_iterator *vmi, struct vm_area_struct *vma,
 	pgoff = vma->vm_pgoff + ((vmstart - vma->vm_start) >> PAGE_SHIFT);
 	merged = vma_merge(vmi, vma->vm_mm, *prev, vmstart, vmend, vma->vm_flags,
 			 vma->anon_vma, vma->vm_file, pgoff, new_pol,
-			 vma->vm_userfaultfd_ctx, anon_vma_name(vma));
+			 vma->vm_userfaultfd_ctx, anon_vma_name(vma), false);
 	if (merged) {
 		*prev = merged;
 		return vma_replace_policy(merged, new_pol);

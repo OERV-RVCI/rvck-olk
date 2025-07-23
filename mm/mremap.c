@@ -1073,7 +1073,7 @@ SYSCALL_DEFINE5(mremap, unsigned long, addr, unsigned long, old_len,
 			vma = vma_merge(&vmi, mm, vma, extension_start,
 				extension_end, vma->vm_flags, vma->anon_vma,
 				vma->vm_file, extension_pgoff, vma_policy(vma),
-				vma->vm_userfaultfd_ctx, anon_vma_name(vma));
+				vma->vm_userfaultfd_ctx, anon_vma_name(vma), false);
 			if (!vma) {
 				vm_unacct_memory(pages);
 				ret = -ENOMEM;

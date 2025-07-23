@@ -587,10 +587,13 @@ static inline void vma_complete(struct vma_prepare *vp,
 
 	if (vp->file) {
 		i_mmap_unlock_write(vp->mapping);
-		uprobe_mmap(vp->vma);
 
-		if (vp->adj_next)
-			uprobe_mmap(vp->adj_next);
+		if (!vp->skip_vma_uprobe) {
+			uprobe_mmap(vp->vma);
+
+			if (vp->adj_next)
+				uprobe_mmap(vp->adj_next);
+		}
 	}
 
 	if (vp->remove) {
@@ -908,6 +911,9 @@ can_vma_merge_after(struct vm_area_struct *vma, unsigned long vm_flags,
  * NNNN is represented by *next or not represented at all (NULL)
  * **** is not represented - it will be merged and the vma containing the
  *      area is returned, or the function will return NULL
+ *
+ * @skip_vma_uprobe: only valid for copy_vma process, others please
+ *                   mark it as false.
  */
 struct vm_area_struct *vma_merge(struct vma_iterator *vmi, struct mm_struct *mm,
 			struct vm_area_struct *prev, unsigned long addr,
@@ -915,7 +921,8 @@ struct vm_area_struct *vma_merge(struct vma_iterator *vmi, struct mm_struct *mm,
 			struct anon_vma *anon_vma, struct file *file,
 			pgoff_t pgoff, struct mempolicy *policy,
 			struct vm_userfaultfd_ctx vm_userfaultfd_ctx,
-			struct anon_vma_name *anon_name)
+			struct anon_vma_name *anon_name,
+			bool skip_vma_uprobe)
 {
 	struct vm_area_struct *curr, *next, *res;
 	struct vm_area_struct *vma, *adjust, *remove, *remove2;
@@ -1061,6 +1068,8 @@ struct vm_area_struct *vma_merge(struct vma_iterator *vmi, struct mm_struct *mm,
 	init_multi_vma_prep(&vp, vma, adjust, remove, remove2);
 	VM_WARN_ON(vp.anon_vma && adjust && adjust->anon_vma &&
 		   vp.anon_vma != adjust->anon_vma);
+
+	vp.skip_vma_uprobe = skip_vma_uprobe;
 
 	vma_prepare(&vp);
 	vma_adjust_trans_huge(vma, vma_start, vma_end, adj_start);
@@ -2873,7 +2882,7 @@ cannot_expand:
 			merge = vma_merge(&vmi, mm, prev, vma->vm_start,
 				    vma->vm_end, vma->vm_flags, NULL,
 				    vma->vm_file, vma->vm_pgoff, NULL,
-				    NULL_VM_UFFD_CTX, NULL);
+				    NULL_VM_UFFD_CTX, NULL, false);
 
 			if (merge) {
 				/*
@@ -3457,6 +3466,7 @@ struct vm_area_struct *copy_vma(struct vm_area_struct **vmap,
 	struct mm_struct *mm = vma->vm_mm;
 	struct vm_area_struct *new_vma, *prev;
 	bool faulted_in_anon_vma = true;
+	bool skip_vma_uprobe = false;
 	VMA_ITERATOR(vmi, mm, addr);
 
 	/*
@@ -3472,9 +3482,17 @@ struct vm_area_struct *copy_vma(struct vm_area_struct **vmap,
 	if (new_vma && new_vma->vm_start < addr + len)
 		return NULL;	/* should never get here */
 
+	/*
+	 * If the VMA we are copying might contain a uprobe PTE, ensure
+	 * that we do not establish one upon merge. Otherwise, when mremap()
+	 * moves page tables, it will orphan the newly created PTE.
+	 */
+	if (vma->vm_file)
+		skip_vma_uprobe = true;
+
 	new_vma = vma_merge(&vmi, mm, prev, addr, addr + len, vma->vm_flags,
 			    vma->anon_vma, vma->vm_file, pgoff, vma_policy(vma),
-			    vma->vm_userfaultfd_ctx, anon_vma_name(vma));
+			    vma->vm_userfaultfd_ctx, anon_vma_name(vma), skip_vma_uprobe);
 	if (new_vma) {
 		/*
 		 * Source vma may have been merged into new_vma
