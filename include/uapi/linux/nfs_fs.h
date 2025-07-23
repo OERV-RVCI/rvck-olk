@@ -57,7 +57,8 @@
 #define NFSDBG_PNFS_LD		0x2000
 #define NFSDBG_STATE		0x4000
 #define NFSDBG_XATTRCACHE	0x8000
-#define NFSDBG_ALL		0xFFFF
+#define NFSDBG_ENFS		0x10000
+#define NFSDBG_ALL		0xFFFFF
 
 
 #endif /* _UAPI_LINUX_NFS_FS_H */

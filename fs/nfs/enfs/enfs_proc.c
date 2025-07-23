@@ -107,7 +107,7 @@ static int debug_show_clnt(struct rpc_clnt *clnt, void *data)
 
 static void debug_print_all_xprt(void)
 {
-	if (enfs_debug != 0)
+	ifdebug(ENFS)
 		enfs_iter_rpc_clnt(debug_show_clnt, NULL);
 }
 

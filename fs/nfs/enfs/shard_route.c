@@ -3,6 +3,7 @@
  * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
  */
 #include <linux/kthread.h>
+#include <linux/lockd/lockd.h>
 #include <linux/nfs3.h>
 #include <linux/nfs_fs.h>
 #include <linux/nfs_xdr.h>
@@ -11,7 +12,6 @@
 #include <linux/sunrpc/types.h>
 #include <linux/sunrpc/xprt.h>
 #include <linux/moduleparam.h>
-#include <linux/lockd/lockd.h>
 #include "../../../net/sunrpc/netns.h"
 #include "../../../fs/nfs/nfs4_fs.h"
 #include "../../../fs/nfs/netns.h"

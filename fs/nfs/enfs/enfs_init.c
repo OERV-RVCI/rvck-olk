@@ -23,10 +23,6 @@
 #include "dns_internal.h"
 #include "shard.h"
 
-unsigned int enfs_debug;
-module_param_named(enfs_debug, enfs_debug, uint, 0600);
-MODULE_PARM_DESC(enfs_debug, "enfs debugging mask");
-
 static struct enfs_adapter_ops enfs_adapter = {
 	.name = "enfs",
 	.owner = THIS_MODULE,
