@@ -245,7 +245,7 @@ void print_enfs_multipath_addr(struct sockaddr *local, struct sockaddr *remote)
 	sockaddr_ip_to_str(local, buf1, sizeof(buf1));
 	sockaddr_ip_to_str(remote, buf2, sizeof(buf2));
 
-	pr_info("local:%s remote:%s\n", buf1, buf2);
+	enfs_log_info("local:%s remote:%s\n", buf1, buf2);
 }
 
 static int enfs_servername(char *servername, unsigned long long len,
@@ -267,8 +267,7 @@ static int enfs_servername(char *servername, unsigned long long len,
 		snprintf(servername, len, "%pI6", &sin6->sin6_addr);
 		break;
 	default:
-		pr_info("ENFS: invalid family:%d\n",
-		       args->address->sa_family);
+		enfs_log_info("invalid family:%d\n", args->address->sa_family);
 		return -EINVAL;
 	}
 	return 0;

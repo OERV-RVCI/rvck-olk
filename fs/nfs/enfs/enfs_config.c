@@ -695,7 +695,7 @@ int enfs_config_timer_init(void)
 
 void enfs_config_timer_exit(void)
 {
-	pr_info("ENFS: enfs_notify_file_exit\n");
+	enfs_log_info("enfs_notify_file_exit\n");
 	if (thread)
 		kthread_stop(thread);
 }

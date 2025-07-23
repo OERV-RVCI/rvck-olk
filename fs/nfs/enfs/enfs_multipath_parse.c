@@ -25,12 +25,11 @@ void nfs_multipath_parse_ip_ipv6_add(struct sockaddr_in6 *sin6, int add_num)
 {
 	int i;
 
-	pr_info("NFS:  before %08x%08x%08x%08x  add_num: %d[%s]\n",
-		ntohl(sin6->sin6_addr.in6_u.u6_addr32[0]),
-		ntohl(sin6->sin6_addr.in6_u.u6_addr32[1]),
-		ntohl(sin6->sin6_addr.in6_u.u6_addr32[2]),
-		ntohl(sin6->sin6_addr.in6_u.u6_addr32[3]), add_num,
-		__func__);
+	enfs_log_info("before %08x%08x%08x%08x  add_num: %d\n",
+		      ntohl(sin6->sin6_addr.in6_u.u6_addr32[0]),
+		      ntohl(sin6->sin6_addr.in6_u.u6_addr32[1]),
+		      ntohl(sin6->sin6_addr.in6_u.u6_addr32[2]),
+		      ntohl(sin6->sin6_addr.in6_u.u6_addr32[3]), add_num);
 	for (i = 0; i < add_num; i++) {
 		sin6->sin6_addr.in6_u.u6_addr32[3] =
 			htonl(ntohl(sin6->sin6_addr.in6_u.u6_addr32[3]) + 1);
@@ -65,23 +64,22 @@ static int enfs_parse_ip_range(struct net *net_ns, const char *cursor,
 	struct sockaddr_in *sin4;
 	struct sockaddr_in6 *sin6;
 
-	pr_info("NFS:   parsing nfs mount option '%s' type: %d[%s]\n", cursor,
-		type, __func__);
+	enfs_log_info("parsing nfs mount option '%s' type: %d\n", cursor, type);
 	len = rpc_pton(net_ns, cursor, strlen(cursor), (struct sockaddr *)&addr,
 		       sizeof(addr));
 	if (!len)
 		return -EINVAL;
 
 	if (addr.ss_family != ip_list->address[ip_list->count - 1].ss_family) {
-		pr_info("NFS:   parsing nfs mount option type: %d fail. both have ipv4 and ipv6 address[%s]\n",
-			type, __func__);
+		enfs_log_info("parsing nfs mount option type: %d fail. both have ipv4 and ipv6 address\n",
+			      type);
 		return -EINVAL;
 	}
 
 	if (rpc_cmp_addr((const struct sockaddr *)&ip_list
 				 ->address[ip_list->count - 1],
 			 (const struct sockaddr *)&addr)) {
-		pr_info("range ip is same ip.\n");
+		enfs_log_info("range ip is same ip.\n");
 		return 0;
 	}
 
@@ -93,20 +91,19 @@ static int enfs_parse_ip_range(struct net *net_ns, const char *cursor,
 			sin4 = (struct sockaddr_in *)&tmp_addr;
 			sin4->sin_addr.s_addr =
 				htonl(ntohl(sin4->sin_addr.s_addr) + add_num);
-			pr_info("NFS:   parsing nfs mount option ip %08x type: %d ipcont %d [%s]\n",
-				ntohl(sin4->sin_addr.s_addr), type,
-				ip_list->count, __func__);
+			enfs_log_info("parsing nfs mount option ip %08x type: %d ipcont %d\n",
+				      ntohl(sin4->sin_addr.s_addr), type, ip_list->count);
 			break;
 		}
 		case AF_INET6:
 			sin6 = (struct sockaddr_in6 *)&tmp_addr;
 			nfs_multipath_parse_ip_ipv6_add(sin6, add_num);
-			pr_info("NFS:   parsing nfs mount option ip %08x%08x%08x%08x type: %d ipcont %d [%s]\n",
-				ntohl(sin6->sin6_addr.in6_u.u6_addr32[0]),
-				ntohl(sin6->sin6_addr.in6_u.u6_addr32[1]),
-				ntohl(sin6->sin6_addr.in6_u.u6_addr32[2]),
-				ntohl(sin6->sin6_addr.in6_u.u6_addr32[3]), type,
-				ip_list->count, __func__);
+			enfs_log_info("parsing nfs mount option ip %08x%08x%08x%08x type: %d ipcont %d\n",
+				      ntohl(sin6->sin6_addr.in6_u.u6_addr32[0]),
+				      ntohl(sin6->sin6_addr.in6_u.u6_addr32[1]),
+				      ntohl(sin6->sin6_addr.in6_u.u6_addr32[2]),
+				      ntohl(sin6->sin6_addr.in6_u.u6_addr32[3]),
+				      type, ip_list->count);
 			break;
 		default:
 			return -EOPNOTSUPP;
@@ -122,9 +119,8 @@ static int enfs_parse_ip_range(struct net *net_ns, const char *cursor,
 			if (rpc_cmp_addr((const struct sockaddr *)&ip_list
 						 ->address[i],
 					 (const struct sockaddr *)&tmp_addr)) {
-				pr_info("NFS:   parsing nfs mount option type: %d index %d,same as before %d, add_num %d [%s]\n",
-					type, ip_list->count, i, add_num,
-					__func__);
+				enfs_log_info("parsing nfs mount option type: %d index %d,same as before %d, add_num %d\n",
+					      type, ip_list->count, i, add_num);
 				add_num++;
 				duplicate_flag = true;
 				break;
@@ -132,7 +128,7 @@ static int enfs_parse_ip_range(struct net *net_ns, const char *cursor,
 		}
 
 		if (duplicate_flag == false) {
-			pr_info("this ip not duplicate;");
+			enfs_log_info("this ip not duplicate;");
 			add_num = 1;
 
 			if ((type == LOCALADDR &&
@@ -140,11 +136,11 @@ static int enfs_parse_ip_range(struct net *net_ns, const char *cursor,
 			    (type == REMOTEADDR &&
 			     ip_list->count >=
 				     enfs_get_config_link_count_per_mount())) {
-				pr_info("[MULTIPATH:%s] iplist for type %d reached %d, more than supported limit %d\n",
-					__func__, type, ip_list->count,
-					type == LOCALADDR ?
-						MAX_SUPPORTED_LOCAL_IP_COUNT :
-						enfs_get_config_link_count_per_mount());
+				enfs_log_info("iplist for type %d reached %d, more than supported limit %d\n",
+					      type, ip_list->count,
+					      type == LOCALADDR ?
+						      MAX_SUPPORTED_LOCAL_IP_COUNT :
+						      enfs_get_config_link_count_per_mount());
 				ip_list->count = 0;
 				return -ENOSPC;
 			}
@@ -176,8 +172,8 @@ int enfs_parse_ip_single(struct nfs_ip_list *ip_list, struct net *net_ns,
 	for (i = 0; i < ip_list->count; i++) {
 		if (rpc_cmp_addr((const struct sockaddr *)&ip_list->address[i],
 				 (const struct sockaddr *)&addr)) {
-			pr_info("NFS:   parsing nfs mount option '%s' type: %d index %d same as before index %d [%s]\n",
-				cursor, type, ip_list->count, i, __func__);
+			enfs_log_info("parsing nfs mount option '%s' type: %d index %d same as before index %d\n",
+				      cursor, type, ip_list->count, i);
 
 			swap = ip_list->address[i];
 			ip_list->address[i] =
@@ -191,11 +187,11 @@ int enfs_parse_ip_single(struct nfs_ip_list *ip_list, struct net *net_ns,
 	     ip_list->count >= MAX_SUPPORTED_LOCAL_IP_COUNT) ||
 	    (type == REMOTEADDR &&
 	     ip_list->count >= enfs_get_config_link_count_per_mount())) {
-		pr_info("[MULTIPATH:%s] iplist for type %d reached %d, more than supported limit %d\n",
-			__func__, type, ip_list->count,
-			type == LOCALADDR ?
-				MAX_SUPPORTED_LOCAL_IP_COUNT :
-				enfs_get_config_link_count_per_mount());
+		enfs_log_info("iplist for type %d reached %d, more than supported limit %d\n",
+			      type, ip_list->count,
+			      type == LOCALADDR ?
+				      MAX_SUPPORTED_LOCAL_IP_COUNT :
+				      enfs_get_config_link_count_per_mount());
 		ip_list->count = 0;
 		return -ENOSPC;
 	}
@@ -549,9 +545,8 @@ int nfs_multipath_parse_options_check_duplicate(
 						 ->local_ip_list->address[i],
 					 (const struct sockaddr *)&options
 						 ->remote_ip_list->address[j])) {
-				pr_info(
-				       "ENFS: local_addr index %d as same as remote_addr index %d\n.",
-				       i, j);
+				enfs_log_info("local_addr index %d as same as remote_addr index %d\n.",
+					      i, j);
 				return -EOPNOTSUPP;
 			}
 		}

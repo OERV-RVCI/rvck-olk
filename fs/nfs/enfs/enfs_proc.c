@@ -89,9 +89,9 @@ static int debug_show_xprt(struct rpc_clnt *clnt, struct rpc_xprt *xprt,
 
 	lsid = ctx ? ctx->lsid : 0;
 
-	pr_info("	   xprt:%p ctx:%p main:%d queue_len:%lu lsid:%llu.\n",
-		xprt, ctx, ctx ? ctx->main : false,
-		ctx ? atomic_long_read(&ctx->queuelen) : 0, lsid);
+	enfs_log_info("xprt:%p ctx:%p main:%d queue_len:%lu lsid:%llu.\n",
+		      xprt, ctx, ctx ? ctx->main : false,
+		      ctx ? atomic_long_read(&ctx->queuelen) : 0, lsid);
 	return 0;
 }
 
@@ -99,8 +99,8 @@ static int debug_show_clnt(struct rpc_clnt *clnt, void *data)
 {
 	struct rpc_clnt_reserve *clnt_reserve = (struct rpc_clnt_reserve *)clnt;
 
-	pr_info("	clnt %d addr:%p enfs:%d\n", clnt->cl_clid, clnt,
-		clnt_reserve->cl_enfs);
+	enfs_log_info("clnt %d addr:%p enfs:%d\n", clnt->cl_clid, clnt,
+		      clnt_reserve->cl_enfs);
 	rpc_clnt_iterate_for_each_xprt(clnt, debug_show_xprt, NULL);
 	return 0;
 }
