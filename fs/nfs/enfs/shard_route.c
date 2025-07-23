@@ -1231,10 +1231,9 @@ static void debug_show_uuidinfo(int argc, char *argv[])
 		   GET_DEVID_FROM_UUID(&file_uuid));
 	read_lock(&shard_ctrl->view_lock);
 	list_for_each_entry(table, &shard_ctrl->view_list, next) {
-		if (table->devId != GET_DEVID_FROM_UUID(&file_uuid)) {
+		if (table->devId != GET_DEVID_FROM_UUID(&file_uuid))
 			continue;
-			;
-		}
+
 		list_for_each_entry(info, &table->fs_head, next) {
 			if (info->fsId != GET_FSID_FROM_UUID(&file_uuid))
 				continue;
@@ -1288,12 +1287,12 @@ static void debug_show_fsinfo(int argc, char *argv[])
 	read_lock(&shard_ctrl->view_lock);
 	list_for_each_entry(table, &shard_ctrl->view_list, next) {
 		list_for_each_entry(info, &table->fs_head, next) {
-			if (fsid == info->fsId) {
-				pr_info(
-					   "ENFS: fsid(%u) clusterId(%llu) storagePoolId(%u) tenantId(%u).\n",
-					   fsid, info->clusterId,
-					   info->storagePoolId, info->tenantId);
-			}
+			if (fsid != info->fsId)
+				continue;
+			pr_info(
+				   "ENFS: fsid(%u) clusterId(%llu) storagePoolId(%u) tenantId(%u).\n",
+				   fsid, info->clusterId,
+				   info->storagePoolId, info->tenantId);
 		}
 	}
 	read_unlock(&shard_ctrl->view_lock);
@@ -1307,6 +1306,7 @@ static void debug_show_shardinfo(int argc, char *argv[])
 	uint32_t storagePoolId;
 	uint32_t startIndex;
 	uint32_t count;
+	bool matched;
 
 	if (argc != 3) {
 		enfs_log_info("argc number is wrong.\n");
@@ -1332,24 +1332,25 @@ static void debug_show_shardinfo(int argc, char *argv[])
 	read_lock(&shard_ctrl->view_lock);
 	list_for_each_entry(table, &shard_ctrl->view_list, next) {
 		list_for_each_entry(view, &table->shard_head, next) {
-			if (view->clusterId == clusterId &&
-				view->storagePoolId == storagePoolId) {
-				for (count = 0; count < 100; count++) {
-					if (count + startIndex < view->num) {
-						pr_info(
-							   "ENFS: shardid(%d) lsid(0x%llx) vnodeid(%u) cpuId(%u).\n",
-							   count + startIndex,
-							   view->entry[count +
-								   startIndex].
-							   lsid,
-							   view->entry[count +
-								   startIndex].
-							   vnodeid,
-							   view->entry[count +
-								   startIndex].
-							   cpuid);
-					}
-				}
+			matched = (view->clusterId == clusterId &&
+				   view->storagePoolId == storagePoolId);
+			if (!matched)
+				continue;
+			for (count = 0; count < 100; count++) {
+				if (count + startIndex >= view->num)
+					continue;
+				pr_info(
+					   "ENFS: shardid(%d) lsid(0x%llx) vnodeid(%u) cpuId(%u).\n",
+					   count + startIndex,
+					   view->entry[count +
+						   startIndex].
+					   lsid,
+					   view->entry[count +
+						   startIndex].
+					   vnodeid,
+					   view->entry[count +
+						   startIndex].
+					   cpuid);
 			}
 		}
 	}
@@ -1385,6 +1386,7 @@ static void debug_show_lifinfo(int argc, char *argv[])
 	struct rpc_xprt *pos;
 	struct enfs_xprt_context *context;
 	char buf[128];
+	bool matched;
 
 	if (argc > 1) {
 		enfs_log_info("argc number is wrong.\n");
@@ -1399,15 +1401,16 @@ static void debug_show_lifinfo(int argc, char *argv[])
 		list_for_each_entry_rcu(pos, &xps->xps_xprt_list, xprt_switch) {
 			get_ip_to_str((struct sockaddr *)&(pos->addr), buf,
 					  sizeof(buf));
-			if (argc == 0 || strcmp(buf, argv[0]) == 0) {
-				context =
-					(struct enfs_xprt_context *)
-					xprt_get_reserve_context(pos);
-				pr_info(
-					   "ENFS: ipaddr(%s) lsId(0x%llx) wwn(0x%llx) cpuId(%u).\n",
-					   buf, context->lsid, context->wwn,
-					   context->cpuId);
-			}
+			matched = (argc == 0 || strcmp(buf, argv[0]) == 0);
+			if (!matched)
+				continue;
+			context =
+				(struct enfs_xprt_context *)
+				xprt_get_reserve_context(pos);
+			pr_info(
+				   "ENFS: ipaddr(%s) lsId(0x%llx) wwn(0x%llx) cpuId(%u).\n",
+				   buf, context->lsid, context->wwn,
+				   context->cpuId);
 		}
 		rcu_read_unlock();
 	}
