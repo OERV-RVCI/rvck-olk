@@ -343,9 +343,7 @@ void print_ip_info(struct seq_file *mount_option, struct nfs_ip_list *ip_list,
 			seq_printf(mount_option, "%s", buf);
 		else
 			seq_printf(mount_option, "~%s", buf);
-		dfprintk(MOUNT,
-			 "NFS:   show nfs mount option type:%s %s [%s]\n", type,
-			 buf, __func__);
+		enfs_log_debug("show nfs mount option type:%s %s\n", type, buf);
 	}
 }
 
@@ -443,7 +441,7 @@ void nfs_multipath_client_info_show(struct seq_file *seq, void *data)
 	struct multipath_client_info *client_info =
 		server->nfs_client->cl_multipath_data;
 
-	dfprintk(MOUNT, "NFS:   show nfs mount option[%s]\n", __func__);
+	enfs_log_debug("show nfs mount option\n");
 	if ((client_info->local_ip_list) &&
 	    (client_info->local_ip_list->count > 0))
 		print_ip_info(seq, client_info->local_ip_list, "localaddrs");
