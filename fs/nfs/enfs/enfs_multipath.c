@@ -519,9 +519,10 @@ static void enfs_combine_addr(struct xprt_create *xprtargs,
 
 	atomic_set(&wait_queue_condition, total_combinations);
 
-	pr_debug("local count:%d remote count:%d\n", local_total, remote_total);
+	enfs_log_debug("local count:%d remote count:%d\n",
+		       local_total, remote_total);
 	if (local_total == 0 || remote_total == 0) {
-		pr_debug("no ip list is present.\n");
+		enfs_log_debug("no ip list is present.\n");
 		return;
 	}
 
@@ -598,9 +599,10 @@ static void enfs_combine_addr_with_no_local(struct xprt_create *xprtargs,
 
 	atomic_set(&wait_queue_condition, total_combinations);
 
-	pr_debug("local count:%d remote count:%d\n", local_total, remote_total);
+	enfs_log_debug("local count:%d remote count:%d\n",
+		       local_total, remote_total);
 	if (remote_total == 0) {
-		pr_debug("no ip list is present.\n");
+		enfs_log_debug("no ip list is present.\n");
 		return;
 	}
 

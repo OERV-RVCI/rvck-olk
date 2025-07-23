@@ -39,7 +39,7 @@ static bool enfs_rpc_xprt_switch_need_delete_addr(
 	local_total = enfs_option->local_ip_list->count;
 	remote_total = enfs_option->remote_ip_list->count;
 	if (local_total == 0 || remote_total == 0) {
-		pr_debug("no ip list is present.\n");
+		enfs_log_debug("no ip list is present.\n");
 		return false;
 	}
 
