@@ -63,7 +63,6 @@ struct view_table {
 	rwlock_t lock;
 	struct list_head fs_head;
 	struct list_head shard_head;
-	struct list_head lif_head;
 	struct list_head ls_head;
 	uint64_t devId;
 };
@@ -227,7 +226,6 @@ static struct view_table *create_view_table(uint64_t devId)
 	rwlock_init(&table->lock);
 	INIT_LIST_HEAD(&table->fs_head);
 	INIT_LIST_HEAD(&table->shard_head);
-	INIT_LIST_HEAD(&table->lif_head);
 	INIT_LIST_HEAD(&table->ls_head);
 	table->devId = devId;
 	list_add_tail(&table->next, &shard_ctrl->view_list);
@@ -273,14 +271,12 @@ static void enfs_clear_ ## __struct_name(struct view_table *table)	\
 
 DEFINE_CLEAR_LIST_FUNC(fs_info, fs_head);
 DEFINE_CLEAR_LIST_FUNC(shard_view, shard_head);
-DEFINE_CLEAR_LIST_FUNC(lif_info, lif_head);
 DEFINE_CLEAR_LIST_FUNC(ls_info, ls_head);
 
 static void enfs_free_view_table(struct view_table *table)
 {
 	enfs_clear_fs_info(table);
 	enfs_clear_shard_view(table);
-	enfs_clear_lif_info(table);
 	enfs_clear_ls_info(table);
 	list_del(&table->next);
 	kfree(table);
@@ -576,76 +572,6 @@ static int enfs_update_lsinfo(uint64_t devId, struct enfs_get_ls_version_rsp *ls
 		return ret;
 	}
 
-	write_unlock(&shard_ctrl->view_lock);
-	return 0;
-}
-
-int enfs_update_lif_info(uint64_t devId, const char *ipaddr,
-			 struct enfs_lif_port_info_single *lif_info)
-{
-	struct view_table *table;
-	struct lif_info *lif;
-
-	if (strlen(ipaddr) >= IP_ADDRESS_LEN_MAX || lif_info->isfound == 1)
-		return -EINVAL;
-
-	write_lock(&shard_ctrl->view_lock);
-	table = get_view_table(devId, true);
-	if (!table) {
-		write_unlock(&shard_ctrl->view_lock);
-		enfs_log_error("get view table failed.\n");
-		return -ENOMEM;
-	}
-
-	list_for_each_entry(lif, &table->lif_head, next) {
-		if (strcmp(lif->ipAddr, ipaddr) == 0)
-			break;
-	}
-
-	if (!list_entry_is_head(lif, &table->lif_head, next)) {
-		lif->workStatus = lif_info->workStatus;
-		lif->lsId = lif_info->lsId;
-		lif->tenantId = lif_info->tenantId;
-		lif->homeSiteWwn = lif_info->homeSiteWwn;
-		write_unlock(&shard_ctrl->view_lock);
-		return 0;
-	}
-
-	lif = kmalloc(sizeof(*lif), GFP_KERNEL);
-	if (!lif) {
-		write_unlock(&shard_ctrl->view_lock);
-		return -ENOMEM;
-	}
-	strscpy(lif->ipAddr, ipaddr, IP_ADDRESS_LEN_MAX);
-	lif->workStatus = lif_info->workStatus;
-	lif->lsId = lif_info->lsId;
-	lif->tenantId = lif_info->tenantId;
-	lif->homeSiteWwn = lif_info->homeSiteWwn;
-	list_add_tail(&lif->next, &table->lif_head);
-
-	write_unlock(&shard_ctrl->view_lock);
-	return 0;
-}
-
-int enfs_delete_shard(uint64_t devId, uint64_t clusterId,
-			  uint32_t storagePoolId)
-{
-	struct view_table *table;
-	struct shard_view *view;
-
-	write_lock(&shard_ctrl->view_lock);
-	table = get_view_table(devId, false);
-	if (!table) {
-		write_unlock(&shard_ctrl->view_lock);
-		return 0;
-	}
-	list_for_each_entry(view, &table->shard_head, next) {
-		if (view->clusterId == clusterId &&
-			view->storagePoolId == storagePoolId) {
-			list_del(&view->next);
-			kfree(view);
-		}
-	}
 	write_unlock(&shard_ctrl->view_lock);
 	return 0;
 }
