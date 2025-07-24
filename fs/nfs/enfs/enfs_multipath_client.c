@@ -266,7 +266,7 @@ int nfs_multipath_client_info_match(void *src, void *dst)
 	ret = nfs_multipath_ip_list_info_match(src_info->local_ip_list,
 					       dst_info->local_ip_list);
 	if (ret == false) {
-		pr_err("ENFS: local_ip not match.\n");
+		enfs_log_error("local_ip not match.\n");
 		return ret;
 	}
 
@@ -275,14 +275,14 @@ int nfs_multipath_client_info_match(void *src, void *dst)
 		ret = nfs_multipath_ip_list_info_match(
 			src_info->remote_ip_list, dst_info->remote_ip_list);
 		if (ret == false) {
-			pr_err("ENFS: remote_ip not match.\n");
+			enfs_log_error("remote_ip not match.\n");
 			return ret;
 		}
 	} else {
 		ret = nfs_multipath_dns_list_info_match(
 			src_info->pRemoteDnsInfo, dst_info->pRemoteDnsInfo);
 		if (ret == false) {
-			pr_err("ENFS: dns not match.\n");
+			enfs_log_error("dns not match.\n");
 			return ret;
 		}
 	}
@@ -379,8 +379,7 @@ static void multipath_print_sockaddr(struct seq_file *seq,
 	default:
 		break;
 	}
-	pr_err("ENFS: unsupport family:%d\n",
-		addr->sa_family);
+	enfs_log_error("unsupport family:%d\n", addr->sa_family);
 }
 
 void convert_lookup_cache_str(struct nfs_server *server, char **server_lookup,

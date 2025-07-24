@@ -560,7 +560,7 @@ int nfs_multipath_parse_options_check(struct multipath_mount_options *options)
 
 	rc = nfs_multipath_parse_options_check_valid(options);
 	if (rc != 0) {
-		pr_err("ENFS: has invalid ip.\n");
+		enfs_log_error("has invalid ip.\n");
 		return rc;
 	}
 

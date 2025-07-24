@@ -687,7 +687,7 @@ int enfs_config_timer_init(void)
 {
 	thread = kthread_run(enfs_thread_func, NULL, "enfs_notiy_file_thread");
 	if (IS_ERR(thread)) {
-		pr_err("Failed to create kernel thread\n");
+		enfs_log_error("Failed to create kernel thread\n");
 		return PTR_ERR(thread);
 	}
 	return 0;

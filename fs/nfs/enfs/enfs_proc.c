@@ -481,7 +481,7 @@ static void enfs_proc_delete_file(struct rpc_clnt *clnt)
 
 	err = clnt_proc_name(clnt, buf, sizeof(buf));
 	if (err) {
-		pr_err("gen clnt name failed.\n");
+		enfs_log_error("gen clnt name failed.\n");
 		return;
 	}
 	remove_proc_subtree(buf, enfs_proc_parent);
@@ -494,7 +494,7 @@ int enfs_proc_create_clnt(struct rpc_clnt *clnt)
 
 	err = enfs_proc_create_file(clnt);
 	if (err) {
-		pr_err("ENFS: create client %d\n",
+		enfs_log_error("create client %d\n",
 			err);
 		return err;
 	}
@@ -573,7 +573,7 @@ static int enfs_proc_create_parent(void)
 	enfs_proc_parent = proc_mkdir(ENFS_PROC_DIR, NULL);
 	LVOS_TP_END;
 	if (enfs_proc_parent == NULL) {
-		pr_err("ENFS: create proc dir err\n");
+		enfs_log_error("create proc dir err\n");
 		return -ENOMEM;
 	}
 #ifdef NFS_CLIENT_DEBUG

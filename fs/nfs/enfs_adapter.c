@@ -40,8 +40,7 @@ int enfs_adapter_register(struct enfs_adapter_ops *ops)
 	old = cmpxchg((struct enfs_adapter_ops **)&enfs_adapter, NULL, ops);
 	if (old == NULL || old == ops)
 		return 0;
-	pr_err("ENFS: regist enfs_adapter ops %p fail. old %p\n",
-		ops, old);
+	enfs_log_error("regist enfs_adapter ops %p fail. old %p\n", ops, old);
 	return -EPERM;
 }
 EXPORT_SYMBOL_GPL(enfs_adapter_register);
@@ -53,9 +52,7 @@ int enfs_adapter_unregister(struct enfs_adapter_ops *ops)
 	old = cmpxchg((struct enfs_adapter_ops **)&enfs_adapter, ops, NULL);
 	if (old == ops || old == NULL)
 		return 0;
-	pr_err("ENFS: unregist enfs_adapter ops %p fail. old %p\n",
-		ops,
-	       old);
+	enfs_log_error("unregist enfs_adapter ops %p fail. old %p\n", ops, old);
 	return -EPERM;
 }
 EXPORT_SYMBOL_GPL(enfs_adapter_unregister);

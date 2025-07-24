@@ -564,7 +564,7 @@ static void enfs_combine_addr(struct xprt_create *xprtargs,
 		err = enfs_configure_xprt_to_clnt(xprtargs, clnt,
 						  &attach_infos[i]);
 		if (err) {
-			pr_err("add xprt ippair err:%d\n", err);
+			enfs_log_error("add xprt ippair err:%d\n", err);
 			atomic_dec(&wait_queue_condition);
 		}
 		link_count++;
@@ -627,7 +627,7 @@ static void enfs_combine_addr_with_no_local(struct xprt_create *xprtargs,
 		err = enfs_configure_xprt_to_clnt(xprtargs, clnt,
 						  &attach_infos[i]);
 		if (err) {
-			pr_err("add xprt ippair err:%d\n", err);
+			enfs_log_error("add xprt ippair err:%d\n", err);
 			atomic_dec(&wait_queue_condition);
 		}
 		link_count++;
@@ -648,7 +648,7 @@ void enfs_xprt_ippair_create(struct xprt_create *xprtargs,
 	struct multipath_mount_options *mopt =
 		(struct multipath_mount_options *)data;
 	if (mopt == NULL) {
-		pr_err("ip list is NULL.\n");
+		enfs_log_error("ip list is NULL.\n");
 		return;
 	}
 	if (xprtargs->ident == XPRT_TRANSPORT_RDMA ||
@@ -880,7 +880,7 @@ int enfs_multipath_create_thread(void *data)
 
 	errno = enfs_proc_create_clnt(create_args->clnt);
 	if (errno != 0)
-		pr_err("create clnt proc failed.\n");
+		enfs_log_error("create clnt proc failed.\n");
 
 	set_clnt_enfs_flag(create_args->clnt);
 	enfs_xprt_ippair_create(&xprtargs, create_args->clnt, mount_options);
