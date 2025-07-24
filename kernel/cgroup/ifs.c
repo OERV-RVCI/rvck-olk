@@ -537,15 +537,13 @@ void cgroup_ifs_init(void)
 
 	BUG_ON(cgroup_init_cftypes(NULL, cgroup_ifs_files));
 	cgroup_ifs_tdesc_init();
-
-	static_branch_enable(&cgrp_ifs_enabled);
 }
 
 int cgroup_ifs_add_files(struct cgroup_subsys_state *css, struct cgroup *cgrp)
 {
 	int ret = 0;
 
-	if (!cgroup_ifs_enabled())
+	if (!ifs_enable)
 		return 0;
 
 	ret = cgroup_addrm_files(css, cgrp, cgroup_ifs_files, true);
@@ -559,7 +557,7 @@ int cgroup_ifs_add_files(struct cgroup_subsys_state *css, struct cgroup *cgrp)
 
 void cgroup_ifs_rm_files(struct cgroup_subsys_state *css, struct cgroup *cgrp)
 {
-	if (cgroup_ifs_enabled())
+	if (ifs_enable)
 		cgroup_addrm_files(css, cgrp, cgroup_ifs_files, false);
 }
 
@@ -576,3 +574,16 @@ void cgroup_ifs_enable_irq_account(bool enable)
 	ifs_irq_enable = enable;
 }
 #endif
+
+static __init int cgroup_ifs_enable(void)
+{
+	if (!ifs_enable)
+		return 0;
+
+	if (!this_cpu_read(ifs_tsc_freq))
+		return 0;
+
+	static_branch_enable(&cgrp_ifs_enabled);
+	return 0;
+}
+late_initcall_sync(cgroup_ifs_enable);
