@@ -116,7 +116,7 @@ struct clnt_uuid_info {
 	struct list_head next;
 	struct rpc_clnt *clnt;
 	struct enfs_file_uuid root_uuid;
-	bool updateing;
+	bool updating;
 };
 
 static bool delete_view_table(uint64_t devId);
@@ -165,7 +165,7 @@ static int enfs_insert_clnt_root(struct rpc_clnt *clnt, struct enfs_file_uuid *r
 	info->clnt = clnt;
 	info->root_uuid = *root_uuid;
 	list_add_tail(&info->next, &shard_ctrl->clnt_info_list);
-	info->updateing = false;
+	info->updating = false;
 
 	write_unlock(&shard_ctrl->clnt_info_lock);
 	return 0;
@@ -1555,14 +1555,14 @@ static void shard_update_done(struct rpc_clnt *clnt)
 	write_lock(&shard_ctrl->clnt_info_lock);
 	list_for_each_entry(info, &shard_ctrl->clnt_info_list, next) {
 		if (info->clnt == clnt) {
-			info->updateing = false;
+			info->updating = false;
 			break;
 		}
 	}
 	write_unlock(&shard_ctrl->clnt_info_lock);
 }
 
-static void do_shared_update(struct work_struct *work)
+static void do_shard_update(struct work_struct *work)
 {
 	int error;
 	struct shard_work *shard_work =
@@ -1620,7 +1620,7 @@ static int shard_update_work(struct clnt_uuid_info *info,
 		return -EAGAIN;
 	}
 
-	INIT_WORK(&shard_work->work, do_shared_update);
+	INIT_WORK(&shard_work->work, do_shard_update);
 	shard_work->info = *info;
 	if (!refcount_inc_not_zero(&shard_work->info.clnt->cl_count)) {
 		xprt_switch_put(shard_work->xps);
@@ -1650,14 +1650,14 @@ static void query_update_all_clnt(void)
 
 	write_lock(&shard_ctrl->clnt_info_lock);
 	list_for_each_entry(info, &shard_ctrl->clnt_info_list, next) {
-		if (info->updateing)
+		if (info->updating)
 			continue;
 
-		info->updateing = true;
+		info->updating = true;
 		ret = shard_update_work(info, &free_list);
 		if (ret) {
 			enfs_log_error("update all err:%d.\n", ret);
-			info->updateing = false;
+			info->updating = false;
 		}
 	}
 	write_unlock(&shard_ctrl->clnt_info_lock);
@@ -1752,7 +1752,7 @@ static struct shard_view_ctrl *enfs_shard_ctrl_init(void)
 
 	ctrl = kmalloc(sizeof(*ctrl), GFP_KERNEL);
 	if (!ctrl) {
-		enfs_log_error("shard view cltr alloc failed.\n");
+		enfs_log_error("shard view ctrl alloc failed.\n");
 		return NULL;
 	}
 
@@ -1768,7 +1768,7 @@ int enfs_shard_init(void)
 {
 	shard_ctrl = enfs_shard_ctrl_init();
 	if (!shard_ctrl) {
-		enfs_log_error("create shard view cltr failed.\n");
+		enfs_log_error("create shard view ctrl failed.\n");
 		return -ENOMEM;
 	}
 
