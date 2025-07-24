@@ -255,6 +255,14 @@ static struct view_table *get_view_table(uint64_t devId, bool create)
 	return table;
 }
 
+static void enfs_free_view_table(struct view_table *table)
+{
+	enfs_delete_fs_info(table, 0);
+	viewtable_delete_all_shard(table);
+	list_del(&table->next);
+	kfree(table);
+}
+
 /*
  * view_lock need write_lock
  */
@@ -270,10 +278,7 @@ static bool delete_view_table(uint64_t devId)
 	if (list_entry_is_head(table, &shard_ctrl->view_list, next))
 		return false;
 
-	enfs_delete_fs_info(table, 0);
-	viewtable_delete_all_shard(table);
-	list_del(&table->next);
-	kfree(table);
+	enfs_free_view_table(table);
 	return true;
 }
 
@@ -1882,6 +1887,25 @@ static int shard_update_loop(void *data)
 	return 0;
 }
 
+static void enfs_clear_shard_ctrl(void)
+{
+	struct clnt_uuid_info *info, *tmp_info;
+	struct view_table *table, *tmp_table;
+
+	write_lock(&shard_ctrl->clnt_info_lock);
+	list_for_each_entry_safe(info, tmp_info, &shard_ctrl->clnt_info_list, next) {
+		list_del(&info->next);
+		kfree(info);
+	}
+	write_unlock(&shard_ctrl->clnt_info_lock);
+
+	write_lock(&shard_ctrl->view_lock);
+	list_for_each_entry_safe(table, tmp_table, &shard_ctrl->view_list, next) {
+		enfs_free_view_table(table);
+	}
+	write_unlock(&shard_ctrl->view_lock);
+}
+
 struct shard_view_ctrl *enfs_shard_ctrl_init(void)
 {
 	struct shard_view_ctrl *ctrl;
@@ -1942,4 +1966,6 @@ void enfs_shard_exit(void)
 		flush_workqueue(shard_workq);
 		destroy_workqueue(shard_workq);
 	}
+
+	enfs_clear_shard_ctrl();
 }
