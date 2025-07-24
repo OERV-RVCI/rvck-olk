@@ -122,7 +122,7 @@ struct clnt_uuid_info {
 
 static bool delete_view_table(uint64_t devId);
 
-int enfs_find_clnt_root(struct rpc_clnt *clnt, struct enfs_file_uuid *root_uuid)
+static int enfs_find_clnt_root(struct rpc_clnt *clnt, struct enfs_file_uuid *root_uuid)
 {
 	struct clnt_uuid_info *info;
 
@@ -141,7 +141,7 @@ int enfs_find_clnt_root(struct rpc_clnt *clnt, struct enfs_file_uuid *root_uuid)
 	return -1;
 }
 
-int enfs_insert_clnt_root(struct rpc_clnt *clnt, struct enfs_file_uuid *root_uuid)
+static int enfs_insert_clnt_root(struct rpc_clnt *clnt, struct enfs_file_uuid *root_uuid)
 {
 	struct clnt_uuid_info *info;
 
@@ -352,7 +352,7 @@ static int get_ls_and_cpu_id(struct view_table *table, uint64_t clusterId,
 /**
  * @return:0 for success,otherwise for failed
  */
-int enfs_query_lif_info(struct rpc_clnt *clnt, struct enfs_file_uuid *file_uuid,
+static int enfs_query_lif_info(struct rpc_clnt *clnt, struct enfs_file_uuid *file_uuid,
 			uint64_t *lsid, uint32_t *cpuId)
 {
 	int ret;
@@ -459,7 +459,7 @@ static int update_shard_view(struct view_table *table,
 	return 0;
 }
 
-int enfs_update_fsshard(uint64_t devId, struct enfs_shard_view *fs_shard_view, int *flag)
+static int enfs_update_fsshard(uint64_t devId, struct enfs_shard_view *fs_shard_view, int *flag)
 {
 	int ret;
 	struct view_table *table;
@@ -555,7 +555,7 @@ static int update_ls_info(struct view_table *table,
 	return 0;
 }
 
-int enfs_update_lsinfo(uint64_t devId, struct enfs_get_ls_version_rsp *ls_view,
+static int enfs_update_lsinfo(uint64_t devId, struct enfs_get_ls_version_rsp *ls_view,
 			   int *flag)
 {
 	int ret;
@@ -881,7 +881,7 @@ struct route_rule {
 			  struct enfs_xprt_context *context);
 };
 
-bool check_cpuid_invalid(uint32_t cpuId)
+static bool check_cpuid_invalid(uint32_t cpuId)
 {
 	return cpuId == INVALID_CPU_ID;
 }
@@ -954,7 +954,7 @@ static bool match_default(uint64_t wwn, uint64_t lsid, uint32_t cpuId,
 	return true;
 }
 
-struct rpc_xprt *enfs_choose_shard_xport(struct rpc_xprt_switch *xps,
+static struct rpc_xprt *enfs_choose_shard_xport(struct rpc_xprt_switch *xps,
 					 const struct rpc_xprt *cur,
 					 uint64_t lsid, struct rpc_clnt *clnt,
 					 uint32_t cpuId)
@@ -1033,7 +1033,7 @@ struct rpc_xprt *enfs_choose_shard_xport(struct rpc_xprt_switch *xps,
 	return choose_port;
 }
 
-struct rpc_xprt *enfs_get_shard_xport(struct rpc_clnt *clnt,
+static struct rpc_xprt *enfs_get_shard_xport(struct rpc_clnt *clnt,
 					  struct rpc_task *task, uint64_t lsid,
 					  uint32_t cpuId)
 {
@@ -1814,7 +1814,7 @@ static void enfs_clear_shard_ctrl(void)
 	write_unlock(&shard_ctrl->view_lock);
 }
 
-struct shard_view_ctrl *enfs_shard_ctrl_init(void)
+static struct shard_view_ctrl *enfs_shard_ctrl_init(void)
 {
 	struct shard_view_ctrl *ctrl;
 
