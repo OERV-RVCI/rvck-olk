@@ -121,7 +121,6 @@ struct clnt_uuid_info {
 };
 
 static bool delete_view_table(uint64_t devId);
-static void enfs_clear_fs_info(struct view_table *table);
 static void viewtable_delete_all_shard(struct view_table *table);
 
 int enfs_find_clnt_root(struct rpc_clnt *clnt, struct enfs_file_uuid *root_uuid)
@@ -254,6 +253,26 @@ static struct view_table *get_view_table(uint64_t devId, bool create)
 	}
 	return table;
 }
+
+/**
+ * enfs_clear_ ## __struct_name() - delete and free all __struct_name from view_table
+ * @table: view table
+ *
+ * Context: protected by view_table write lock
+ * Return: None
+ */
+#define DEFINE_CLEAR_LIST_FUNC(__struct_name, __list_name)		\
+static void enfs_clear_ ## __struct_name(struct view_table *table)	\
+{									\
+	struct __struct_name *item, *tmp;				\
+									\
+	list_for_each_entry_safe(item, tmp, &table->__list_name, next) {\
+		list_del(&item->next);					\
+		kfree(item);						\
+	}								\
+}
+
+DEFINE_CLEAR_LIST_FUNC(fs_info, fs_head);
 
 static void enfs_free_view_table(struct view_table *table)
 {
@@ -602,24 +621,6 @@ int enfs_update_lif_info(uint64_t devId, const char *ipaddr,
 
 	write_unlock(&shard_ctrl->view_lock);
 	return 0;
-}
-
-/**
- * enfs_clear_fs_info() - delete and free all fs_info from view_table
- * @table: view table
- *
- * Context: protected by view_table write lock
- * Return: None
- */
-static void enfs_clear_fs_info(struct view_table *table)
-{
-	struct fs_info *info, *tmp;
-
-	list_for_each_entry_safe(info, tmp, &table->fs_head, next) {
-		list_del(&info->next);
-		kfree(info);
-	}
-
 }
 
 static void viewtable_delete_all_shard(struct view_table *table)
