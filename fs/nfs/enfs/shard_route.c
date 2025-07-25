@@ -121,7 +121,7 @@ struct clnt_uuid_info {
 };
 
 static bool delete_view_table(uint64_t devId);
-static void enfs_delete_fs_info(struct view_table *table, uint32_t fsId);
+static void enfs_clear_fs_info(struct view_table *table);
 static void viewtable_delete_all_shard(struct view_table *table);
 
 int enfs_find_clnt_root(struct rpc_clnt *clnt, struct enfs_file_uuid *root_uuid)
@@ -257,7 +257,7 @@ static struct view_table *get_view_table(uint64_t devId, bool create)
 
 static void enfs_free_view_table(struct view_table *table)
 {
-	enfs_delete_fs_info(table, 0);
+	enfs_clear_fs_info(table);
 	viewtable_delete_all_shard(table);
 	list_del(&table->next);
 	kfree(table);
@@ -604,27 +604,20 @@ int enfs_update_lif_info(uint64_t devId, const char *ipaddr,
 	return 0;
 }
 
-/*
- * view_lock need write_lock
+/**
+ * enfs_clear_fs_info() - delete and free all fs_info from view_table
+ * @table: view table
+ *
+ * Context: protected by view_table write lock
+ * Return: None
  */
-static void enfs_delete_fs_info(struct view_table *table, uint32_t fsId)
+static void enfs_clear_fs_info(struct view_table *table)
 {
-	struct fs_info *info;
-	struct fs_info *next_ptr;
+	struct fs_info *info, *tmp;
 
-	list_for_each_entry_safe(info, next_ptr, &table->fs_head, next) {
-		/* storage fsid range 1-65535 */
-		if (info->fsId == 0) {
-			list_del(&info->next);
-			kfree(info);
-			continue;
-		}
-
-		if (info->fsId == fsId) {
-			list_del(&info->next);
-			kfree(info);
-			break;
-		}
+	list_for_each_entry_safe(info, tmp, &table->fs_head, next) {
+		list_del(&info->next);
+		kfree(info);
 	}
 
 }
