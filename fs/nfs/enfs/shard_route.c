@@ -121,7 +121,6 @@ struct clnt_uuid_info {
 };
 
 static bool delete_view_table(uint64_t devId);
-static void viewtable_delete_all_shard(struct view_table *table);
 
 int enfs_find_clnt_root(struct rpc_clnt *clnt, struct enfs_file_uuid *root_uuid)
 {
@@ -273,11 +272,12 @@ static void enfs_clear_ ## __struct_name(struct view_table *table)	\
 }
 
 DEFINE_CLEAR_LIST_FUNC(fs_info, fs_head);
+DEFINE_CLEAR_LIST_FUNC(shard_view, shard_head);
 
 static void enfs_free_view_table(struct view_table *table)
 {
 	enfs_clear_fs_info(table);
-	viewtable_delete_all_shard(table);
+	enfs_clear_shard_view(table);
 	list_del(&table->next);
 	kfree(table);
 }
@@ -621,18 +621,6 @@ int enfs_update_lif_info(uint64_t devId, const char *ipaddr,
 
 	write_unlock(&shard_ctrl->view_lock);
 	return 0;
-}
-
-static void viewtable_delete_all_shard(struct view_table *table)
-{
-	struct shard_view *view;
-	struct shard_view *next_ptr;
-
-	list_for_each_entry_safe(view, next_ptr, &table->shard_head, next) {
-		list_del(&view->next);
-		kfree(view);
-	}
-
 }
 
 int enfs_delete_shard(uint64_t devId, uint64_t clusterId,
