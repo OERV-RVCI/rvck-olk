@@ -50,6 +50,7 @@ static int atf_run_chip_test(unsigned int group)
 static struct cpu_inspector atf_inspector = {
 	.name		= "atf",
 	.start_inspect	= atf_run_chip_test,
+	.owner		= THIS_MODULE,
 };
 
 /**

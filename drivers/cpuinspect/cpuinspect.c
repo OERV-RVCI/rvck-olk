@@ -49,6 +49,11 @@ static int run_inspector(void *data)
 	ktime_t start_time, duration;
 	unsigned long sleep_us;
 
+	if (!try_module_get(curr_cpu_inspector->owner)) {
+		pr_err("failed to get inspector module reference\n");
+		return -ENOENT;
+	}
+
 	while (!kthread_should_stop()) {
 		if (inspect_times >= ci_core.inspect_times || !cpu_online(cpu))
 			break;
@@ -96,6 +101,7 @@ static int run_inspector(void *data)
 		cpuinspect_result_notify();
 	}
 
+	module_put(curr_cpu_inspector->owner);
 	return 0;
 }
 

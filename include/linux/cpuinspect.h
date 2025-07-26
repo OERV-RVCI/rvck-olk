@@ -30,6 +30,7 @@ struct cpu_inspector {
 	const char		name[CPUINSPECT_NAME_LEN];
 	struct list_head	list;
 	unsigned long		group_num;
+	struct module *owner;
 
 	int			(*start_inspect)(unsigned int group);
 };
