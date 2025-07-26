@@ -273,11 +273,15 @@ static void enfs_clear_ ## __struct_name(struct view_table *table)	\
 
 DEFINE_CLEAR_LIST_FUNC(fs_info, fs_head);
 DEFINE_CLEAR_LIST_FUNC(shard_view, shard_head);
+DEFINE_CLEAR_LIST_FUNC(lif_info, lif_head);
+DEFINE_CLEAR_LIST_FUNC(ls_info, ls_head);
 
 static void enfs_free_view_table(struct view_table *table)
 {
 	enfs_clear_fs_info(table);
 	enfs_clear_shard_view(table);
+	enfs_clear_lif_info(table);
+	enfs_clear_ls_info(table);
 	list_del(&table->next);
 	kfree(table);
 }
