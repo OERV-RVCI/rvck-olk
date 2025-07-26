@@ -657,106 +657,28 @@ static const struct nfs_fh *parse_msg_fh(struct rpc_message *msg)
 	return fh;
 }
 
-static const struct nfs_fh *parse_msg_setattr(struct rpc_message *msg)
-{
-	struct nfs3_sattrargs *args = msg->rpc_argp;
-
-	return args->fh;
+#define DEFINE_PARSE_FH_FUNC(__name, __struct_name, __return_member)	\
+static const struct nfs_fh *						\
+parse_ ## __name ## _fh(struct rpc_message *msg)			\
+{									\
+	struct __struct_name *args = msg->rpc_argp;			\
+	return args->__return_member;					\
 }
 
-// lookup,rmdir
-static const struct nfs_fh *parse_msg_dirop(struct rpc_message *msg)
-{
-	struct nfs3_diropargs *args = msg->rpc_argp;
-
-	return args->fh;
-}
-
-static const struct nfs_fh *parse_msg_access(struct rpc_message *msg)
-{
-	struct nfs3_accessargs *args = msg->rpc_argp;
-
-	return args->fh;
-}
-
-static const struct nfs_fh *parse_msg_readlink(struct rpc_message *msg)
-{
-	struct nfs3_readlinkargs *args = msg->rpc_argp;
-
-	return args->fh;
-}
-
-static const struct nfs_fh *parse_msg_io(struct rpc_message *msg)
-{
-	struct nfs_pgio_args *args = msg->rpc_argp;
-
-	return args->fh;
-}
-
-static const struct nfs_fh *parse_msg_create(struct rpc_message *msg)
-{
-	struct nfs3_createargs *args = msg->rpc_argp;
-
-	return args->fh;
-}
-
-static const struct nfs_fh *parse_msg_mkdir(struct rpc_message *msg)
-{
-	struct nfs3_mkdirargs *args = msg->rpc_argp;
-
-	return args->fh;
-}
-
-static const struct nfs_fh *parse_msg_symlink(struct rpc_message *msg)
-{
-	struct nfs3_symlinkargs *args = msg->rpc_argp;
-
-	return args->fromfh;
-}
-
-static const struct nfs_fh *parse_msg_mknode(struct rpc_message *msg)
-{
-	struct nfs3_mknodargs *args = msg->rpc_argp;
-
-	return args->fh;
-}
-
-static const struct nfs_fh *parse_msg_remove(struct rpc_message *msg)
-{
-	struct nfs_removeargs *args = msg->rpc_argp;
-
-	return args->fh;
-}
-
-static const struct nfs_fh *parse_msg_rename(struct rpc_message *msg)
-{
-	struct nfs_renameargs *args = msg->rpc_argp;
-
-	return args->old_dir;
-}
-
-static const struct nfs_fh *parse_msg_link(struct rpc_message *msg)
-{
-	struct nfs3_linkargs *args = msg->rpc_argp;
-
-	return args->fromfh;
-}
-
-// readdir,readdirplus
-static const struct nfs_fh *parse_msg_readdir(struct rpc_message *msg)
-{
-	struct nfs3_readdirargs *args = msg->rpc_argp;
-
-	return args->fh;
-}
-
-// readdir,readdirplus
-static const struct nfs_fh *parse_msg_commit(struct rpc_message *msg)
-{
-	struct nfs_commitargs *args = msg->rpc_argp;
-
-	return args->fh;
-}
+DEFINE_PARSE_FH_FUNC(sattr, nfs3_sattrargs, fh);
+DEFINE_PARSE_FH_FUNC(dirop, nfs3_diropargs, fh);
+DEFINE_PARSE_FH_FUNC(access, nfs3_accessargs, fh);
+DEFINE_PARSE_FH_FUNC(readlink, nfs3_readlinkargs, fh);
+DEFINE_PARSE_FH_FUNC(pgio, nfs_pgio_args, fh);
+DEFINE_PARSE_FH_FUNC(create, nfs3_createargs, fh);
+DEFINE_PARSE_FH_FUNC(mkdir, nfs3_mkdirargs, fh);
+DEFINE_PARSE_FH_FUNC(symlink, nfs3_symlinkargs, fromfh);
+DEFINE_PARSE_FH_FUNC(mknod, nfs3_mknodargs, fh);
+DEFINE_PARSE_FH_FUNC(remove, nfs_removeargs, fh);
+DEFINE_PARSE_FH_FUNC(rename, nfs_renameargs, old_dir);
+DEFINE_PARSE_FH_FUNC(link, nfs3_linkargs, fromfh);
+DEFINE_PARSE_FH_FUNC(readdir, nfs3_readdirargs, fh);
+DEFINE_PARSE_FH_FUNC(commit, nfs_commitargs, fh);
 
 struct nfs3_cmd_ops {
 	int cmd;
@@ -767,26 +689,26 @@ struct nfs3_cmd_ops {
 struct nfs3_cmd_ops nfs3_parse_ops[] = {
 	{ NFS3PROC_NULL, NULL, "NFS3PROC_NULL" },
 	{ NFS3PROC_GETATTR, parse_msg_fh, "NFS3PROC_GETATTR" },
-	{ NFS3PROC_SETATTR, parse_msg_setattr, "NFS3PROC_SETATTR" },
-	{ NFS3PROC_LOOKUP, parse_msg_dirop, "NFS3PROC_LOOKUP" },
-	{ NFS3PROC_ACCESS, parse_msg_access, "NFS3PROC_ACCESS" },
-	{ NFS3PROC_READLINK, parse_msg_readlink, "NFS3PROC_READLINK" },
-	{ NFS3PROC_READ, parse_msg_io, "NFS3PROC_READ" },
-	{ NFS3PROC_WRITE, parse_msg_io, "NFS3PROC_WRITE" },
-	{ NFS3PROC_CREATE, parse_msg_create, "NFS3PROC_CREATE" },
-	{ NFS3PROC_MKDIR, parse_msg_mkdir, "NFS3PROC_MKDIR" },
-	{ NFS3PROC_SYMLINK, parse_msg_symlink, "NFS3PROC_SYMLINK" },
-	{ NFS3PROC_MKNOD, parse_msg_mknode, "NFS3PROC_MKNOD" },
-	{ NFS3PROC_REMOVE, parse_msg_remove, "NFS3PROC_REMOVE" },
-	{ NFS3PROC_RMDIR, parse_msg_dirop, "NFS3PROC_RMDIR" },
-	{ NFS3PROC_RENAME, parse_msg_rename, "NFS3PROC_RENAME" },
-	{ NFS3PROC_LINK, parse_msg_link, "NFS3PROC_LINK" },
-	{ NFS3PROC_READDIR, parse_msg_readdir, "NFS3PROC_READDIR" },
-	{ NFS3PROC_READDIRPLUS, parse_msg_readdir, "NFS3PROC_READDIRPLUS" },
+	{ NFS3PROC_SETATTR, parse_sattr_fh, "NFS3PROC_SETATTR" },
+	{ NFS3PROC_LOOKUP, parse_dirop_fh, "NFS3PROC_LOOKUP" },
+	{ NFS3PROC_ACCESS, parse_access_fh, "NFS3PROC_ACCESS" },
+	{ NFS3PROC_READLINK, parse_readlink_fh, "NFS3PROC_READLINK" },
+	{ NFS3PROC_READ, parse_pgio_fh, "NFS3PROC_READ" },
+	{ NFS3PROC_WRITE, parse_pgio_fh, "NFS3PROC_WRITE" },
+	{ NFS3PROC_CREATE, parse_create_fh, "NFS3PROC_CREATE" },
+	{ NFS3PROC_MKDIR, parse_mkdir_fh, "NFS3PROC_MKDIR" },
+	{ NFS3PROC_SYMLINK, parse_symlink_fh, "NFS3PROC_SYMLINK" },
+	{ NFS3PROC_MKNOD, parse_mknod_fh, "NFS3PROC_MKNOD" },
+	{ NFS3PROC_REMOVE, parse_remove_fh, "NFS3PROC_REMOVE" },
+	{ NFS3PROC_RMDIR, parse_dirop_fh, "NFS3PROC_RMDIR" },
+	{ NFS3PROC_RENAME, parse_rename_fh, "NFS3PROC_RENAME" },
+	{ NFS3PROC_LINK, parse_link_fh, "NFS3PROC_LINK" },
+	{ NFS3PROC_READDIR, parse_readdir_fh, "NFS3PROC_READDIR" },
+	{ NFS3PROC_READDIRPLUS, parse_readdir_fh, "NFS3PROC_READDIRPLUS" },
 	{ NFS3PROC_FSSTAT, parse_msg_fh, "NFS3PROC_FSSTAT" },
 	{ NFS3PROC_FSINFO, parse_msg_fh, "NFS3PROC_FSINFO" },
 	{ NFS3PROC_PATHCONF, parse_msg_fh, "NFS3PROC_PATHCONF" },
-	{ NFS3PROC_COMMIT, parse_msg_commit, "NFS3PROC_COMMIT" },
+	{ NFS3PROC_COMMIT, parse_commit_fh, "NFS3PROC_COMMIT" },
 };
 
 int nfs3_parse_ops_size = sizeof(nfs3_parse_ops) / sizeof(struct nfs3_cmd_ops);
