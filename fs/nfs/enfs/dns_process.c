@@ -69,21 +69,18 @@ void enfs_debug_print_name_list(void)
 
 	spin_lock(&dns_cache_lock);
 	list_for_each_entry(list, &dns_cache_list, next) {
-		pr_info("ENFS: domain name:%s\n",
-			list->name);
+		enfs_log_info("domain name:%s\n", list->name);
 		for (i = 0; i < list->inet.count; i++) {
 			sockaddr_ip_to_str(
 				(struct sockaddr *)&list->inet.address[i], buf,
 				128);
-			pr_info("ENFS: %s\n",
-				buf);
+			enfs_log_info("%s\n", buf);
 		}
 		for (i = 0; i < list->inet6.count; i++) {
 			sockaddr_ip_to_str(
 				(struct sockaddr *)&list->inet6.address[i], buf,
 				128);
-			pr_info("ENFS: %s\n",
-				buf);
+			enfs_log_info("%s\n", buf);
 		}
 	}
 	spin_unlock(&dns_cache_lock);

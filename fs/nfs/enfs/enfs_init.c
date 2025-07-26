@@ -23,10 +23,6 @@
 #include "dns_internal.h"
 #include "shard.h"
 
-unsigned int enfs_debug;
-module_param_named(enfs_debug, enfs_debug, uint, 0600);
-MODULE_PARM_DESC(enfs_debug, "enfs debugging mask");
-
 static struct enfs_adapter_ops enfs_adapter = {
 	.name = "enfs",
 	.owner = THIS_MODULE,
@@ -108,8 +104,7 @@ static int __init init_enfs(void)
 
 	ret = enfs_adapter_register(&enfs_adapter);
 	if (ret) {
-		pr_err("ENFS: regist enfs_adapter fail. ret %d\n",
-			ret);
+		enfs_log_error("regist enfs_adapter fail. ret %d\n", ret);
 		return -1;
 	}
 

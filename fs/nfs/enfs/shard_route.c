@@ -3,6 +3,7 @@
  * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
  */
 #include <linux/kthread.h>
+#include <linux/lockd/lockd.h>
 #include <linux/nfs3.h>
 #include <linux/nfs_fs.h>
 #include <linux/nfs_xdr.h>
@@ -11,7 +12,6 @@
 #include <linux/sunrpc/types.h>
 #include <linux/sunrpc/xprt.h>
 #include <linux/moduleparam.h>
-#include <linux/lockd/lockd.h>
 #include "../../../net/sunrpc/netns.h"
 #include "../../../fs/nfs/nfs4_fs.h"
 #include "../../../fs/nfs/netns.h"
@@ -876,17 +876,16 @@ void enfs_print_uuid(struct enfs_file_uuid *file_uuid)
 	if (enfs_uuid_debug == 0)
 		return;
 
-	pr_info("ENFS: dev:%llu fs:%u dtree:%u snap:%u pfid:%llu fid:%llu\n",
-		   *(uint64_t *) (uuid + UUID_DEVID_OFFSET),
-		   *(uint32_t *) (uuid + UUID_FSID_OFFSET),
-		   *(uint32_t *) (uuid + UUID_DTREEID_OFFSET),
-		   *(uint32_t *) (uuid + UUID_SNAPID_OFFSET),
-		   *(uint64_t *) (uuid + UUID_PFID_OFFSET),
-		   *(uint64_t *) (uuid + UUID_FID_OFFSET));
+	enfs_log_info("dev:%llu fs:%u dtree:%u snap:%u pfid:%llu fid:%llu\n",
+		      *(uint64_t *) (uuid + UUID_DEVID_OFFSET),
+		      *(uint32_t *) (uuid + UUID_FSID_OFFSET),
+		      *(uint32_t *) (uuid + UUID_DTREEID_OFFSET),
+		      *(uint32_t *) (uuid + UUID_SNAPID_OFFSET),
+		      *(uint64_t *) (uuid + UUID_PFID_OFFSET),
+		      *(uint64_t *) (uuid + UUID_FID_OFFSET));
 
 	sprint_uuid(buf, 80, file_uuid);
-	pr_info("ENFS: UUID:%s\n",
-		buf);
+	enfs_log_info("UUID:%s\n", buf);
 }
 
 static int get_uuid_from_task(struct rpc_clnt *clnt, struct rpc_task *task,
@@ -1227,23 +1226,21 @@ static void debug_show_uuidinfo(int argc, char *argv[])
 		return;
 	}
 
-	pr_info("ENFS: fsidinfo devId:%llu",
-		   GET_DEVID_FROM_UUID(&file_uuid));
+	enfs_log_info("fsidinfo devId:%llu",
+		      GET_DEVID_FROM_UUID(&file_uuid));
 	read_lock(&shard_ctrl->view_lock);
 	list_for_each_entry(table, &shard_ctrl->view_list, next) {
-		if (table->devId != GET_DEVID_FROM_UUID(&file_uuid)) {
+		if (table->devId != GET_DEVID_FROM_UUID(&file_uuid))
 			continue;
-			;
-		}
+
 		list_for_each_entry(info, &table->fs_head, next) {
 			if (info->fsId != GET_FSID_FROM_UUID(&file_uuid))
 				continue;
 			clusterId = info->clusterId;
 			storagePoolId = info->storagePoolId;
-			pr_info(
-				   "ENFS: fsidinfo fsid:%u clusterId:%llu storagePoolId:%u tenantId:%u.\n",
-				   GET_FSID_FROM_UUID(&file_uuid), info->clusterId,
-				   info->storagePoolId, info->tenantId);
+			enfs_log_info("fsidinfo fsid:%u clusterId:%llu storagePoolId:%u tenantId:%u.\n",
+				      GET_FSID_FROM_UUID(&file_uuid), info->clusterId,
+				      info->storagePoolId, info->tenantId);
 			break;
 		}
 
@@ -1257,11 +1254,10 @@ static void debug_show_uuidinfo(int argc, char *argv[])
 				enfs_log_error("shardNum:%u shardId:%u",
 						   view->num, shardId);
 			}
-			pr_info(
-				   "ENFS: fsidinfo clusterId:%llu storagePoolId:%u shardNum:%u shard:%u lsid:%llu cpuId:%u.\n",
-				   view->clusterId, view->storagePoolId, view->num,
-				   shardId, view->entry[shardId].lsid,
-				   view->entry[shardId].cpuid);
+			enfs_log_info("fsidinfo clusterId:%llu storagePoolId:%u shardNum:%u shard:%u lsid:%llu cpuId:%u.\n",
+				      view->clusterId, view->storagePoolId, view->num,
+				      shardId, view->entry[shardId].lsid,
+				      view->entry[shardId].cpuid);
 			break;
 		}
 		break;
@@ -1288,12 +1284,11 @@ static void debug_show_fsinfo(int argc, char *argv[])
 	read_lock(&shard_ctrl->view_lock);
 	list_for_each_entry(table, &shard_ctrl->view_list, next) {
 		list_for_each_entry(info, &table->fs_head, next) {
-			if (fsid == info->fsId) {
-				pr_info(
-					   "ENFS: fsid(%u) clusterId(%llu) storagePoolId(%u) tenantId(%u).\n",
-					   fsid, info->clusterId,
-					   info->storagePoolId, info->tenantId);
-			}
+			if (fsid != info->fsId)
+				continue;
+			enfs_log_info("fsid(%u) clusterId(%llu) storagePoolId(%u) tenantId(%u).\n",
+				      fsid, info->clusterId,
+				      info->storagePoolId, info->tenantId);
 		}
 	}
 	read_unlock(&shard_ctrl->view_lock);
@@ -1307,6 +1302,7 @@ static void debug_show_shardinfo(int argc, char *argv[])
 	uint32_t storagePoolId;
 	uint32_t startIndex;
 	uint32_t count;
+	bool matched;
 
 	if (argc != 3) {
 		enfs_log_info("argc number is wrong.\n");
@@ -1326,30 +1322,24 @@ static void debug_show_shardinfo(int argc, char *argv[])
 		return;
 	}
 
-	pr_info("ENFS: clusterId(%llu) storagePoolId(%u) startIndex(%u).\n",
-		   clusterId, storagePoolId, startIndex);
+	enfs_log_info("clusterId(%llu) storagePoolId(%u) startIndex(%u).\n",
+		      clusterId, storagePoolId, startIndex);
 
 	read_lock(&shard_ctrl->view_lock);
 	list_for_each_entry(table, &shard_ctrl->view_list, next) {
 		list_for_each_entry(view, &table->shard_head, next) {
-			if (view->clusterId == clusterId &&
-				view->storagePoolId == storagePoolId) {
-				for (count = 0; count < 100; count++) {
-					if (count + startIndex < view->num) {
-						pr_info(
-							   "ENFS: shardid(%d) lsid(0x%llx) vnodeid(%u) cpuId(%u).\n",
-							   count + startIndex,
-							   view->entry[count +
-								   startIndex].
-							   lsid,
-							   view->entry[count +
-								   startIndex].
-							   vnodeid,
-							   view->entry[count +
-								   startIndex].
-							   cpuid);
-					}
-				}
+			matched = (view->clusterId == clusterId &&
+				   view->storagePoolId == storagePoolId);
+			if (!matched)
+				continue;
+			for (count = 0; count < 100; count++) {
+				if (count + startIndex >= view->num)
+					continue;
+				enfs_log_info("shardid(%d) lsid(0x%llx) vnodeid(%u) cpuId(%u).\n",
+					      count + startIndex,
+					      view->entry[count + startIndex].lsid,
+					      view->entry[count + startIndex].vnodeid,
+					      view->entry[count + startIndex].cpuid);
 			}
 		}
 	}
@@ -1385,6 +1375,7 @@ static void debug_show_lifinfo(int argc, char *argv[])
 	struct rpc_xprt *pos;
 	struct enfs_xprt_context *context;
 	char buf[128];
+	bool matched;
 
 	if (argc > 1) {
 		enfs_log_info("argc number is wrong.\n");
@@ -1399,15 +1390,15 @@ static void debug_show_lifinfo(int argc, char *argv[])
 		list_for_each_entry_rcu(pos, &xps->xps_xprt_list, xprt_switch) {
 			get_ip_to_str((struct sockaddr *)&(pos->addr), buf,
 					  sizeof(buf));
-			if (argc == 0 || strcmp(buf, argv[0]) == 0) {
-				context =
-					(struct enfs_xprt_context *)
-					xprt_get_reserve_context(pos);
-				pr_info(
-					   "ENFS: ipaddr(%s) lsId(0x%llx) wwn(0x%llx) cpuId(%u).\n",
-					   buf, context->lsid, context->wwn,
-					   context->cpuId);
-			}
+			matched = (argc == 0 || strcmp(buf, argv[0]) == 0);
+			if (!matched)
+				continue;
+			context =
+				(struct enfs_xprt_context *)
+				xprt_get_reserve_context(pos);
+			enfs_log_info("ipaddr(%s) lsId(0x%llx) wwn(0x%llx) cpuId(%u).\n",
+				      buf, context->lsid, context->wwn,
+				      context->cpuId);
 		}
 		rcu_read_unlock();
 	}
@@ -1423,19 +1414,17 @@ static void debug_show_shardview(int argc, char *argv[])
 
 	read_lock(&shard_ctrl->view_lock);
 	list_for_each_entry(table, &shard_ctrl->view_list, next) {
-		pr_info("ENFS: shardivew  devid:%llu.\n", table->devId);
+		enfs_log_info("shardivew  devid:%llu.\n", table->devId);
 
 		list_for_each_entry(info, &table->fs_head, next) {
-			pr_info(
-			       "ENFS: shardview  fsid:%u clusterId:%llu storagePoolId:%u tenantId:%u.\n",
-			       info->fsId, info->clusterId, info->storagePoolId,
-			       info->tenantId);
+			enfs_log_info("shardview  fsid:%u clusterId:%llu storagePoolId:%u tenantId:%u.\n",
+				      info->fsId, info->clusterId, info->storagePoolId,
+				      info->tenantId);
 		}
 
 		list_for_each_entry(view, &table->shard_head, next) {
-			pr_info(
-			       "ENFS: shardview  clusterId:%llu storagePoolId:%u shardNum:%u.\n",
-			       view->clusterId, view->storagePoolId, view->num);
+			enfs_log_info("shardview  clusterId:%llu storagePoolId:%u shardNum:%u.\n",
+				      view->clusterId, view->storagePoolId, view->num);
 		}
 	}
 	read_unlock(&shard_ctrl->view_lock);
@@ -1472,8 +1461,8 @@ static char *parse_cmd_args(char *str, int *argc, char *argv[10])
 
 static void debug_show_linkcount(int argc, char *argv[])
 {
-	pr_info("ENFS: enfs link count:%d mount count:%d\n",
-		   enfs_link_count_num(), enfs_mount_count());
+	enfs_log_info("enfs link count:%d mount count:%d\n",
+		      enfs_link_count_num(), enfs_mount_count());
 }
 
 int enfs_debug_match_cmd(char *str, size_t len)

@@ -172,8 +172,7 @@ int enfs_query_lookup_cache(struct lookupcache_work *work_info)
 			start_query_lookup_init = true;
 			start_query_lookup = ktime_get();
 		} else if (enfs_timeout_ms(&start_query_lookup, interval_ms)) {
-			pr_err("ENFS: get lookupcache failed %d.\n",
-			       ret);
+			enfs_log_error("get lookupcache failed %d.\n", ret);
 			start_query_lookup = ktime_get();
 		}
 		return ret;

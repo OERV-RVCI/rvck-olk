@@ -775,8 +775,7 @@ int dorado_query_lsId(struct rpc_clnt *clnt, struct enfs_get_ls_version_rsp **re
 
 	// another err handle
 	if (ret) {
-		pr_err("ENFS: get fsInfo failed %d.\n",
-			ret);
+		enfs_log_error("get fsInfo failed %d.\n", ret);
 		kfree(args);
 		kfree(buf);
 		return ret;
@@ -1014,8 +1013,7 @@ int dorado_query_dns(struct rpc_clnt *clnt,
 
 	// another err handle
 	if (ret) {
-		pr_err("ENFS: NfsExtendOp query dns failed %d.\n",
-			ret);
+		enfs_log_error("NfsExtendOp query dns failed %d.\n", ret);
 		goto out;
 	}
 

@@ -151,8 +151,7 @@ void nfs_multipath_client_info_free(void *data)
 
 	if (clp_info == NULL)
 		return;
-	pr_info("ENFS: free client info %p.\n",
-		clp_info);
+	enfs_log_info("free client info %p.\n", clp_info);
 	INIT_WORK(&clp_info->work, nfs_multipath_client_info_free_work);
 	schedule_work(&clp_info->work);
 }
@@ -178,8 +177,7 @@ int nfs_multipath_client_info_init(void **data,
 		return -ENOMEM;
 
 	info = (struct multipath_client_info *)*enfs_info;
-	pr_info("ENFS: init client info %p.\n",
-		info);
+	enfs_log_info("init client info %p.\n", info);
 	rc = nfs_multipath_client_mount_info_init(info, cl_init);
 	if (rc) {
 		nfs_multipath_client_info_free((void *)info);
@@ -268,7 +266,7 @@ int nfs_multipath_client_info_match(void *src, void *dst)
 	ret = nfs_multipath_ip_list_info_match(src_info->local_ip_list,
 					       dst_info->local_ip_list);
 	if (ret == false) {
-		pr_err("ENFS: local_ip not match.\n");
+		enfs_log_error("local_ip not match.\n");
 		return ret;
 	}
 
@@ -277,14 +275,14 @@ int nfs_multipath_client_info_match(void *src, void *dst)
 		ret = nfs_multipath_ip_list_info_match(
 			src_info->remote_ip_list, dst_info->remote_ip_list);
 		if (ret == false) {
-			pr_err("ENFS: remote_ip not match.\n");
+			enfs_log_error("remote_ip not match.\n");
 			return ret;
 		}
 	} else {
 		ret = nfs_multipath_dns_list_info_match(
 			src_info->pRemoteDnsInfo, dst_info->pRemoteDnsInfo);
 		if (ret == false) {
-			pr_err("ENFS: dns not match.\n");
+			enfs_log_error("dns not match.\n");
 			return ret;
 		}
 	}
@@ -343,9 +341,7 @@ void print_ip_info(struct seq_file *mount_option, struct nfs_ip_list *ip_list,
 			seq_printf(mount_option, "%s", buf);
 		else
 			seq_printf(mount_option, "~%s", buf);
-		dfprintk(MOUNT,
-			 "NFS:   show nfs mount option type:%s %s [%s]\n", type,
-			 buf, __func__);
+		enfs_log_debug("show nfs mount option type:%s %s\n", type, buf);
 	}
 }
 
@@ -383,8 +379,7 @@ static void multipath_print_sockaddr(struct seq_file *seq,
 	default:
 		break;
 	}
-	pr_err("ENFS: unsupport family:%d\n",
-		addr->sa_family);
+	enfs_log_error("unsupport family:%d\n", addr->sa_family);
 }
 
 void convert_lookup_cache_str(struct nfs_server *server, char **server_lookup,
@@ -443,7 +438,7 @@ void nfs_multipath_client_info_show(struct seq_file *seq, void *data)
 	struct multipath_client_info *client_info =
 		server->nfs_client->cl_multipath_data;
 
-	dfprintk(MOUNT, "NFS:   show nfs mount option[%s]\n", __func__);
+	enfs_log_debug("show nfs mount option\n");
 	if ((client_info->local_ip_list) &&
 	    (client_info->local_ip_list->count > 0))
 		print_ip_info(seq, client_info->local_ip_list, "localaddrs");
