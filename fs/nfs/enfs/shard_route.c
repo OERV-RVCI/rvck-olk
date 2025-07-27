@@ -127,15 +127,12 @@ static int enfs_find_clnt_root(struct rpc_clnt *clnt, struct enfs_file_uuid *roo
 
 	read_lock(&shard_ctrl->clnt_info_lock);
 	list_for_each_entry(info, &shard_ctrl->clnt_info_list, next) {
-		if (info->clnt == clnt)
-			break;
+		if (info->clnt == clnt) {
+			*root_uuid = info->root_uuid;
+			read_unlock(&shard_ctrl->clnt_info_lock);
+			return 0;
+		}
 	}
-	if (!list_entry_is_head(info, &shard_ctrl->clnt_info_list, next)) {
-		*root_uuid = info->root_uuid;
-		read_unlock(&shard_ctrl->clnt_info_lock);
-		return 0;
-	}
-
 	read_unlock(&shard_ctrl->clnt_info_lock);
 	return -1;
 }
@@ -146,14 +143,11 @@ static int enfs_insert_clnt_root(struct rpc_clnt *clnt, struct enfs_file_uuid *r
 
 	write_lock(&shard_ctrl->clnt_info_lock);
 	list_for_each_entry(info, &shard_ctrl->clnt_info_list, next) {
-		if (info->clnt == clnt)
-			break;
-	}
-
-	if (!list_entry_is_head(info, &shard_ctrl->clnt_info_list, next)) {
-		info->root_uuid = *root_uuid;
-		write_unlock(&shard_ctrl->clnt_info_lock);
-		return 0;
+		if (info->clnt == clnt) {
+			info->root_uuid = *root_uuid;
+			write_unlock(&shard_ctrl->clnt_info_lock);
+			return 0;
+		}
 	}
 
 	info = kmalloc(sizeof(*info), GFP_KERNEL);
@@ -213,11 +207,8 @@ static struct view_table *create_view_table(uint64_t devId)
 
 	list_for_each_entry(table, &shard_ctrl->view_list, next) {
 		if (table->devId == devId)
-			break;
+			return table;
 	}
-
-	if (!list_entry_is_head(table, &shard_ctrl->view_list, next))
-		return table;
 
 	table = kmalloc(sizeof(*table), GFP_KERNEL);
 	if (!table)
@@ -239,16 +230,13 @@ static struct view_table *get_view_table(uint64_t devId, bool create)
 
 	list_for_each_entry(table, &shard_ctrl->view_list, next) {
 		if (table->devId == devId)
-			break;
+			return table;
 	}
 
 	// Note use write_lock when creating a view tabel.
-	if (list_entry_is_head(table, &shard_ctrl->view_list, next)) {
-		if (create)
-			return create_view_table(devId);
-		return NULL;
-	}
-	return table;
+	if (create)
+		return create_view_table(devId);
+	return NULL;
 }
 
 /**
@@ -287,18 +275,17 @@ static void enfs_free_view_table(struct view_table *table)
  */
 static bool delete_view_table(uint64_t devId)
 {
-	struct view_table *table;
+	struct view_table *table, *tmp;
 
-	list_for_each_entry(table, &shard_ctrl->view_list, next) {
-		if (table->devId == devId)
-			break;
+	list_for_each_entry_safe(table, tmp, &shard_ctrl->view_list, next) {
+		if (table->devId == devId) {
+			enfs_free_view_table(table);
+			return true;
+		}
 	}
 
-	if (list_entry_is_head(table, &shard_ctrl->view_list, next))
-		return false;
+	return false;
 
-	enfs_free_view_table(table);
-	return true;
 }
 
 static struct fs_info *get_fsinfo(struct view_table *table, uint32_t fsId)
@@ -307,13 +294,10 @@ static struct fs_info *get_fsinfo(struct view_table *table, uint32_t fsId)
 
 	list_for_each_entry(info, &table->fs_head, next) {
 		if (info->fsId == fsId)
-			break;
+			return info;
 	}
 
-	if (list_entry_is_head(info, &table->fs_head, next))
-		return NULL;
-
-	return info;
+	return NULL;
 }
 
 static int get_ls_and_cpu_id(struct view_table *table, uint64_t clusterId,
@@ -321,15 +305,16 @@ static int get_ls_and_cpu_id(struct view_table *table, uint64_t clusterId,
 				 uint64_t *lsid, uint32_t *cpuId)
 {
 	struct shard_view *view;
+	bool matched;
 
 	list_for_each_entry(view, &table->shard_head, next) {
-		if (view->clusterId == clusterId &&
-			view->storagePoolId == storagePoolId) {
+		matched = (view->clusterId == clusterId &&
+			   view->storagePoolId == storagePoolId);
+		if (matched)
 			break;
-		}
 	}
 
-	if (list_entry_is_head(view, &table->shard_head, next))
+	if (!matched)
 		return -1;
 
 	if (shardId >= view->num) {
@@ -388,14 +373,11 @@ static int update_fs_info(struct view_table *table,
 	struct fs_info *info;
 
 	list_for_each_entry(info, &table->fs_head, next) {
-		if (info->fsId == fs_shard_view->fsId)
-			break;
-	}
-
-	if (!list_entry_is_head(info, &table->fs_head, next)) {
-		info->clusterId = fs_shard_view->clusterId;
-		info->storagePoolId = fs_shard_view->storagePoolId;
-		return 0;
+		if (info->fsId == fs_shard_view->fsId) {
+			info->clusterId = fs_shard_view->clusterId;
+			info->storagePoolId = fs_shard_view->storagePoolId;
+			return 0;
+		}
 	}
 
 	info = kmalloc(sizeof(*info), GFP_KERNEL);
@@ -430,14 +412,10 @@ static int update_shard_view(struct view_table *table,
 
 	list_for_each_entry(view, &table->shard_head, next) {
 		if (view->clusterId == fs_shard_view->clusterId &&
-			view->storagePoolId == fs_shard_view->storagePoolId) {
-			break;
+		    view->storagePoolId == fs_shard_view->storagePoolId) {
+			copy_shard_entry(view, fs_shard_view, flag);
+			return 0;
 		}
-	}
-
-	if (!list_entry_is_head(view, &table->shard_head, next)) {
-		copy_shard_entry(view, fs_shard_view, flag);
-		return 0;
 	}
 
 	view = kmalloc(sizeof(*view), GFP_KERNEL);
@@ -528,13 +506,10 @@ static int update_ls_info(struct view_table *table,
 	struct ls_info *info;
 
 	list_for_each_entry(info, &table->ls_head, next) {
-		if (info->clusterId == ls_view->clusterId)
-			break;
-	}
-
-	if (!list_entry_is_head(info, &table->ls_head, next)) {
-		copy_ls_entry(info, ls_view, flag);
-		return 0;
+		if (info->clusterId == ls_view->clusterId) {
+			copy_ls_entry(info, ls_view, flag);
+			return 0;
+		}
 	}
 
 	info = kmalloc(sizeof(*info), GFP_KERNEL);
