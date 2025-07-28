@@ -1701,7 +1701,7 @@ int dpool_init(struct dpool_info *arg)
 
 	dpool = dpool_create(arg->memcg, &pagelist_dpool_ops);
 	if (!dpool) {
-		pr_err("init failed, create failed. ret: %d\n", ret);
+		pr_err("init failed, create failed.\n");
 		ret = -ENOMEM;
 		goto unlock;
 	}
