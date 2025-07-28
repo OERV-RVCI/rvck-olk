@@ -31,11 +31,6 @@
 #define SHARD_VIEW_UPDATE_INTERVAL_UNDER_LOCK 10
 #define SECOND_TO_MILLISECOND 1000
 
-/*
- * Set the shard_should_stop to true so that the work can be quickly returned.
- */
-static bool shard_should_stop;
-
 // TODO: replace the rwlock with RCU
 struct shard_view_ctrl {
 	rwlock_t view_lock;
@@ -1540,9 +1535,6 @@ static void do_shard_update(struct work_struct *work)
 		container_of(work, struct shard_work, work);
 	struct clnt_uuid_info *info = &shard_work->info;
 
-	if (shard_should_stop)
-		goto stop_work;
-
 	error =
 		query_and_update_shard(info->clnt, &info->root_uuid, shard_work);
 	if (error)
@@ -1556,7 +1548,6 @@ static void do_shard_update(struct work_struct *work)
 		enfs_recovery_nlm_lock(info->clnt);
 	}
 
-stop_work:
 	rpc_release_client(shard_work->info.clnt);
 	xprt_switch_put(shard_work->xps);
 	shard_update_done(info->clnt);
@@ -1749,8 +1740,6 @@ int enfs_shard_init(void)
 		return -ENOMEM;
 	}
 
-	shard_should_stop = false;
-
 	shard_thread =
 		kthread_run(shard_update_loop, NULL, "enfs_shard_update");
 	if (IS_ERR(shard_thread)) {
@@ -1764,8 +1753,6 @@ void enfs_shard_exit(void)
 {
 	if (shard_thread)
 		kthread_stop(shard_thread);
-
-	shard_should_stop = true;
 
 	if (shard_workq) {
 		flush_workqueue(shard_workq);
