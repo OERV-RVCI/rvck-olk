@@ -25,10 +25,6 @@
 #include "pm_state.h"
 #include "shard.h"
 
-unsigned int enfs_uuid_debug;
-module_param_named(uuid, enfs_uuid_debug, uint, 0600);
-MODULE_PARM_DESC(uuid, "print nfsv3 req uuid debugging mask");
-
 #define MAX_SHARD_COUNT_TIME 5	// 5 second
 #define FAULT_DETECTED 1
 
@@ -687,10 +683,10 @@ void enfs_print_uuid(struct enfs_file_uuid *file_uuid)
 	char buf[80];		/* 80 uuid buf */
 	uint8_t *uuid = file_uuid->data;
 
-	if (enfs_uuid_debug == 0)
+	ifdebug(ENFS)
 		return;
 
-	enfs_log_info("dev:%llu fs:%u dtree:%u snap:%u pfid:%llu fid:%llu\n",
+	enfs_log_debug("dev:%llu fs:%u dtree:%u snap:%u pfid:%llu fid:%llu\n",
 		      *(uint64_t *) (uuid + UUID_DEVID_OFFSET),
 		      *(uint32_t *) (uuid + UUID_FSID_OFFSET),
 		      *(uint32_t *) (uuid + UUID_DTREEID_OFFSET),
@@ -699,7 +695,7 @@ void enfs_print_uuid(struct enfs_file_uuid *file_uuid)
 		      *(uint64_t *) (uuid + UUID_FID_OFFSET));
 
 	sprint_uuid(buf, 80, file_uuid);
-	enfs_log_info("UUID:%s\n", buf);
+	enfs_log_debug("UUID:%s\n", buf);
 }
 
 static int get_uuid_from_task(struct rpc_clnt *clnt, struct rpc_task *task,

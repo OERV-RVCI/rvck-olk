@@ -9,8 +9,6 @@
 #include  <linux/types.h>
 #include "exten_call.h"
 
-extern unsigned int enfs_uuid_debug;
-
 void shard_set_transport(struct rpc_task *task, struct rpc_clnt *clnt);
 int enfs_debug_match_cmd(char *str, size_t len);
 int enfs_shard_init(void);
