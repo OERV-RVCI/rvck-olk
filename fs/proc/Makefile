@@ -38,3 +38,4 @@ proc-$(CONFIG_MEMORY_RELIABLE)	+= mem_reliable.o
 obj-$(CONFIG_ETMEM_SCAN)	+= etmem_scan.o
 obj-$(CONFIG_ETMEM_SWAP)	+= etmem_swap.o
 proc-${CONFIG_ETMEM}		+= etmem_proc.o
+proc-$(CONFIG_FAST_SYSCALL)	+= proc_xcall.o

@@ -889,6 +889,12 @@ static inline bool system_supports_haft(void)
 		cpus_have_final_cap(ARM64_HAFT);
 }
 
+static __always_inline bool system_supports_xcall(void)
+{
+	return IS_ENABLED(CONFIG_FAST_SYSCALL) &&
+		cpus_have_const_cap(ARM64_HAS_XCALL);
+}
+
 int do_emulate_mrs(struct pt_regs *regs, u32 sys_reg, u32 rt);
 bool try_emulate_mrs(struct pt_regs *regs, u32 isn);
 

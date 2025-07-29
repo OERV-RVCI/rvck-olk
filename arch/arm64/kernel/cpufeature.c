@@ -2438,11 +2438,6 @@ static int __init xcall_setup(char *str)
 }
 __setup("xcall", xcall_setup);
 
-bool fast_syscall_enabled(void)
-{
-	return is_xcall_support;
-}
-
 static bool has_xcall_support(const struct arm64_cpu_capabilities *entry, int __unused)
 {
 	return is_xcall_support;
