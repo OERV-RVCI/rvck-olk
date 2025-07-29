@@ -63,6 +63,7 @@ config SECURITY_FEATURE_BYPASS
 
 config ACTLR_XCALL_XINT
 	bool "Hardware XCALL and Xint support"
+	depends on FAST_SYSCALL
 	default n
 	help
 	  Use the 0x600 as the offset to the exception vector base address for

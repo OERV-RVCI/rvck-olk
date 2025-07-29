@@ -831,13 +831,11 @@ static inline bool system_has_full_ptr_auth(void)
 	return system_supports_address_auth() && system_supports_generic_auth();
 }
 
-#ifdef CONFIG_ACTLR_XCALL_XINT
 static __always_inline bool system_uses_xcall_xint(void)
 {
 	return IS_ENABLED(CONFIG_ACTLR_XCALL_XINT) &&
 	       cpus_have_const_cap(ARM64_HAS_HW_XCALL_XINT);
 }
-#endif
 
 static __always_inline bool system_uses_irq_prio_masking(void)
 {
@@ -887,12 +885,6 @@ static inline bool system_supports_haft(void)
 {
 	return IS_ENABLED(CONFIG_ARM64_HAFT) &&
 		cpus_have_final_cap(ARM64_HAFT);
-}
-
-static __always_inline bool system_supports_xcall(void)
-{
-	return IS_ENABLED(CONFIG_FAST_SYSCALL) &&
-		cpus_have_const_cap(ARM64_HAS_XCALL);
 }
 
 int do_emulate_mrs(struct pt_regs *regs, u32 sys_reg, u32 rt);

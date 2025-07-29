@@ -1054,7 +1054,7 @@ UNHANDLED(el0t, 32, error)
 #ifdef CONFIG_ACTLR_XCALL_XINT
 asmlinkage void noinstr el0t_64_xcall_handler(struct pt_regs *regs)
 {
-	el0_svc(regs);
+	el0_xcall(regs);
 }
 asmlinkage void noinstr el0t_64_xint_handler(struct pt_regs *regs)
 {
