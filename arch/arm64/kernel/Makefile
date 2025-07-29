@@ -79,6 +79,7 @@ obj-$(CONFIG_ARM64_MTE)			+= mte.o
 obj-y					+= vdso-wrap.o
 obj-$(CONFIG_COMPAT_VDSO)		+= vdso32-wrap.o
 obj-$(CONFIG_ARM64_ILP32)		+= vdso-ilp32/
+obj-$(CONFIG_FAST_SYSCALL)		+= xcall.o
 obj-$(CONFIG_UNWIND_PATCH_PAC_INTO_SCS)	+= patch-scs.o
 obj-$(CONFIG_IPI_AS_NMI)		+= ipi_nmi.o
 obj-$(CONFIG_HISI_VIRTCCA_GUEST)	+= virtcca_cvm_guest.o virtcca_cvm_tsi.o

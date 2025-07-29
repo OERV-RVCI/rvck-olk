@@ -2430,17 +2430,19 @@ static void mpam_extra_caps(void)
 }
 
 #ifdef CONFIG_FAST_SYSCALL
-static bool is_xcall_support;
+#include <asm/xcall.h>
+DEFINE_STATIC_KEY_FALSE(xcall_enable);
+
 static int __init xcall_setup(char *str)
 {
-	is_xcall_support = true;
+	static_branch_enable(&xcall_enable);
 	return 1;
 }
 __setup("xcall", xcall_setup);
 
 static bool has_xcall_support(const struct arm64_cpu_capabilities *entry, int __unused)
 {
-	return is_xcall_support;
+	return static_branch_unlikely(&xcall_enable);
 }
 #endif
 
