@@ -581,6 +581,8 @@ SYM_CODE_START(vectors)
 SYM_CODE_END(vectors)
 
 #ifdef CONFIG_ACTLR_XCALL_XINT
+#include "xcall/entry.S"
+
 	.align	11
 SYM_CODE_START(vectors_xcall_xint)
 	kernel_ventry	1, t, 64, sync		// Synchronous EL1t
@@ -598,7 +600,7 @@ SYM_CODE_START(vectors_xcall_xint)
 	kernel_ventry	0, t, 64, fiq		// FIQ 64-bit EL0
 	kernel_ventry	0, t, 64, error		// Error 64-bit EL0
 
-	kernel_ventry	0, t, 64, xcall		// XCALL synchronous 64-bit EL0
+	xcall_ventry				// XCALL synchronous 64-bit EL0
 	kernel_ventry	0, t, 64, xint		// XINT 64-bit EL0
 	kernel_ventry	0, t, 32, fiq		// FIQ 32-bit EL0
 	kernel_ventry	0, t, 32, error		// Error 32-bit EL0
@@ -648,7 +650,7 @@ SYM_CODE_END(__bad_stack)
 	.endm
 
 	.macro check_xcall_enable
-	/* x21 = task_struct->xcall_enable */
+	/* x21 = task_struct->xinfo->xcall_enable */
 	ldr_this_cpu	x20, __entry_task, x21
 	ldr	x21, [x20, #TSK_XCALL]
 	/* x20 = sc_no / 8 */

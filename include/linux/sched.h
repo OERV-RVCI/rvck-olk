@@ -1615,7 +1615,7 @@ struct task_struct {
 	randomized_struct_fields_end
 
 #if defined(CONFIG_FAST_SYSCALL)
-	KABI_USE(1, unsigned long *xcall_enable)
+	KABI_USE(1, void *xinfo)
 #else
 	KABI_RESERVE(1)
 #endif
