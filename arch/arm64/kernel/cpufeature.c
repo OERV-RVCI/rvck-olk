@@ -2503,6 +2503,7 @@ static void enable_xcall_xint_vectors(void)
 	 * the vbar_el1 from the default vectors to the xcall/xint vectors
 	 * at once.
 	 */
+	__this_cpu_write(this_cpu_vector, vectors_xcall_xint);
 	write_sysreg(vectors_xcall_xint, vbar_el1);
 	isb();
 }
