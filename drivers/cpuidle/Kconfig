@@ -70,6 +70,11 @@ depends on RISCV
 source "drivers/cpuidle/Kconfig.riscv"
 endmenu
 
+menu "SW64 CPU Idle Drivers"
+depends on SW64
+source "drivers/cpuidle/Kconfig.sw64"
+endmenu
+
 config HALTPOLL_CPUIDLE
 	tristate "Haltpoll cpuidle driver"
 	depends on ARCH_CPUIDLE_HALTPOLL && ARCH_HAS_OPTIMIZED_POLL
