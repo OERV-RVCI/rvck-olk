@@ -919,6 +919,9 @@ struct folio *dynamic_pool_alloc_hugepage(struct hugetlbfs_inode_info *p,
 	if (!dpool->online)
 		goto unlock;
 
+	if (!pool->free_huge_pages)
+		goto unlock;
+
 	list_for_each_entry(folio, &pool->freelist, lru) {
 		if (folio_test_hwpoison(folio))
 			continue;
