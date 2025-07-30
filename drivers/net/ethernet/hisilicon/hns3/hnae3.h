@@ -362,6 +362,10 @@ enum hnae3_dbg_cmd {
 	HNAE3_DBG_CMD_UNKNOWN,
 };
 
+#define hnae3_seq_file_to_ae_dev(s)	(dev_get_drvdata((s)->private))
+#define hnae3_seq_file_to_handle(s)	\
+		(((struct hnae3_ae_dev *)hnae3_seq_file_to_ae_dev(s))->handle)
+
 enum hnae3_tc_map_mode {
 	HNAE3_TC_MAP_MODE_PRIO,
 	HNAE3_TC_MAP_MODE_DSCP,
@@ -457,7 +461,10 @@ struct hnae3_ae_dev {
 	u32 dev_version;
 	DECLARE_BITMAP(caps, HNAE3_DEV_CAPS_MAX_NUM);
 	void *priv;
+	struct hnae3_handle *handle;
 };
+
+typedef int (*read_func)(struct seq_file *s, void *data);
 
 /* This struct defines the operation on the handle.
  *
@@ -603,8 +610,6 @@ struct hnae3_ae_dev {
  *   Delete clsflower rule
  * cls_flower_active
  *   Check if any cls flower rule exist
- * dbg_read_cmd
- *   Execute debugfs read command.
  * request_flush_qb_config
  *   Request to update queue bonding configuration
  * request_pfc_storm_config
@@ -625,6 +630,8 @@ struct hnae3_ae_dev {
  *   Get wake on lan info
  * set_wol
  *   Config wake on lan
+ * dbg_get_read_func
+ *   Return the read func for debugfs seq file
  */
 struct hnae3_ae_ops {
 	int (*init_ae_dev)(struct hnae3_ae_dev *ae_dev);
@@ -779,8 +786,6 @@ struct hnae3_ae_ops {
 	void (*enable_fd)(struct hnae3_handle *handle, bool enable);
 	int (*add_arfs_entry)(struct hnae3_handle *handle, u16 queue_id,
 			      u16 flow_id, struct flow_keys *fkeys);
-	int (*dbg_read_cmd)(struct hnae3_handle *handle, enum hnae3_dbg_cmd cmd,
-			    char *buf, int len);
 	pci_ers_result_t (*handle_hw_ras_error)(struct hnae3_ae_dev *ae_dev);
 	bool (*get_hw_reset_stat)(struct hnae3_handle *handle);
 	bool (*ae_dev_resetting)(struct hnae3_handle *handle);
@@ -832,6 +837,9 @@ struct hnae3_ae_ops {
 			struct ethtool_wolinfo *wol);
 	int (*set_wol)(struct hnae3_handle *handle,
 		       struct ethtool_wolinfo *wol);
+	int (*dbg_get_read_func)(struct hnae3_handle *handle,
+				 enum hnae3_dbg_cmd cmd,
+				 read_func *func);
 	int (*priv_ops)(struct hnae3_handle *handle, int opcode,
 			void *data, size_t length);
 };

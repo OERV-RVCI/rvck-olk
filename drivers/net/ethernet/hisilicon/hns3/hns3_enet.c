@@ -5641,6 +5641,8 @@ static int hns3_client_init(struct hnae3_handle *handle)
 	struct net_device *netdev;
 	int ret;
 
+	ae_dev->handle = handle;
+
 	handle->ae_algo->ops->get_tqps_and_rss_info(handle, &alloc_tqps,
 						    &max_rss_size);
 	netdev = alloc_etherdev_mq(sizeof(struct hns3_nic_priv), alloc_tqps);
