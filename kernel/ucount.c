@@ -323,14 +323,14 @@ void dec_ucount(struct ucounts *ucounts, enum ucount_type type)
 #ifdef CONFIG_UCOUNTS_PERCPU_COUNTER
 /* Return 1 if increments successful, otherwise return LONG_MAX. */
 long inc_rlimit_ucounts_limit(struct ucounts *ucounts, enum rlimit_type type,
-					long v, long limit)
+					long v, unsigned long limit)
 {
 	struct ucounts *iter;
 	long max = LONG_MAX;
 	bool over_limit = false;
 
 	for (iter = ucounts; iter; iter = iter->ns->ucounts) {
-		max = min(limit, max);
+		max = limit < max ? limit : max;
 		if (!percpu_counter_limited_add(&iter->rlimit[type], max, v))
 			over_limit = true;
 
@@ -387,18 +387,18 @@ void dec_rlimit_put_ucounts(struct ucounts *ucounts, enum rlimit_type type)
  * Return 1 if increments successful, otherwise return 0.
  */
 long inc_rlimit_get_ucounts(struct ucounts *ucounts, enum rlimit_type type,
-			    bool override_rlimit, long limit)
+			    bool override_rlimit, unsigned long limit)
 {
 	struct ucounts *iter;
 	long max = LONG_MAX;
-	long in_limit = limit;
+	unsigned long in_limit = limit;
 
 	if (override_rlimit)
 		in_limit = LONG_MAX;
 
 	for (iter = ucounts; iter; iter = iter->ns->ucounts) {
 		/* Can not exceed the limit(inputed) or the ns->rlimit_max */
-		max = min(in_limit, max);
+		max = in_limit < max ? in_limit : max;
 		if (!percpu_counter_limited_add(&iter->rlimit[type], max, 1))
 			goto dec_unwind;
 
@@ -420,7 +420,7 @@ void __init ucounts_init(void)
 #else
 
 long inc_rlimit_ucounts_limit(struct ucounts *ucounts, enum rlimit_type type,
-					long v, long limit)
+					long v, unsigned long limit)
 {
 	struct ucounts *iter;
 	long max = LONG_MAX;
@@ -469,7 +469,7 @@ void dec_rlimit_put_ucounts(struct ucounts *ucounts, enum rlimit_type type)
 }
 
 long inc_rlimit_get_ucounts(struct ucounts *ucounts, enum rlimit_type type,
-			    bool override_rlimit, long limit)
+			    bool override_rlimit, unsigned long limit)
 {
 	/* Caller must hold a reference to ucounts */
 	struct ucounts *iter;
