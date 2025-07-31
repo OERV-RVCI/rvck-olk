@@ -26,6 +26,7 @@ declare -rx MPTCP_LIB_AF_INET6=10
 MPTCP_LIB_SUBTESTS=()
 MPTCP_LIB_SUBTESTS_DUPLICATED=0
 MPTCP_LIB_SUBTEST_FLAKY=0
+MPTCP_LIB_SUBTESTS_LAST_TS_MS=
 MPTCP_LIB_TEST_COUNTER=0
 MPTCP_LIB_TEST_FORMAT="%02u %-50s"
 MPTCP_LIB_IP_MPTCP=0
@@ -202,6 +203,11 @@ mptcp_lib_kversion_ge() {
 	mptcp_lib_fail_if_expected_feature "kernel version ${1} lower than ${v}"
 }
 
+mptcp_lib_subtests_last_ts_reset() {
+	MPTCP_LIB_SUBTESTS_LAST_TS_MS="$(date +%s%3N)"
+}
+mptcp_lib_subtests_last_ts_reset
+
 __mptcp_lib_result_check_duplicated() {
 	local subtest
 
@@ -216,13 +222,22 @@ __mptcp_lib_result_check_duplicated() {
 
 __mptcp_lib_result_add() {
 	local result="${1}"
+	local time="time="
+	local ts_prev_ms
 	shift
 
 	local id=$((${#MPTCP_LIB_SUBTESTS[@]} + 1))
 
 	__mptcp_lib_result_check_duplicated "${*}"
 
-	MPTCP_LIB_SUBTESTS+=("${result} ${id} - ${KSFT_TEST}: ${*}")
+	# not to add two '#'
+	[[ "${*}" != *"#"* ]] && time="# ${time}"
+
+	ts_prev_ms="${MPTCP_LIB_SUBTESTS_LAST_TS_MS}"
+	mptcp_lib_subtests_last_ts_reset
+	time+="$((MPTCP_LIB_SUBTESTS_LAST_TS_MS - ts_prev_ms))ms"
+
+	MPTCP_LIB_SUBTESTS+=("${result} ${id} - ${KSFT_TEST}: ${*} ${time}")
 }
 
 # $1: test name
@@ -415,6 +430,12 @@ mptcp_lib_check_tools() {
 				exit ${KSFT_SKIP}
 			fi
 			;;
+		"tc")
+			if ! tc -help &> /dev/null; then
+				mptcp_lib_pr_skip "Could not run test without tc tool"
+				exit ${KSFT_SKIP}
+			fi
+			;;
 		"ss")
 			if ! ss -h | grep -q MPTCP; then
 				mptcp_lib_pr_skip "ss tool does not support MPTCP"
@@ -543,4 +564,124 @@ mptcp_lib_set_ip_mptcp() {
 
 mptcp_lib_is_ip_mptcp() {
 	[ "${MPTCP_LIB_IP_MPTCP}" = "1" ]
+}
+
+# format: <id>,<ip>,<flags>,<dev>
+mptcp_lib_pm_nl_format_endpoints() {
+	local entry id ip flags dev port
+
+	for entry in "${@}"; do
+		IFS=, read -r id ip flags dev port <<< "${entry}"
+		if mptcp_lib_is_ip_mptcp; then
+			echo -n "${ip}"
+			[ -n "${port}" ] && echo -n " port ${port}"
+			echo -n " id ${id}"
+			[ -n "${flags}" ] && echo -n " ${flags}"
+			[ -n "${dev}" ] && echo -n " dev ${dev}"
+			echo " " # always a space at the end
+		else
+			echo -n "id ${id}"
+			echo -n " flags ${flags//" "/","}"
+			[ -n "${dev}" ] && echo -n " dev ${dev}"
+			echo -n " ${ip}"
+			[ -n "${port}" ] && echo -n " ${port}"
+			echo ""
+		fi
+	done
+}
+
+mptcp_lib_pm_nl_get_endpoint() {
+	local ns=${1}
+	local id=${2}
+
+	if mptcp_lib_is_ip_mptcp; then
+		ip -n "${ns}" mptcp endpoint show id "${id}"
+	else
+		ip netns exec "${ns}" ./pm_nl_ctl get "${id}"
+	fi
+}
+
+mptcp_lib_pm_nl_set_limits() {
+	local ns=${1}
+	local addrs=${2}
+	local subflows=${3}
+
+	if mptcp_lib_is_ip_mptcp; then
+		ip -n "${ns}" mptcp limits set add_addr_accepted "${addrs}" subflows "${subflows}"
+	else
+		ip netns exec "${ns}" ./pm_nl_ctl limits "${addrs}" "${subflows}"
+	fi
+}
+
+mptcp_lib_pm_nl_add_endpoint() {
+	local ns=${1}
+	local addr=${2}
+	local flags dev id port
+	local nr=2
+
+	local p
+	for p in "${@}"; do
+		case "${p}" in
+		"flags" | "dev" | "id" | "port")
+			eval "${p}"=\$"${nr}"
+			;;
+		esac
+
+		nr=$((nr + 1))
+	done
+
+	if mptcp_lib_is_ip_mptcp; then
+		# shellcheck disable=SC2086 # blanks in flags, no double quote
+		ip -n "${ns}" mptcp endpoint add "${addr}" ${flags//","/" "} \
+			${dev:+dev "${dev}"} ${id:+id "${id}"} ${port:+port "${port}"}
+	else
+		ip netns exec "${ns}" ./pm_nl_ctl add "${addr}" ${flags:+flags "${flags}"} \
+			${dev:+dev "${dev}"} ${id:+id "${id}"} ${port:+port "${port}"}
+	fi
+}
+
+mptcp_lib_pm_nl_del_endpoint() {
+	local ns=${1}
+	local id=${2}
+	local addr=${3}
+
+	if mptcp_lib_is_ip_mptcp; then
+		[ "${id}" -ne 0 ] && addr=''
+		ip -n "${ns}" mptcp endpoint delete id "${id}" ${addr:+"${addr}"}
+	else
+		ip netns exec "${ns}" ./pm_nl_ctl del "${id}" "${addr}"
+	fi
+}
+
+mptcp_lib_pm_nl_flush_endpoint() {
+	local ns=${1}
+
+	if mptcp_lib_is_ip_mptcp; then
+		ip -n "${ns}" mptcp endpoint flush
+	else
+		ip netns exec "${ns}" ./pm_nl_ctl flush
+	fi
+}
+
+mptcp_lib_pm_nl_show_endpoints() {
+	local ns=${1}
+
+	if mptcp_lib_is_ip_mptcp; then
+		ip -n "${ns}" mptcp endpoint show
+	else
+		ip netns exec "${ns}" ./pm_nl_ctl dump
+	fi
+}
+
+mptcp_lib_pm_nl_change_endpoint() {
+	local ns=${1}
+	local id=${2}
+	local flags=${3}
+
+	if mptcp_lib_is_ip_mptcp; then
+		# shellcheck disable=SC2086 # blanks in flags, no double quote
+		ip -n "${ns}" mptcp endpoint change id "${id}" ${flags//","/" "}
+	else
+		ip netns exec "${ns}" ./pm_nl_ctl set id "${id}" flags "${flags}"
+	fi
 }
