@@ -165,7 +165,8 @@ static inline long get_rlimit_value(struct ucounts *ucounts, enum rlimit_type ty
 #endif
 }
 
-long inc_rlimit_ucounts_limit(struct ucounts *ucounts, enum rlimit_type type, long v, long limit);
+long inc_rlimit_ucounts_limit(struct ucounts *ucounts, enum rlimit_type type,
+				long v, unsigned long limit);
 static inline long inc_rlimit_ucounts(struct ucounts *ucounts, enum rlimit_type type, long v)
 {
 	return inc_rlimit_ucounts_limit(ucounts, type, v, LONG_MAX);
@@ -173,7 +174,7 @@ static inline long inc_rlimit_ucounts(struct ucounts *ucounts, enum rlimit_type 
 
 bool dec_rlimit_ucounts(struct ucounts *ucounts, enum rlimit_type type, long v);
 long inc_rlimit_get_ucounts(struct ucounts *ucounts, enum rlimit_type type,
-			    bool override_rlimit, long limit);
+			    bool override_rlimit, unsigned long limit);
 void dec_rlimit_put_ucounts(struct ucounts *ucounts, enum rlimit_type type);
 bool is_rlimit_overlimit(struct ucounts *ucounts, enum rlimit_type type, unsigned long max);
 
