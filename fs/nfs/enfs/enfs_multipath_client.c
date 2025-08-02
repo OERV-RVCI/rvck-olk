@@ -117,7 +117,7 @@ int nfs_multipath_client_mount_info_init(
 	return 0;
 }
 
-void enfs_free_client_info(struct multipath_client_info *clp_info)
+static void enfs_free_client_info(struct multipath_client_info *clp_info)
 {
 	if (!clp_info)
 		return;
@@ -132,18 +132,6 @@ void enfs_free_client_info(struct multipath_client_info *clp_info)
 	kfree(clp_info);
 }
 
-void nfs_multipath_client_info_free_work(struct work_struct *work)
-{
-	struct multipath_client_info *clp_info;
-
-	if (work == NULL)
-		return;
-
-	clp_info = container_of(work, struct multipath_client_info, work);
-
-	enfs_free_client_info(clp_info);
-}
-
 void nfs_multipath_client_info_free(void *data)
 {
 	struct multipath_client_info *clp_info =
@@ -152,19 +140,15 @@ void nfs_multipath_client_info_free(void *data)
 	if (clp_info == NULL)
 		return;
 	enfs_log_info("free client info %p.\n", clp_info);
-	INIT_WORK(&clp_info->work, nfs_multipath_client_info_free_work);
-	schedule_work(&clp_info->work);
+	enfs_free_client_info(clp_info);
 }
 
 int nfs_multipath_client_info_init(void **data,
 				   const struct nfs_client_initdata *cl_init)
 {
 	int rc;
-	struct multipath_client_info *info;
 	struct multipath_client_info **enfs_info;
-	/* no multi path info, no need do multipath init */
-	if (cl_init->enfs_option == NULL)
-		return 0;
+
 	enfs_info = (struct multipath_client_info **)data;
 	if (enfs_info == NULL)
 		return -EINVAL;
@@ -176,11 +160,11 @@ int nfs_multipath_client_info_init(void **data,
 	if (*enfs_info == NULL)
 		return -ENOMEM;
 
-	info = (struct multipath_client_info *)*enfs_info;
-	enfs_log_info("init client info %p.\n", info);
-	rc = nfs_multipath_client_mount_info_init(info, cl_init);
+	enfs_log_info("init client info %p.\n", *enfs_info);
+	rc = nfs_multipath_client_mount_info_init(*enfs_info, cl_init);
 	if (rc) {
-		nfs_multipath_client_info_free((void *)info);
+		nfs_multipath_client_info_free(*enfs_info);
+		*enfs_info = NULL;
 		return rc;
 	}
 	return rc;
