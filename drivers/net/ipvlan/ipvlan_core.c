@@ -797,11 +797,15 @@ static int ipvlan_l2e_local_xmit_event(struct ipvl_dev *ipvlan,
 static int ipvlan_xmit_mode_l2e(struct sk_buff *skb, struct net_device *dev)
 {
 	struct ipvl_dev *ipvlan = netdev_priv(dev);
-	struct ethhdr *eth = eth_hdr(skb);
 	struct ipvl_addr *addr;
+	struct ethhdr *eth;
 	void *lyr3h;
 	int addr_type;
 
+	if (!skb_mac_header_was_set(skb))
+		skb_reset_mac_header(skb);
+
+	eth = eth_hdr(skb);
 	if (!ipvlan_is_vepa(ipvlan->port) &&
 	    ether_addr_equal(eth->h_dest, eth->h_source)) {
 		lyr3h = ipvlan_get_L3_hdr(ipvlan->port, skb, &addr_type);
