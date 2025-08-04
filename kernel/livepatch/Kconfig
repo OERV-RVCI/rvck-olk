@@ -101,4 +101,14 @@ config LIVEPATCH_ISOLATE_KPROBE
 	  do not allow both modify the same instruction when a function is
 	  marked as 'notrace' and without the reserved instructions.
 
+config LIVEPATCH_LONG_SYMBOL_SUPPORT
+	bool "support relocate symbol name whose length longer than 128 bytes"
+	depends on LIVEPATCH_WO_FTRACE
+	default y
+	help
+	  symbols longer than KSYM_NAME_LEN will be truncated in strtab,
+	  we can not find them using original name, so we use a new format
+	  .klp.sym.objname-ref_name,ref_offset to find a unique symbol
+	  and add ref_offset to get the long name symbol address.
+
 endmenu

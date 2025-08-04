@@ -234,6 +234,7 @@ static int klp_resolve_symbols(Elf_Shdr *sechdrs, const char *strtab,
 #endif
 	Elf_Sym *sym;
 	unsigned long sympos, addr;
+	long ref_offset;
 	bool sym_vmlinux;
 	bool sec_vmlinux = !strcmp(sec_objname, "vmlinux");
 
@@ -267,10 +268,19 @@ static int klp_resolve_symbols(Elf_Shdr *sechdrs, const char *strtab,
 			return -EINVAL;
 		}
 
+		ref_offset = 0;
 		/* Format: .klp.sym.sym_objname.sym_name,sympos */
 		cnt = sscanf(strtab + sym->st_name,
 			     ".klp.sym.%55[^.].%511[^,],%lu",
 			     sym_objname, sym_name, &sympos);
+		if (IS_ENABLED(CONFIG_LIVEPATCH_LONG_SYMBOL_SUPPORT) && cnt != 3) {
+			/* Format: .klp.sym.objname-ref_name,ref_offset*/
+			cnt = sscanf(strtab + sym->st_name,
+					".klp.sym.%55[^-]-%127[^,],%ld",
+					sym_objname, sym_name, &ref_offset);
+			if (cnt == 3)
+				sympos = 1;
+		}
 		if (cnt != 3) {
 			pr_err("symbol %s has an incorrectly formatted name\n",
 			       strtab + sym->st_name);
@@ -298,6 +308,8 @@ static int klp_resolve_symbols(Elf_Shdr *sechdrs, const char *strtab,
 			return ret;
 
 		sym->st_value = addr;
+		if (IS_ENABLED(CONFIG_LIVEPATCH_LONG_SYMBOL_SUPPORT))
+			sym->st_value += ref_offset;
 	}
 
 	return 0;
