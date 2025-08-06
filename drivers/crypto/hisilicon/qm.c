@@ -3357,6 +3357,9 @@ static int qm_eq_aeq_ctx_cfg(struct hisi_qm *qm)
 
 	qm_init_eq_aeq_status(qm);
 
+	/* Before starting the dev, clear previous task info in dma memory */
+	memset(qm->qdma.va, 0, qm->qdma.size);
+
 	ret = qm_eq_ctx_cfg(qm);
 	if (ret) {
 		dev_err(dev, "Set eqc failed!\n");
@@ -3368,9 +3371,13 @@ static int qm_eq_aeq_ctx_cfg(struct hisi_qm *qm)
 
 static int __hisi_qm_start(struct hisi_qm *qm)
 {
+	struct device *dev = &qm->pdev->dev;
 	int ret;
 
-	WARN_ON(!qm->qdma.va);
+	if (unlikely(!qm->qdma.va)) {
+		dev_err(dev, "dma virtual address should not be NULL\n");
+		return -EINVAL;
+	}
 
 	if (qm->fun_type == QM_HW_PF) {
 		ret = hisi_qm_set_vft(qm, 0, qm->qp_base, qm->qp_num);
@@ -3500,7 +3507,6 @@ static void qm_invalid_queues(struct hisi_qm *qm)
 	if (qm->status.stop_reason == QM_DOWN)
 		hisi_qm_cache_wb(qm);
 
-	memset(qm->qdma.va, 0, qm->qdma.size);
 	for (i = 0; i < qm->qp_num; i++) {
 		qp = &qm->qp_array[i];
 		if (!qp->is_resetting)
