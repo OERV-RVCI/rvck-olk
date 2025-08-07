@@ -1683,7 +1683,7 @@ static int shard_update_loop(void *data)
 	return 0;
 }
 
-static void enfs_clear_shard_ctrl(void)
+static void enfs_shard_ctrl_clear(void)
 {
 	struct clnt_uuid_info *info, *tmp_info;
 	struct view_table *table, *tmp_table;
@@ -1700,17 +1700,14 @@ static void enfs_clear_shard_ctrl(void)
 		enfs_free_view_table(table);
 	}
 	write_unlock(&shard_ctrl->view_lock);
+
+	kfree(shard_ctrl);
+	shard_ctrl = NULL;
 }
 
 static struct shard_view_ctrl *enfs_shard_ctrl_init(void)
 {
 	struct shard_view_ctrl *ctrl;
-
-	ctrl = enfs_adapter_get_data();
-	if (ctrl) {
-		enfs_log_info("existing shard ctrl is obtained.\n");
-		return ctrl;
-	}
 
 	ctrl = kmalloc(sizeof(*ctrl), GFP_KERNEL);
 	if (!ctrl) {
@@ -1722,7 +1719,6 @@ static struct shard_view_ctrl *enfs_shard_ctrl_init(void)
 	rwlock_init(&ctrl->view_lock);
 	INIT_LIST_HEAD(&ctrl->clnt_info_list);
 	rwlock_init(&ctrl->clnt_info_lock);
-	enfs_adapter_set_data((void *)ctrl);
 	return ctrl;
 }
 
@@ -1759,5 +1755,6 @@ void enfs_shard_exit(void)
 		destroy_workqueue(shard_workq);
 	}
 
-	enfs_clear_shard_ctrl();
+	if (shard_ctrl)
+		enfs_shard_ctrl_clear();
 }

@@ -19,19 +19,6 @@
 static struct enfs_adapter_ops __rcu *enfs_adapter;
 
 static DEFINE_MUTEX(enfs_module_mutex);
-static void *enfs_adapter_data;
-
-void *enfs_adapter_get_data(void)
-{
-	return enfs_adapter_data;
-}
-EXPORT_SYMBOL_GPL(enfs_adapter_get_data);
-
-void enfs_adapter_set_data(void *data)
-{
-	enfs_adapter_data = data;
-}
-EXPORT_SYMBOL_GPL(enfs_adapter_set_data);
 
 int enfs_adapter_register(struct enfs_adapter_ops *ops)
 {
