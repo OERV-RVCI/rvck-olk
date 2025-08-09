@@ -41,8 +41,11 @@ DEFINE_PER_CPU(enum arm_spe_user_e, arm_spe_user);
 EXPORT_PER_CPU_SYMBOL_GPL(arm_spe_user);
 
 enum mem_sampling_saved_state_e {
-	MEM_SAMPLING_STATE_ENABLE,
 	MEM_SAMPLING_STATE_DISABLE,
+	MEM_SAMPLING_STATE_ENABLE,
+	MEM_SAMPLING_STATE_NUMA_ENABLE,
+	MEM_SAMPLING_STATE_DAMON_ENABLE,
+	MEM_SAMPLING_STATE_NUM_DAMON_ENABLE,
 	MEM_SAMPLING_STATE_EMPTY,
 };
 enum mem_sampling_saved_state_e mem_sampling_saved_state = MEM_SAMPLING_STATE_EMPTY;
@@ -416,16 +419,25 @@ static void __set_mem_sampling_state(bool enabled)
 	}
 }
 
+static enum mem_sampling_saved_state_e get_mem_sampling_saved_state(void)
+{
+	if (static_branch_likely(&mm_damon_mem_sampling) &&
+		static_branch_likely(&sched_numabalancing_mem_sampling))
+		return MEM_SAMPLING_STATE_NUM_DAMON_ENABLE;
+	if (static_branch_likely(&mm_damon_mem_sampling))
+		return MEM_SAMPLING_STATE_DAMON_ENABLE;
+	if (static_branch_likely(&sched_numabalancing_mem_sampling))
+		return MEM_SAMPLING_STATE_NUMA_ENABLE;
+	if (static_branch_likely(&mem_sampling_access_hints))
+		return MEM_SAMPLING_STATE_ENABLE;
+
+	return MEM_SAMPLING_STATE_DISABLE;
+}
+
 void set_mem_sampling_state(bool enabled)
 {
 	if (!mem_sampling_ops.sampling_start || !mm_spe_enabled())
 		return;
-
-	if (mem_sampling_saved_state != MEM_SAMPLING_STATE_EMPTY) {
-		mem_sampling_saved_state = enabled ? MEM_SAMPLING_STATE_ENABLE :
-					    MEM_SAMPLING_STATE_DISABLE;
-		return;
-	}
 
 	if (enabled)
 		sysctl_mem_sampling_mode = MEM_SAMPLING_NORMAL;
@@ -434,10 +446,45 @@ void set_mem_sampling_state(bool enabled)
 	__set_mem_sampling_state(enabled);
 }
 
+static int set_state(int state)
+{
+	if (mem_sampling_saved_state != MEM_SAMPLING_STATE_EMPTY) {
+		mem_sampling_saved_state = state;
+		return -EINVAL;
+	}
+	switch (state) {
+	case 0:
+		set_mem_sampling_state(false);
+		break;
+	case 1:
+		set_mem_sampling_state(false);
+		set_mem_sampling_state(true);
+		break;
+	case 2:
+		set_mem_sampling_state(false);
+		set_mem_sampling_state(true);
+		set_numabalancing_mem_sampling_state(true);
+		break;
+	case 3:
+		set_mem_sampling_state(false);
+		set_mem_sampling_state(true);
+		set_damon_mem_sampling_state(true);
+		break;
+	case 4:
+		set_mem_sampling_state(true);
+		set_numabalancing_mem_sampling_state(true);
+		set_damon_mem_sampling_state(true);
+		break;
+	default:
+		return -EINVAL;
+	}
+	return 0;
+}
+
 void mem_sampling_user_switch_process(enum user_switch_type type)
 {
-	bool state, mm_spe_is_perf_user = false;
-	int cpu;
+	bool mm_spe_is_perf_user = false;
+	int cpu, hints;
 
 	if (type >= USER_SWITCH_TYPE_MAX) {
 		pr_err("user switch type error.\n");
@@ -456,26 +503,27 @@ void mem_sampling_user_switch_process(enum user_switch_type type)
 		if (mem_sampling_saved_state != MEM_SAMPLING_STATE_EMPTY)
 			return;
 
-		if (static_branch_unlikely(&mem_sampling_access_hints))
-			mem_sampling_saved_state = MEM_SAMPLING_STATE_ENABLE;
+		hints = get_mem_sampling_saved_state();
+		set_state(0);
+
+		if (hints)
+			mem_sampling_saved_state = hints;
 		else
 			mem_sampling_saved_state = MEM_SAMPLING_STATE_DISABLE;
 
-		pr_debug("user switch away from mem_sampling, %s is saved, set to disable.\n",
-				mem_sampling_saved_state ? "disabled" : "enabled");
+		pr_debug("user switch away from mem_sampling, %d is saved, set to disable.\n",
+				mem_sampling_saved_state);
 
-		set_mem_sampling_state(false);
 	} else {
 		/* If the state is not backed up, do not restore it */
 		if (mem_sampling_saved_state == MEM_SAMPLING_STATE_EMPTY || mm_spe_is_perf_user)
 			return;
 
-		state = (mem_sampling_saved_state == MEM_SAMPLING_STATE_ENABLE) ? true : false;
-		set_mem_sampling_state(state);
+		hints = mem_sampling_saved_state;
 		mem_sampling_saved_state = MEM_SAMPLING_STATE_EMPTY;
+		set_state(hints);
 
-		pr_debug("user switch back to mem_sampling, set to saved %s.\n",
-				state ? "enalbe" : "disable");
+		pr_debug("user switch back to mem_sampling, set to saved %d.\n", hints);
 	}
 }
 EXPORT_SYMBOL_GPL(mem_sampling_user_switch_process);
@@ -488,15 +536,7 @@ static int proc_mem_sampling_enable(struct ctl_table *table, int write,
 	int err;
 	int state = 0;
 
-	if (static_branch_likely(&mem_sampling_access_hints))
-		state = 1;
-	if (static_branch_likely(&sched_numabalancing_mem_sampling))
-		state = 2;
-	if (static_branch_likely(&mm_damon_mem_sampling))
-		state = 3;
-	if (static_branch_likely(&mm_damon_mem_sampling) &&
-		static_branch_likely(&sched_numabalancing_mem_sampling))
-		state = 4;
+	state = get_mem_sampling_saved_state();
 
 	if (write && !capable(CAP_SYS_ADMIN))
 		return -EPERM;
@@ -508,34 +548,8 @@ static int proc_mem_sampling_enable(struct ctl_table *table, int write,
 	err = proc_dointvec_minmax(&t, write, buffer, lenp, ppos);
 	if (err < 0)
 		return err;
-	if (write) {
-		switch (state) {
-		case 0:
-			set_mem_sampling_state(false);
-			break;
-		case 1:
-			set_mem_sampling_state(false);
-			set_mem_sampling_state(true);
-			break;
-		case 2:
-			set_mem_sampling_state(false);
-			set_mem_sampling_state(true);
-			set_numabalancing_mem_sampling_state(true);
-			break;
-		case 3:
-			set_mem_sampling_state(false);
-			set_mem_sampling_state(true);
-			set_damon_mem_sampling_state(true);
-			break;
-		case 4:
-			set_mem_sampling_state(true);
-			set_numabalancing_mem_sampling_state(true);
-			set_damon_mem_sampling_state(true);
-			break;
-		default:
-			return -EINVAL;
-		}
-	}
+	if (write)
+		err = set_state(state);
 	return err;
 }
 
