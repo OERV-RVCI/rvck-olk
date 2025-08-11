@@ -634,8 +634,7 @@ void free_task(struct task_struct *tsk)
 		free_kthread_struct(tsk);
 	bpf_task_storage_free(tsk);
 #ifdef CONFIG_QOS_SCHED_DYNAMIC_AFFINITY
-	if (dynamic_affinity_enabled())
-		sched_prefer_cpus_free(tsk);
+	sched_prefer_cpus_free(tsk);
 #endif
 #ifdef CONFIG_QOS_SCHED_SMART_GRID
 	if (smart_grid_enabled())
@@ -2450,11 +2449,9 @@ __latent_entropy struct task_struct *copy_process(
 #endif
 
 #ifdef CONFIG_QOS_SCHED_DYNAMIC_AFFINITY
-	if (dynamic_affinity_enabled()) {
-		retval = sched_prefer_cpus_fork(p, current->prefer_cpus);
-		if (retval)
-			goto bad_fork_free;
-	}
+	retval = sched_prefer_cpus_fork(p, current->prefer_cpus);
+	if (retval)
+		goto bad_fork_free;
 #endif
 
 	lockdep_assert_irqs_enabled();

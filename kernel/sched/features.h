@@ -61,6 +61,10 @@ SCHED_FEAT(SIS_UTIL, true)
 SCHED_FEAT(STEAL, false)
 #endif
 
+#ifdef CONFIG_SCHED_PARAL
+SCHED_FEAT(PARAL, false)
+#endif
+
 /*
  * Issue a WARN when we do multiple update_rq_clock() calls
  * in a single rq->lock section. Default disabled because the

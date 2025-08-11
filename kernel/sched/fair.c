@@ -75,6 +75,10 @@
 #endif
 #include <linux/sched/grid_qos.h>
 
+#ifdef CONFIG_SCHED_PARAL
+#include <asm/prefer_numa.h>
+#endif
+
 /*
  * The initial- and re-scaling of tunables is configurable
  *
@@ -9057,6 +9061,12 @@ unlock:
 }
 
 #ifdef CONFIG_QOS_SCHED_DYNAMIC_AFFINITY
+#ifdef CONFIG_SCHED_PARAL
+bool sched_paral_used(void)
+{
+	return sched_feat(PARAL);
+}
+#endif
 
 DEFINE_STATIC_KEY_FALSE(__dynamic_affinity_switch);
 
@@ -9084,16 +9094,15 @@ __setup("dynamic_affinity=", dynamic_affinity_switch_setup);
 
 static inline bool prefer_cpus_valid(struct task_struct *p)
 {
-	struct cpumask *prefer_cpus;
+	struct cpumask *prefer_cpus = task_prefer_cpus(p);
 
-	if (!dynamic_affinity_enabled())
-		return false;
+	if (dynamic_affinity_enabled() || sched_paral_used()) {
+		return !cpumask_empty(prefer_cpus) &&
+			!cpumask_equal(prefer_cpus, p->cpus_ptr) &&
+			cpumask_subset(prefer_cpus, p->cpus_ptr);
+	}
 
-	prefer_cpus = task_prefer_cpus(p);
-
-	return !cpumask_empty(prefer_cpus) &&
-	       !cpumask_equal(prefer_cpus, p->cpus_ptr) &&
-	       cpumask_subset(prefer_cpus, p->cpus_ptr);
+	return false;
 }
 
 static inline unsigned long taskgroup_cpu_util(struct task_group *tg,
@@ -9192,6 +9201,14 @@ static void set_task_select_cpus(struct task_struct *p, int *idlest_cpu,
 			tg_capacity += capacity_of(cpu);
 	}
 	rcu_read_unlock();
+
+	/* In extreme cases, it may cause uneven system load. */
+	if (sched_paral_used() && sysctl_sched_util_low_pct == 100 && nr_cpus_valid > 0) {
+		p->select_cpus = p->prefer_cpus;
+		if (sd_flag & SD_BALANCE_WAKE)
+			schedstat_inc(p->stats.nr_wakeups_preferred_cpus);
+		return;
+	}
 
 	/*
 	 * Follow cases should select cpus_ptr, checking by condition of
@@ -14679,6 +14696,12 @@ static void task_fork_fair(struct task_struct *p)
 	if (curr)
 		update_curr(cfs_rq);
 	place_entity(cfs_rq, se, ENQUEUE_INITIAL);
+
+#ifdef CONFIG_SCHED_PARAL
+	if (sched_paral_used())
+		set_task_paral_node(p);
+#endif
+
 	rq_unlock(rq, &rf);
 }
 
