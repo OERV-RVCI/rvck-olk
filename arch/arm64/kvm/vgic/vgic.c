@@ -10,7 +10,9 @@
 #include <linux/list_sort.h>
 #include <linux/nospec.h>
 
+#include <asm/kvm_emulate.h>
 #include <asm/kvm_hyp.h>
+#include <asm/kvm_rme.h>
 #include <asm/kvm_tmi.h>
 
 #include "vgic.h"
@@ -21,6 +23,13 @@
 struct vgic_global kvm_vgic_global_state __ro_after_init = {
 	.gicv3_cpuif = STATIC_KEY_FALSE_INIT,
 };
+
+static inline int kvm_vcpu_vgic_nr_lr(struct kvm_vcpu *vcpu)
+{
+	if (unlikely(vcpu_is_rec(vcpu)))
+		return kvm_realm_vgic_nr_lr();
+	return kvm_vgic_global_state.nr_lr;
+}
 
 /*
  * Locking order is always:
@@ -841,7 +850,7 @@ static void vgic_flush_lr_state(struct kvm_vcpu *vcpu)
 	lockdep_assert_held(&vgic_cpu->ap_list_lock);
 
 	count = compute_ap_list_depth(vcpu, &multi_sgi);
-	if (count > kvm_vgic_global_state.nr_lr || multi_sgi)
+	if (count > kvm_vcpu_vgic_nr_lr(vcpu) || multi_sgi)
 		vgic_sort_ap_list(vcpu);
 
 	count = 0;
@@ -870,7 +879,7 @@ static void vgic_flush_lr_state(struct kvm_vcpu *vcpu)
 
 		raw_spin_unlock(&irq->irq_lock);
 
-		if (count == kvm_vgic_global_state.nr_lr) {
+		if (count == kvm_vcpu_vgic_nr_lr(vcpu)) {
 			if (!list_is_last(&irq->ap_list,
 					  &vgic_cpu->ap_list_head))
 				vgic_set_underflow(vcpu);
@@ -879,7 +888,7 @@ static void vgic_flush_lr_state(struct kvm_vcpu *vcpu)
 	}
 
 	/* Nuke remaining LRs */
-	for (i = count ; i < kvm_vgic_global_state.nr_lr; i++)
+	for (i = count ; i < kvm_vcpu_vgic_nr_lr(vcpu); i++)
 		vgic_clear_lr(vcpu, i);
 
 	if (!static_branch_unlikely(&kvm_vgic_global_state.gicv3_cpuif))
@@ -903,11 +912,11 @@ static inline void vgic_tmm_save_state(struct kvm_vcpu *vcpu)
 {
 	int i;
 	struct vgic_v3_cpu_if *cpu_if = &vcpu->arch.vgic_cpu.vgic_v3;
-	struct tmi_tec_run *tec_run = vcpu->arch.tec.tec_run;
+	struct tmi_tec_run *tec_run = vcpu->arch.tec.run;
 
 	for (i = 0; i < kvm_vgic_global_state.nr_lr; ++i) {
-		cpu_if->vgic_lr[i] = tec_run->tec_exit.gicv3_lrs[i];
-		tec_run->tec_entry.gicv3_lrs[i] = 0;
+		cpu_if->vgic_lr[i] = tec_run->exit.gicv3_lrs[i];
+		tec_run->enter.gicv3_lrs[i] = 0;
 	}
 }
 
@@ -915,27 +924,41 @@ static inline void vgic_tmm_restore_state(struct kvm_vcpu *vcpu)
 {
 	int i;
 	struct vgic_v3_cpu_if *cpu_if = &vcpu->arch.vgic_cpu.vgic_v3;
-	struct tmi_tec_run *tec_run = vcpu->arch.tec.tec_run;
+	struct tmi_tec_run *tec_run = vcpu->arch.tec.run;
 
 	for (i = 0; i < kvm_vgic_global_state.nr_lr; ++i) {
-		tec_run->tec_entry.gicv3_lrs[i] = cpu_if->vgic_lr[i];
-		tec_run->tec_exit.gicv3_lrs[i] = cpu_if->vgic_lr[i];
+		tec_run->enter.gicv3_lrs[i] = cpu_if->vgic_lr[i];
+		tec_run->exit.gicv3_lrs[i] = cpu_if->vgic_lr[i];
 	}
 }
 #endif
+
+static inline void vgic_rmm_save_state(struct kvm_vcpu *vcpu)
+{
+	struct vgic_v3_cpu_if *cpu_if = &vcpu->arch.vgic_cpu.vgic_v3;
+	int i;
+
+	if (!_vcpu_is_rec(vcpu))
+		return;
+
+	for (i = 0; i < kvm_vcpu_vgic_nr_lr(vcpu); i++) {
+		cpu_if->vgic_lr[i] = vcpu->arch.rec->run->exit.gicv3_lrs[i];
+		vcpu->arch.rec->run->enter.gicv3_lrs[i] = 0;
+	}
+}
 
 static inline void vgic_save_state(struct kvm_vcpu *vcpu)
 {
 	if (!static_branch_unlikely(&kvm_vgic_global_state.gicv3_cpuif))
 		vgic_v2_save_state(vcpu);
-	else
 #ifdef CONFIG_HISI_VIRTCCA_HOST
-		if (vcpu_is_tec(vcpu))
-			vgic_tmm_save_state(vcpu);
-		else
+	else if (vcpu_is_tec(vcpu))
+		vgic_tmm_save_state(vcpu);
 #endif
-			__vgic_v3_save_state(&vcpu->arch.vgic_cpu.vgic_v3);
-
+	else if (vcpu_is_rec(vcpu))
+		vgic_rmm_save_state(vcpu);
+	else
+		__vgic_v3_save_state(&vcpu->arch.vgic_cpu.vgic_v3);
 }
 
 /* Sync back the hardware VGIC state into our emulation after a guest's run. */
@@ -960,17 +983,37 @@ void kvm_vgic_sync_hwstate(struct kvm_vcpu *vcpu)
 	vgic_prune_ap_list(vcpu);
 }
 
+static inline void vgic_rmm_restore_state(struct kvm_vcpu *vcpu)
+{
+	struct vgic_v3_cpu_if *cpu_if = &vcpu->arch.vgic_cpu.vgic_v3;
+	int i;
+
+	if (!_vcpu_is_rec(vcpu))
+		return;
+
+	for (i = 0; i < kvm_vcpu_vgic_nr_lr(vcpu); i++) {
+		vcpu->arch.rec->run->enter.gicv3_lrs[i] = cpu_if->vgic_lr[i];
+		/*
+		 * Also populate the rec.run->exit copies so that a late
+		 * decision to back out from entering the realm doesn't cause
+		 * the state to be lost
+		 */
+		vcpu->arch.rec->run->exit.gicv3_lrs[i] = cpu_if->vgic_lr[i];
+	}
+}
+
 static inline void vgic_restore_state(struct kvm_vcpu *vcpu)
 {
 	if (!static_branch_unlikely(&kvm_vgic_global_state.gicv3_cpuif))
 		vgic_v2_restore_state(vcpu);
-	else
 #ifdef CONFIG_HISI_VIRTCCA_HOST
-		if (vcpu_is_tec(vcpu))
-			vgic_tmm_restore_state(vcpu);
-		else
+	else if (vcpu_is_tec(vcpu))
+		vgic_tmm_restore_state(vcpu);
 #endif
-			__vgic_v3_restore_state(&vcpu->arch.vgic_cpu.vgic_v3);
+	else if (vcpu_is_rec(vcpu))
+		vgic_rmm_restore_state(vcpu);
+	else
+		__vgic_v3_restore_state(&vcpu->arch.vgic_cpu.vgic_v3);
 }
 
 /* Flush our emulation state into the GIC hardware before entering the guest. */
@@ -1009,13 +1052,15 @@ void kvm_vgic_flush_hwstate(struct kvm_vcpu *vcpu)
 
 void kvm_vgic_load(struct kvm_vcpu *vcpu)
 {
-	if (unlikely(!vgic_initialized(vcpu->kvm)))
+	if (unlikely(!irqchip_in_kernel(vcpu->kvm) ||
+		     !vgic_initialized(vcpu->kvm) ||
+		     vcpu_is_rec(vcpu))) {
+		if (has_vhe() && static_branch_unlikely(&kvm_vgic_global_state.gicv3_cpuif))
+			__vgic_v3_activate_traps(&vcpu->arch.vgic_cpu.vgic_v3);
 		return;
-#ifdef CONFIG_HISI_VIRTCCA_HOST
-	if (vcpu_is_tec(vcpu))
-		return;
-#endif
-	if (kvm_vgic_global_state.type == VGIC_V2)
+	}
+
+	if (!static_branch_unlikely(&kvm_vgic_global_state.gicv3_cpuif))
 		vgic_v2_load(vcpu);
 	else
 		vgic_v3_load(vcpu);
@@ -1023,13 +1068,15 @@ void kvm_vgic_load(struct kvm_vcpu *vcpu)
 
 void kvm_vgic_put(struct kvm_vcpu *vcpu)
 {
-	if (unlikely(!vgic_initialized(vcpu->kvm)))
+	if (unlikely(!irqchip_in_kernel(vcpu->kvm) ||
+		     !vgic_initialized(vcpu->kvm) ||
+		     vcpu_is_rec(vcpu))) {
+		if (has_vhe() && static_branch_unlikely(&kvm_vgic_global_state.gicv3_cpuif))
+			__vgic_v3_deactivate_traps(&vcpu->arch.vgic_cpu.vgic_v3);
 		return;
-#ifdef CONFIG_HISI_VIRTCCA_HOST
-	if (vcpu_is_tec(vcpu))
-		return;
-#endif
-	if (kvm_vgic_global_state.type == VGIC_V2)
+	}
+
+	if (!static_branch_unlikely(&kvm_vgic_global_state.gicv3_cpuif))
 		vgic_v2_put(vcpu);
 	else
 		vgic_v3_put(vcpu);

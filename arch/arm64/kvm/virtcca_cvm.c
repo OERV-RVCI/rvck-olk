@@ -22,7 +22,7 @@
 /* Protects access to cvm_vmid_bitmap */
 static DEFINE_SPINLOCK(cvm_vmid_lock);
 static unsigned long *cvm_vmid_bitmap;
-DEFINE_STATIC_KEY_FALSE(virtcca_cvm_is_available);
+DECLARE_STATIC_KEY_FALSE(virtcca_cvm_is_enable);
 #define SIMD_PAGE_SIZE 0x3000
 #define UEFI_MAX_SIZE 0x8000000
 #define UEFI_DTB_START 0x40000000
@@ -30,13 +30,13 @@ DEFINE_STATIC_KEY_FALSE(virtcca_cvm_is_available);
 
 bool is_virtcca_available(void)
 {
-	return static_key_enabled(&virtcca_cvm_is_available);
+	return static_key_enabled(&virtcca_cvm_is_enable);
 }
 EXPORT_SYMBOL_GPL(is_virtcca_available);
 
 int kvm_enable_virtcca_cvm(struct kvm *kvm)
 {
-	if (!static_key_enabled(&virtcca_cvm_is_available))
+	if (!static_key_enabled(&virtcca_cvm_is_enable))
 		return -EFAULT;
 
 	kvm->arch.is_virtcca_cvm = true;
@@ -144,7 +144,7 @@ int kvm_arm_create_cvm(struct kvm *kvm)
 	/* get affine host numa set by default vcpu 0 */
 	u64 numa_set = kvm_get_host_numa_set_by_vcpu(0, kvm);
 
-	if (!kvm_is_virtcca_cvm(kvm) || virtcca_cvm_state(kvm) != CVM_STATE_NONE)
+	if (!kvm_is_realm(kvm) || virtcca_cvm_state(kvm) != CVM_STATE_NONE)
 		return 0;
 
 	if (!cvm->params) {
@@ -404,8 +404,8 @@ int kvm_finalize_vcpu_tec(struct kvm_vcpu *vcpu)
 	struct virtcca_cvm_tec *tec = &vcpu->arch.tec;
 
 	mutex_lock(&vcpu->kvm->lock);
-	tec->tec_run = kzalloc(PAGE_SIZE, GFP_KERNEL_ACCOUNT);
-	if (!tec->tec_run) {
+	tec->run = kzalloc(PAGE_SIZE, GFP_KERNEL_ACCOUNT);
+	if (!tec->run) {
 		ret = -ENOMEM;
 		goto tec_free;
 	}
@@ -434,7 +434,7 @@ int kvm_finalize_vcpu_tec(struct kvm_vcpu *vcpu)
 	return ret;
 
 tec_free:
-	kfree(tec->tec_run);
+	kfree(tec->run);
 	kfree(params_ptr);
 	mutex_unlock(&vcpu->kvm->lock);
 	return ret;
@@ -693,7 +693,6 @@ int kvm_cvm_enable_cap(struct kvm *kvm, struct kvm_enable_cap *cap)
 {
 	int r = 0;
 
-	mutex_lock(&kvm->lock);
 	switch (cap->args[0]) {
 	case KVM_CAP_ARM_TMM_CONFIG_CVM_HOST:
 		r = kvm_tmm_config_cvm(kvm, cap);
@@ -719,7 +718,6 @@ int kvm_cvm_enable_cap(struct kvm *kvm, struct kvm_enable_cap *cap)
 		r = -EINVAL;
 		break;
 	}
-	mutex_unlock(&kvm->lock);
 
 	return r;
 }
@@ -728,14 +726,14 @@ void kvm_destroy_tec(struct kvm_vcpu *vcpu)
 {
 	struct virtcca_cvm_tec *tec = &vcpu->arch.tec;
 
-	if (!vcpu_is_tec(vcpu))
+	if (!vcpu_is_rec(vcpu))
 		return;
 
 	if (tmi_tec_destroy(tec->tec) != 0)
 		kvm_err("%s vcpu id : %d failed!\n", __func__, vcpu->vcpu_id);
 
 	tec->tec = 0;
-	kfree(tec->tec_run);
+	kfree(tec->run);
 }
 
 static int tmi_check_version(void)
@@ -767,25 +765,25 @@ int kvm_tec_enter(struct kvm_vcpu *vcpu)
 	struct virtcca_cvm_tec *tec = &vcpu->arch.tec;
 	struct virtcca_cvm *cvm = vcpu->kvm->arch.virtcca_cvm;
 
+	run = (struct tmi_tec_run *)tec->run;
 	if (READ_ONCE(cvm->state) != CVM_STATE_ACTIVE)
 		return -EINVAL;
 
-	run = tec->tec_run;
 	/* set/clear TWI TWE flags */
 	if (vcpu->arch.hcr_el2 & HCR_TWI)
-		run->tec_entry.flags |= TEC_ENTRY_FLAG_TRAP_WFI;
+		run->enter.flags |= TEC_ENTRY_FLAG_TRAP_WFI;
 	else
-		run->tec_entry.flags &= ~TEC_ENTRY_FLAG_TRAP_WFI;
+		run->enter.flags &= ~TEC_ENTRY_FLAG_TRAP_WFI;
 
 	if (vcpu->arch.hcr_el2 & HCR_TWE)
-		run->tec_entry.flags |= TEC_ENTRY_FLAG_TRAP_WFE;
+		run->enter.flags |= TEC_ENTRY_FLAG_TRAP_WFE;
 	else
-		run->tec_entry.flags &= ~TEC_ENTRY_FLAG_TRAP_WFE;
+		run->enter.flags &= ~TEC_ENTRY_FLAG_TRAP_WFE;
 
 	return tmi_tec_enter(tec->tec, __pa(run));
 }
 
-int cvm_psci_complete(struct kvm_vcpu *calling, struct kvm_vcpu *target)
+int cvm_psci_complete(struct kvm_vcpu *calling, struct kvm_vcpu *target, unsigned long status)
 {
 	int ret;
 	struct virtcca_cvm_tec *calling_tec = &calling->arch.tec;
@@ -797,29 +795,30 @@ int cvm_psci_complete(struct kvm_vcpu *calling, struct kvm_vcpu *target)
 	return 0;
 }
 
-int kvm_init_tmm(void)
+void kvm_init_tmm(void)
 {
 	int ret;
 
 	if (PAGE_SIZE != SZ_4K)
-		return 0;
+		return;
 
 	if (tmi_check_version())
-		return 0;
+		return;
 
 	if (tmi_kae_init())
 		pr_warn("kvm [%i]: Warning: kae init failed!\n", task_pid_nr(current));
 
 	ret = cvm_vmid_init();
 	if (ret)
-		return ret;
+		return;
 
 	tmm_feat_reg0 = tmi_features(0);
 	kvm_info("TMM feature0: 0x%lx\n", tmm_feat_reg0);
 
-	static_branch_enable(&virtcca_cvm_is_available);
+	static_branch_enable(&kvm_rme_is_available);
+	static_branch_enable(&virtcca_cvm_is_enable);
 
-	return 0;
+	return;
 }
 
 u64 virtcca_get_tmi_version(void)
@@ -863,7 +862,7 @@ int kvm_load_user_data(struct kvm *kvm, unsigned long arg)
 	struct virtcca_cvm *cvm = kvm->arch.virtcca_cvm;
 	struct kvm_numa_info *numa_info;
 
-	if (!kvm_is_virtcca_cvm(kvm))
+	if (!kvm_is_realm(kvm))
 		return -EFAULT;
 
 	if (copy_from_user(&user_data, argp, sizeof(user_data)))
@@ -938,27 +937,22 @@ unsigned long cvm_psci_vcpu_affinity_info(struct kvm_vcpu *vcpu,
 	if (!target_vcpu)
 		return PSCI_RET_INVALID_PARAMS;
 
-	cvm_psci_complete(vcpu, target_vcpu);
+	cvm_psci_complete(vcpu, target_vcpu, PSCI_RET_SUCCESS);
 	return PSCI_RET_SUCCESS;
 }
 
 int kvm_cvm_vcpu_set_events(struct kvm_vcpu *vcpu,
 	bool serror_pending, bool ext_dabt_pending)
 {
-	struct virtcca_cvm_tec *tec = &vcpu->arch.tec;
-
+	struct tmi_tec_run *run = vcpu->arch.tec.run;
 	if (serror_pending)
 		return -EINVAL;
 
 	if (ext_dabt_pending) {
-		if (!(((struct tmi_tec_run *)tec->tec_run)->tec_entry.flags &
-			TEC_ENTRY_FLAG_EMUL_MMIO))
+		if (!(run->enter.flags & REC_ENTER_FLAG_EMULATED_MMIO))
 			return -EINVAL;
-
-		((struct tmi_tec_run *)tec->tec_run)->tec_entry.flags
-						&= ~TEC_ENTRY_FLAG_EMUL_MMIO;
-		((struct tmi_tec_run *)tec->tec_run)->tec_entry.flags
-						|= TEC_ENTRY_FLAG_INJECT_SEA;
+		run->enter.flags &= ~REC_ENTER_FLAG_EMULATED_MMIO;
+		run->enter.flags |= REC_ENTER_FLAG_INJECT_SEA;
 	}
 	return 0;
 }
@@ -988,8 +982,35 @@ int kvm_init_cvm_vm(struct kvm *kvm)
 	cvm->params = params;
 	WRITE_ONCE(cvm->state, CVM_STATE_NONE);
 
+	kvm_enable_virtcca_cvm(kvm);
 	return 0;
 }
+
+extern struct vgic_global kvm_vgic_global_state;
+
+u32 kvm_cvm_vgic_nr_lr(void)
+{
+	return kvm_vgic_global_state.nr_lr;
+}
+
+static struct cca_operations virtcca_operations = {
+	.enable_cap = kvm_cvm_enable_cap,
+	.init_realm_vm = kvm_init_cvm_vm,
+	.realm_vm_enter = kvm_tec_enter,
+	.realm_vm_exit = handle_cvm_exit,
+	.init_sel2_hypervisor = kvm_init_tmm,
+	.psci_complete = cvm_psci_complete,
+	.destroy_vm = kvm_destroy_cvm,
+	.create_vcpu = kvm_finalize_vcpu_tec,
+	.destroy_vcpu = kvm_destroy_tec,
+	.vgic_nr_lr = kvm_cvm_vgic_nr_lr,
+};
+
+static int __init virtcca_register(void)
+{
+	return cca_operations_register(VIRTCCA_CVM, &virtcca_operations);
+}
+core_initcall(virtcca_register);
 
 #ifdef CONFIG_HISI_VIRTCCA_CODA
 /*
@@ -1250,7 +1271,7 @@ err:
 int kvm_cvm_map_ipa(struct kvm *kvm, phys_addr_t ipa, kvm_pfn_t pfn,
 	unsigned long map_size, enum kvm_pgtable_prot prot, int ret)
 {
-	if (!is_virtcca_cvm_enable() || !kvm_is_virtcca_cvm(kvm))
+	if (!is_virtcca_cvm_enable() || !kvm_is_realm(kvm))
 		return ret;
 
 	struct page *dst_page = pfn_to_page(pfn);
@@ -1301,7 +1322,7 @@ int cvm_arm_smmu_domain_set_kvm(struct device *dev, void *data)
 		return 1;
 
 	kvm = virtcca_arm_smmu_get_kvm(arm_smmu_domain);
-	if (kvm && kvm_is_virtcca_cvm(kvm))
+	if (kvm && kvm_is_realm(kvm))
 		arm_smmu_domain->kvm = kvm;
 
 	return 1;

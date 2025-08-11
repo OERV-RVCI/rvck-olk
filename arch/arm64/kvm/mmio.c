@@ -6,6 +6,7 @@
 
 #include <linux/kvm_host.h>
 #include <asm/kvm_emulate.h>
+#include <asm/rmi_smc.h>
 #include <asm/kvm_tmi.h>
 #include <trace/events/kvm.h>
 
@@ -137,20 +138,29 @@ int kvm_handle_mmio_return(struct kvm_vcpu *vcpu)
 		trace_kvm_mmio(KVM_TRACE_MMIO_READ, len, run->mmio.phys_addr,
 			       &data);
 		data = vcpu_data_host_to_guest(vcpu, data, len);
-		vcpu_set_reg(vcpu, kvm_vcpu_dabt_get_rd(vcpu), data);
+
+		if (_vcpu_is_rec(vcpu))
+			vcpu->arch.rec->run->enter.gprs[0] = data;
 #ifdef CONFIG_HISI_VIRTCCA_HOST
-		if (vcpu_is_tec(vcpu)) {
-			((struct tmi_tec_run *)vcpu->arch.tec.tec_run)->
-				tec_entry.gprs[0] = data;
-		}
+		else if (vcpu_is_tec(vcpu))
+			vcpu->arch.tec.run->enter.gprs[0] = data;
 #endif
+		else
+			vcpu_set_reg(vcpu, kvm_vcpu_dabt_get_rd(vcpu), data);
 	}
 
 	/*
 	 * The MMIO instruction is emulated and should not be re-executed
 	 * in the guest.
 	 */
-	kvm_incr_pc(vcpu);
+	if (_vcpu_is_rec(vcpu))
+		vcpu->arch.rec->run->enter.flags |= REC_ENTER_FLAG_EMULATED_MMIO;
+#ifdef CONFIG_HISI_VIRTCCA_HOST
+	else if (vcpu_is_tec(vcpu))
+		vcpu->arch.tec.run->enter.flags |= REC_ENTER_FLAG_EMULATED_MMIO;
+#endif
+	else
+		kvm_incr_pc(vcpu);
 
 	return 1;
 }
@@ -170,6 +180,11 @@ int io_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa)
 	 * volunteered to do so, and bail out otherwise.
 	 */
 	if (!kvm_vcpu_dabt_isvalid(vcpu)) {
+		if (vcpu_is_rec(vcpu)) {
+			kvm_inject_dabt(vcpu, kvm_vcpu_get_hfar(vcpu));
+			return 1;
+		}
+
 		if (test_bit(KVM_ARCH_FLAG_RETURN_NISV_IO_ABORT_TO_USER,
 			     &vcpu->kvm->arch.flags)) {
 			run->exit_reason = KVM_EXIT_ARM_NISV;
@@ -213,12 +228,7 @@ int io_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa)
 	run->mmio.phys_addr	= fault_ipa;
 	run->mmio.len		= len;
 	vcpu->mmio_needed	= 1;
-#ifdef CONFIG_HISI_VIRTCCA_HOST
-	if (vcpu_is_tec(vcpu)) {
-		((struct tmi_tec_run *)vcpu->arch.tec.tec_run)->tec_entry.flags |=
-			TEC_ENTRY_FLAG_EMUL_MMIO;
-	}
-#endif
+
 	if (!ret) {
 		/* We handled the access successfully in the kernel. */
 		if (!is_write)

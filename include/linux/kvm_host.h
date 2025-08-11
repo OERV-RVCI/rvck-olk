@@ -259,11 +259,17 @@ union kvm_mmu_notifier_arg {
 	pte_t pte;
 };
 
+enum kvm_gfn_range_filter {
+	KVM_FILTER_SHARED		= BIT(0),
+	KVM_FILTER_PRIVATE		= BIT(1),
+};
+
 struct kvm_gfn_range {
 	struct kvm_memory_slot *slot;
 	gfn_t start;
 	gfn_t end;
 	union kvm_mmu_notifier_arg arg;
+	enum kvm_gfn_range_filter attr_filter;
 	bool may_block;
 };
 bool kvm_unmap_gfn_range(struct kvm *kvm, struct kvm_gfn_range *range);
@@ -545,26 +551,18 @@ static __always_inline void guest_state_exit_irqoff(void)
 }
 
 #ifdef CONFIG_HISI_VIRTCCA_HOST
-
-#define KVM_TYPE_CVM_BIT     8
 #define CVM_MAX_HALT_POLL_NS 100000
-
-DECLARE_STATIC_KEY_FALSE(virtcca_cvm_is_available);
 
 static __always_inline bool vcpu_is_tec(struct kvm_vcpu *vcpu)
 {
-	if (static_branch_unlikely(&virtcca_cvm_is_available))
-		return vcpu->arch.tec.tec_run;
-
+	return (vcpu->arch.tec.run != NULL);
+}
+#else
+static __always_inline bool vcpu_is_tec(struct kvm_vcpu *vcpu)
+{
 	return false;
 }
-
-static inline bool kvm_arm_cvm_type(unsigned long type)
-{
-	return type & (1UL << KVM_TYPE_CVM_BIT);
-}
-
-#endif
+#endif /* CONFIG_HISI_VIRTCCA_HOST */
 
 static inline int kvm_vcpu_exiting_guest_mode(struct kvm_vcpu *vcpu)
 {

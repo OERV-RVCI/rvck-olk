@@ -28,8 +28,10 @@ static int __init setup_virtcca_cvm_host(char *str)
 	if (ret) {
 		pr_warn("Unable to parse cvm_guest.\n");
 	} else {
-		if (val)
+		if (val) {
 			static_branch_enable(&virtcca_cvm_is_enable);
+			set_cca_cvm_type(VIRTCCA_CVM);
+		}
 	}
 	return ret;
 }
