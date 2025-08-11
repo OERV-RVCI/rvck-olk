@@ -251,7 +251,6 @@ void failover_reselect_transport(struct rpc_task *task, struct rpc_clnt *clnt)
 	struct rpc_xprt *old;
 	struct rpc_xprt *parent_cursor;
 	struct rpc_clnt *parent_clnt = clnt;
-	struct rpc_clnt_reserve *clnt_reserve;
 
 	if (task->tk_xprt && !failover_prepare_transmit(task)) {
 		reselect_xprt(task);
@@ -264,9 +263,8 @@ void failover_reselect_transport(struct rpc_task *task, struct rpc_clnt *clnt)
 		parent_clnt = parent_clnt->cl_parent;
 	} while (parent_clnt);
 
-	clnt_reserve = (struct rpc_clnt_reserve *)parent_clnt;
-	if (task->tk_xprt && clnt->cl_vers == 4 && clnt_reserve &&
-	    clnt_reserve->cl_enfs) {
+	if (task->tk_xprt && clnt->cl_vers == 4 && parent_clnt &&
+	    parent_clnt->cl_enfs) {
 		old = smp_load_acquire(cursor); // multi thread to access
 		parent_cursor = xprt_iter_get_xprt(&parent_clnt->cl_xpi);
 		if (parent_cursor != old)

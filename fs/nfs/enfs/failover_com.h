@@ -9,19 +9,17 @@
 static inline bool failover_is_enfs_clnt(struct rpc_clnt *clnt)
 {
 	struct rpc_clnt *next = clnt->cl_parent;
-	struct rpc_clnt_reserve *clnt_reserve;
+	struct rpc_clnt *target = clnt;
 
 	while (next) {
 		if (next == next->cl_parent)
 			break;
 		next = next->cl_parent;
 	}
-	if (next != NULL) {
-		clnt_reserve = (struct rpc_clnt_reserve *)next;
-		return clnt_reserve->cl_enfs == 1 ? true : false;
-	}
-	clnt_reserve = (struct rpc_clnt_reserve *)clnt;
-	return clnt_reserve->cl_enfs == 1 ? true : false;
+
+	if (next != NULL)
+		target = next;
+	return target->cl_enfs == 1 ? true : false;
 }
 
 #endif // FAILOVER_COMMON_H

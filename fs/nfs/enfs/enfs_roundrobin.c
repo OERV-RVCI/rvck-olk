@@ -263,9 +263,7 @@ static struct rpc_xprt *enfs_lb_iter_current_entry(struct rpc_xprt_iter *xpi)
 
 int enfs_lb_set_policy(struct rpc_clnt *clnt, void *data)
 {
-	struct rpc_clnt_reserve *clnt_reserve = (struct rpc_clnt_reserve *)clnt;
-
-	if (clnt_reserve->cl_enfs == 1)
+	if (clnt->cl_enfs == 1)
 		enfs_lb_switch_set_roundrobin(clnt);
 
 	return 0;
@@ -332,9 +330,8 @@ bool enfs_is_singularr_route(struct rpc_clnt *clnt)
 int enfs_lb_revert_policy(struct rpc_clnt *clnt, void *data)
 {
 	struct rpc_xprt_switch *xps;
-	struct rpc_clnt_reserve *clnt_reserve = (struct rpc_clnt_reserve *)clnt;
 
-	if (clnt_reserve->cl_enfs == 1) {
+	if (clnt->cl_enfs == 1) {
 		rcu_read_lock();
 		xps = rcu_dereference(clnt->cl_xpi.xpi_xpswitch);
 		rcu_read_unlock();

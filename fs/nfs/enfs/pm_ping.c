@@ -294,13 +294,11 @@ static int pm_ping_execute_xprt_test(struct rpc_clnt *clnt,
 static void pm_ping_loop_rpclnt(struct sunrpc_net *sn)
 {
 	struct rpc_clnt *clnt;
-	struct rpc_clnt_reserve *clnt_reserve;
 	LIST_HEAD(free_list);
 
 	spin_lock(&sn->rpc_client_lock);
 	list_for_each_entry_rcu(clnt, &sn->all_clients, cl_clients) {
-		clnt_reserve = (struct rpc_clnt_reserve *)clnt;
-		if (clnt_reserve->cl_enfs == 1) {
+		if (clnt->cl_enfs == 1) {
 			enfs_log_debug("find rpc_clnt.   %p\n", clnt);
 			rpc_clnt_iterate_for_each_xprt(clnt, pm_ping_execute_xprt_test,
 							   (void *)&free_list);

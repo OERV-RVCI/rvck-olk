@@ -38,33 +38,6 @@ struct rpc_sysfs_client {
 	struct rpc_xprt_switch *xprt_switch;
 };
 
-#if IS_ENABLED(CONFIG_SUNRPC_ENFS)
-struct rpc_clnt_reserve {
-	atomic_t		cl_count;	/* Number of references */
-	unsigned int		cl_clid;	/* client id */
-	struct list_head	cl_clients;	/* Global list of clients */
-	struct list_head	cl_tasks;	/* List of tasks */
-	spinlock_t		cl_lock;	/* spinlock */
-	struct rpc_xprt __rcu *cl_xprt;	/* transport */
-	const struct rpc_procinfo *cl_procinfo;	/* procedure info */
-	u32			cl_prog,	/* RPC program number */
-				cl_vers,	/* RPC version number */
-				cl_maxproc;	/* max procedure number */
-
-	struct rpc_auth *cl_auth;	/* authenticator */
-	struct rpc_stat *cl_stats;	/* per-program statistics */
-	struct rpc_iostats *cl_metrics;	/* per-client statistics */
-
-	unsigned int		cl_softrtry : 1,/* soft timeouts */
-				cl_discrtry : 1,/* disconnect before retry */
-				cl_noretranstimeo: 1,/* No retransmit timeouts */
-				cl_autobind : 1,/* use getport() */
-				cl_chatty   : 1,/* be verbose */
-				cl_reserve  : 11,/* reserve bits */
-				cl_enfs   : 1;/* be enfs */
-};
-#endif
-
 /*
  * The high-level client handle
  */
@@ -91,7 +64,12 @@ struct rpc_clnt {
 				cl_noretranstimeo: 1,/* No retransmit timeouts */
 				cl_autobind : 1,/* use getport() */
 				cl_chatty   : 1,/* be verbose */
+#if defined(__GENKSYMS__) || !IS_ENABLED(CONFIG_SUNRPC_ENFS)
 				cl_shutdown : 1;/* rpc immediate -EIO */
+#else
+				cl_shutdown : 1,/* rpc immediate -EIO */
+				cl_enfs     : 1;/* be enfs */
+#endif
 	struct xprtsec_parms	cl_xprtsec;	/* transport security policy */
 
 	struct rpc_rtt *	cl_rtt;		/* RTO estimator data */
