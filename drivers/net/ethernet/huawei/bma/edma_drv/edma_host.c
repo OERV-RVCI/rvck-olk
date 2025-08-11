@@ -20,11 +20,18 @@
 #include <linux/seq_file.h>
 
 #include "bma_pci.h"
+#include "edma_queue.h"
 #include "edma_host.h"
 
 static struct edma_user_inft_s *g_user_func[TYPE_MAX] = { 0 };
 
 static struct bma_dev_s *g_bma_dev;
+
+struct bma_dev_s *get_bma_dev(void)
+{
+	return g_bma_dev;
+}
+
 static int edma_host_dma_interrupt(struct edma_host_s *edma_host);
 
 int edmainfo_show(char *buf)
@@ -231,7 +238,8 @@ void clear_int_dmab2h(struct edma_host_s *edma_host)
 	(void)pci_write_config_dword(pdev, REG_PCIE1_DMAWRITEINT_CLEAR, data);
 }
 
-int edma_host_check_dma_status(enum dma_direction_e dir)
+// for 1710 1711
+int edma_host_check_dma_status_v1(enum dma_direction_e dir)
 {
 	int ret = 0;
 
@@ -257,6 +265,18 @@ int edma_host_check_dma_status(enum dma_direction_e dir)
 	}
 
 	return ret;
+}
+
+// for 1712
+int edma_host_check_dma_status_v2(enum dma_direction_e dir)
+{
+	UNUSED(dir);
+	if (check_dma_queue_state(CPL_STATE, TRUE) == 0 ||
+	    check_dma_queue_state(IDLE_STATE, TRUE) == 0) {
+		return 1; /* ok */
+	}
+
+	return 0; /* busy */
 }
 
 #ifdef USE_DMA
@@ -633,9 +653,9 @@ void host_dma_transfer_withlist(struct edma_host_s *edma_host,
 	}
 }
 
-int edma_host_dma_transfer(struct edma_host_s *edma_host,
-			   struct bma_priv_data_s *priv,
-			   struct bma_dma_transfer_s *dma_transfer)
+// for 1710 1711
+int edma_host_dma_transfer_v1(struct edma_host_s *edma_host, struct bma_priv_data_s *priv,
+			      struct bma_dma_transfer_s *dma_transfer)
 {
 	int ret = 0;
 	unsigned long flags = 0;
@@ -673,7 +693,44 @@ int edma_host_dma_transfer(struct edma_host_s *edma_host,
 	return ret;
 }
 
-void edma_host_reset_dma(struct edma_host_s *edma_host, int dir)
+// for 1712
+int edma_host_dma_transfer_v2(struct edma_host_s *edma_host, struct bma_priv_data_s *priv,
+			      struct bma_dma_transfer_s *dma_transfer)
+{
+	int ret = 0;
+	unsigned long flags = 0;
+	struct bma_dev_s *bma_dev = NULL;
+
+	BMA_LOG(DLOG_DEBUG, "edma_host_dma_transfer 1712");
+
+	if (!edma_host || !priv || !dma_transfer)
+		return -EFAULT;
+
+	bma_dev = list_entry(edma_host, struct bma_dev_s, edma_host);
+
+	spin_lock_irqsave(&bma_dev->priv_list_lock, flags);
+
+	if (priv->user.dma_transfer == 0) {
+		spin_unlock_irqrestore(&bma_dev->priv_list_lock, flags);
+		BMA_LOG(DLOG_ERROR, "dma_transfer = %hhd\n", priv->user.dma_transfer);
+		return -EFAULT;
+	}
+
+	BMA_LOG(DLOG_DEBUG, "transfer_edma_host 1712");
+
+	spin_unlock_irqrestore(&bma_dev->priv_list_lock, flags);
+
+	edma_host->statistics.dma_count++;
+
+	spin_lock_irqsave(&edma_host->reg_lock, flags);
+	ret = transfer_dma_queue(dma_transfer);
+	spin_unlock_irqrestore(&edma_host->reg_lock, flags);
+
+	return ret;
+}
+
+// for 1710/1711
+void edma_host_reset_dma_v1(struct edma_host_s *edma_host, enum dma_direction_e dir)
 {
 	u32 data = 0;
 	u32 reg_addr = 0;
@@ -717,6 +774,13 @@ void edma_host_reset_dma(struct edma_host_s *edma_host, int dir)
 		reg_addr, count, data);
 }
 
+// for 1712
+void edma_host_reset_dma_v2(struct edma_host_s *edma_host, enum dma_direction_e dir)
+{
+	UNUSED(dir);
+	reset_edma_host(edma_host);
+}
+
 int edma_host_dma_stop(struct edma_host_s *edma_host,
 		       struct bma_priv_data_s *priv)
 {
@@ -750,8 +814,8 @@ static int edma_host_send_msg(struct edma_host_s *edma_host)
 	if (send_mbx_hdr->mbxlen > 0) {
 		if (send_mbx_hdr->mbxlen > HOST_MAX_SEND_MBX_LEN) {
 			/*share memory is disable */
+			BMA_LOG(DLOG_DEBUG, "mbxlen is too long: %d\n", send_mbx_hdr->mbxlen);
 			send_mbx_hdr->mbxlen = 0;
-			BMA_LOG(DLOG_DEBUG, "mbxlen is too long\n");
 			return -EFAULT;
 		}
 
@@ -1296,6 +1360,69 @@ int edma_host_user_unregister(u32 type)
 	return 0;
 }
 
+static void init_edma_sq_cq(struct edma_host_s *edma_host)
+{
+	u64 sq_phy_addr = 0;
+	u64 cq_phy_addr = 0;
+	phys_addr_t edma_address = 0;
+	int ret = 0;
+
+	if (get_pci_type() != PCI_TYPE_1712)
+		return;
+
+	ret = bma_intf_get_map_address(TYPE_EDMA_ADDR, &edma_address);
+	if (ret != 0)
+		return;
+
+	edma_host->edma_sq_addr = (void *)((unsigned char *)edma_host->edma_recv_addr
+				  + HOST_MAX_RCV_MBX_LEN);
+	edma_host->edma_cq_addr = (void *)((unsigned char *)edma_host->edma_sq_addr
+				  + sizeof(struct dma_ch_sq_s) * SQ_DEPTH);
+	sq_phy_addr = edma_address + HOST_DMA_FLAG_LEN + HOST_MAX_SEND_MBX_LEN
+		      + HOST_MAX_RCV_MBX_LEN;
+	cq_phy_addr = sq_phy_addr + sizeof(struct dma_ch_sq_s) * SQ_DEPTH;
+
+	BMA_LOG(DLOG_DEBUG,
+		"sq_phy_addr = 0x%llx, SQ size = %zu, cq_phy_addr = 0x%llx, CQ size = %zu",
+		sq_phy_addr, sizeof(struct dma_ch_sq_s) * SQ_DEPTH,
+		cq_phy_addr, sizeof(struct dma_ch_cq_s) * CQ_DEPTH);
+	BMA_LOG(DLOG_DEBUG, "sq_addr = %pK, cq_addr = %pK", edma_host->edma_sq_addr,
+		edma_host->edma_cq_addr);
+
+	(void)memset(edma_host->edma_sq_addr, 0,
+		     sizeof(struct dma_ch_sq_s) * SQ_DEPTH + sizeof(struct dma_ch_cq_s) * CQ_DEPTH);
+
+	set_dma_queue_sq_base_l(sq_phy_addr & PCIE_ADDR_L_32_MASK);
+	set_dma_queue_sq_base_h((u32)(sq_phy_addr >> PCIE_ADDR_H_SHIFT_32));
+	set_dma_queue_cq_base_l(cq_phy_addr & PCIE_ADDR_L_32_MASK);
+	set_dma_queue_cq_base_h((u32)(cq_phy_addr >> PCIE_ADDR_H_SHIFT_32));
+
+	reset_edma_host(edma_host);
+}
+
+static void edma_setup_timer(struct edma_host_s *edma_host)
+{
+#ifdef HAVE_TIMER_SETUP
+	timer_setup(&edma_host->timer, edma_host_timeout, 0);
+#else
+	setup_timer(&edma_host->timer, edma_host_timeout,
+		    (unsigned long)edma_host);
+#endif
+	(void)mod_timer(&edma_host->timer, jiffies_64 + TIMER_INTERVAL_CHECK);
+
+#ifdef USE_DMA
+	#ifdef HAVE_TIMER_SETUP
+		timer_setup(&edma_host->dma_timer, edma_host_dma_timeout, 0);
+
+	#else
+		setup_timer(&edma_host->dma_timer, edma_host_dma_timeout,
+			    (unsigned long)edma_host);
+	#endif
+	(void)mod_timer(&edma_host->dma_timer,
+			jiffies_64 + DMA_TIMER_INTERVAL_CHECK);
+#endif
+}
+
 int edma_host_init(struct edma_host_s *edma_host)
 {
 	int ret = 0;
@@ -1352,24 +1479,7 @@ int edma_host_init(struct edma_host_s *edma_host)
 	edma_host->b2h_state = B2HSTATE_IDLE;
 
 #ifdef EDMA_TIMER
-	#ifdef HAVE_TIMER_SETUP
-		timer_setup(&edma_host->timer, edma_host_timeout, 0);
-	#else
-		setup_timer(&edma_host->timer, edma_host_timeout,
-			    (unsigned long)edma_host);
-	#endif
-	(void)mod_timer(&edma_host->timer, jiffies_64 + TIMER_INTERVAL_CHECK);
-#ifdef USE_DMA
-	#ifdef HAVE_TIMER_SETUP
-		timer_setup(&edma_host->dma_timer, edma_host_dma_timeout, 0);
-
-	#else
-		setup_timer(&edma_host->dma_timer, edma_host_dma_timeout,
-			    (unsigned long)edma_host);
-	#endif
-	(void)mod_timer(&edma_host->dma_timer,
-			jiffies_64 + DMA_TIMER_INTERVAL_CHECK);
-#endif
+	edma_setup_timer(edma_host);
 
 #else
 	init_completion(&edma_host->msg_ready);
@@ -1382,6 +1492,8 @@ int edma_host_init(struct edma_host_s *edma_host)
 		return PTR_ERR(edma_host->edma_thread);
 	}
 #endif
+
+	init_edma_sq_cq(edma_host);
 
 	#ifdef HAVE_TIMER_SETUP
 		timer_setup(&edma_host->heartbeat_timer,

@@ -47,6 +47,17 @@ enum intr_mod {
 	INTR_ENABLE = 1,
 };
 
+enum addr_type {
+	TYPE_EDMA_ADDR = 0,
+	TYPE_VETH_ADDR = 1,
+};
+
+enum pci_type_e {
+	PCI_TYPE_UNKNOWN,
+	PCI_TYPE_171x,
+	PCI_TYPE_1712
+};
+
 struct bma_dma_addr_s {
 	dma_addr_t dma_addr;
 	u32 dma_data_len;
@@ -66,10 +77,28 @@ union transfer_u {
 	struct dmalist_transfer_s list;
 };
 
+struct bspveth_dmal {
+	u32 chl;
+	u32 len;
+	u32 slow;
+	u32 shi;
+	u32 dlow;
+	u32 dhi;
+};
+
 struct bma_dma_transfer_s {
 	enum dma_type_e type;
 	enum dma_direction_e dir;
 	union transfer_u transfer;
+	struct bspveth_dmal *pdmalbase_v;
+	u32 dmal_cnt;
+};
+
+struct bma_map_addr_s {
+	enum pci_type_e pci_type;
+	u32 host_number;
+	enum addr_type addr_type;
+	u32 addr;
 };
 
 int bma_intf_register_int_notifier(struct notifier_block *nb);
@@ -91,4 +120,21 @@ int bma_cdev_add_msg(void *handle, const char __user *msg, size_t msg_len);
 unsigned int bma_cdev_check_recv(void *handle);
 void *bma_cdev_get_wait_queue(void *handle);
 int bma_intf_check_edma_supported(void);
+
+enum pci_type_e get_pci_type(void);
+void set_pci_type(enum pci_type_e type);
+
+int bma_intf_get_host_number(unsigned int *host_number);
+int bma_intf_get_map_address(enum addr_type type, phys_addr_t *addr);
+
+#define HOST_NUMBER_0 0
+#define HOST_NUMBER_1 1
+
+#define EDMA_1711_HOST0_ADDR 0x84810000
+#define VETH_1711_HOST0_ADDR 0x84820000
+#define EDMA_1712_HOST0_ADDR 0x85400000
+#define VETH_1712_HOST0_ADDR 0x85410000
+#define EDMA_1712_HOST1_ADDR 0x87400000
+#define VETH_1712_HOST1_ADDR 0x87410000
+
 #endif

@@ -495,6 +495,11 @@ s32 bspveth_setup_all_tx_resources(struct bspveth_device *pvethdev)
 	int err = 0;
 	u8 *shmq_head_p = NULL;
 	struct bspveth_shmq_hd *shmq_head = NULL;
+	phys_addr_t veth_address = 0;
+
+	err = bma_intf_get_map_address(TYPE_VETH_ADDR, &veth_address);
+	if (err != 0)
+		goto failed;
 
 	if (!pvethdev)
 		return BSP_ERR_NULL_POINTER;
@@ -526,7 +531,7 @@ s32 bspveth_setup_all_tx_resources(struct bspveth_device *pvethdev)
 			(struct bspveth_dmal *)((BSP_VETH_T)(shmq_head)
 			+ SHMDMAL_OFFSET);
 		pvethdev->ptx_queue[qid]->pdmalbase_p =
-			(u8 *)(u64)(VETH_SHAREPOOL_BASE_INBMC +
+			(u8 *)(u64)(veth_address +
 			MAX_SHAREQUEUE_SIZE * qid +
 			SHMDMAL_OFFSET);
 
@@ -851,6 +856,11 @@ s32 bspveth_setup_all_rx_resources(struct bspveth_device *pvethdev)
 	int qid, i, err = 0;
 	struct bspveth_shmq_hd *shmq_head = NULL;
 	u8 *shmq_head_p = NULL;
+	phys_addr_t veth_address = 0;
+
+	err = bma_intf_get_map_address(TYPE_VETH_ADDR, &veth_address);
+	if (err != 0)
+		goto failed;
 
 	if (!pvethdev)
 		return BSP_ERR_NULL_POINTER;
@@ -885,7 +895,7 @@ s32 bspveth_setup_all_rx_resources(struct bspveth_device *pvethdev)
 			(struct bspveth_dmal *)((BSP_VETH_T)(shmq_head)
 			+ SHMDMAL_OFFSET);
 		pvethdev->prx_queue[qid]->pdmalbase_p =
-			(u8 *)(u64)(VETH_SHAREPOOL_BASE_INBMC
+			(u8 *)(u64)(veth_address
 			+ MAX_SHAREQUEUE_SIZE * (qid + 1)
 			+ SHMDMAL_OFFSET);
 		memset(pvethdev->prx_queue[qid]->pdmalbase_v, 0,
@@ -1236,12 +1246,20 @@ void veth_netdev_func_init(struct net_device *dev)
 {
 	struct tag_pcie_comm_priv *priv =
 				(struct tag_pcie_comm_priv *)netdev_priv(dev);
+	u32 host_number = 0;
+	int ret = 0;
 	/*9C:7D:A3:28:6F:F9*/
 	unsigned char veth_mac[ETH_ALEN] = {0x9C, 0x7D, 0xA3, 0x28, 0x6F, 0xF9};
 
 	VETH_LOG(DLOG_DEBUG, "eth init start\n");
 
 	ether_setup(dev);
+
+	ret = bma_intf_get_host_number(&host_number);
+	if (ret < 0) {
+		VETH_LOG(DLOG_ERROR, "bma_intf_get_host_number failed!\n");
+		return;
+	}
 
 	dev->netdev_ops = &veth_ops;
 
@@ -1257,6 +1275,7 @@ void veth_netdev_func_init(struct net_device *dev)
 	memset(priv, 0, sizeof(struct tag_pcie_comm_priv));
 	strncpy(priv->net_type, MODULE_NAME, NET_TYPE_LEN);
 
+	veth_mac[ETH_ALEN - 1] = (host_number == 0 ? 0xF9 : 0xFB);
 	eth_hw_addr_set(dev, veth_mac);
 
 	VETH_LOG(DLOG_DEBUG, "set veth MAC addr OK\n");
@@ -2226,6 +2245,8 @@ s32 __start_dmalist_H(struct bspveth_rxtx_q *prxtx_queue, u32 cnt, u32 type)
 	dma_transfer.type = DMA_LIST;
 	dma_transfer.transfer.list.dma_addr =
 		(dma_addr_t)prxtx_queue->pdmalbase_p;
+	dma_transfer.pdmalbase_v = prxtx_queue->pdmalbase_v;
+	dma_transfer.dmal_cnt = prxtx_queue->dmal_cnt;
 
 	ret = bma_intf_start_dma(g_bspveth_dev.bma_priv, &dma_transfer);
 	if (ret < 0)

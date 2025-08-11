@@ -31,6 +31,18 @@ static struct bma_dev_s *g_bma_dev;
 
 static ATOMIC_NOTIFIER_HEAD(bma_int_notify_list);
 
+static enum pci_type_e g_pci_type = PCI_TYPE_UNKNOWN;
+
+enum pci_type_e get_pci_type(void)
+{
+	return g_pci_type;
+}
+
+void set_pci_type(enum pci_type_e type)
+{
+	g_pci_type = type;
+}
+
 static int bma_priv_insert_priv_list(struct bma_priv_data_s *priv, u32 type,
 				     u32 sub_type)
 {
@@ -342,6 +354,82 @@ int bma_intf_unregister_type(void **handle)
 }
 EXPORT_SYMBOL(bma_intf_unregister_type);
 
+int bma_intf_get_host_number(unsigned int *host_number)
+{
+	unsigned int devfn = 0;
+
+	if (!host_number)
+		return -EFAULT;
+
+	if (!g_bma_dev) {
+		BMA_LOG(DLOG_ERROR, "g_bma_dev is NULL\n");
+		return -ENXIO;
+	}
+
+	devfn = g_bma_dev->bma_pci_dev->pdev->devfn;
+	BMA_LOG(DLOG_DEBUG, "devfn is %u\n", devfn);
+	if (devfn == PF7 || devfn == PF10) {
+		*host_number = HOST_NUMBER_0;
+	} else if (devfn == PF4) {
+		*host_number = HOST_NUMBER_1;
+	} else {
+		BMA_LOG(DLOG_DEBUG, "Treat as host0 because of unknown PF %u\n", devfn);
+		*host_number = HOST_NUMBER_0;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(bma_intf_get_host_number);
+
+int bma_intf_get_map_address(enum addr_type type, phys_addr_t *addr)
+{
+	u32 host_number = 0;
+	u32 devfn = 0;
+	u32 i = 0;
+	enum pci_type_e pci_type = get_pci_type();
+	struct bma_pci_dev_s *bma_pci_dev = get_bma_pci_dev();
+
+	static struct bma_map_addr_s addr_info[] = {
+		{PCI_TYPE_UNKNOWN,  HOST_NUMBER_0, TYPE_EDMA_ADDR, EDMA_1711_HOST0_ADDR},
+		{PCI_TYPE_UNKNOWN,  HOST_NUMBER_0, TYPE_VETH_ADDR, VETH_1711_HOST0_ADDR},
+		{PCI_TYPE_171x,	 HOST_NUMBER_0, TYPE_EDMA_ADDR, EDMA_1711_HOST0_ADDR},
+		{PCI_TYPE_171x,	 HOST_NUMBER_0, TYPE_VETH_ADDR, VETH_1711_HOST0_ADDR},
+		{PCI_TYPE_1712,	 HOST_NUMBER_0, TYPE_EDMA_ADDR, EDMA_1712_HOST0_ADDR},
+		{PCI_TYPE_1712,	 HOST_NUMBER_0, TYPE_VETH_ADDR, VETH_1712_HOST0_ADDR},
+		{PCI_TYPE_1712,	 HOST_NUMBER_1, TYPE_EDMA_ADDR, EDMA_1712_HOST1_ADDR},
+		{PCI_TYPE_1712,	 HOST_NUMBER_1, TYPE_VETH_ADDR, VETH_1712_HOST1_ADDR},
+	};
+
+	if (!bma_pci_dev) {
+		BMA_LOG(DLOG_ERROR, "bma_pci_dev is null\n");
+		return -EFAULT;
+	}
+
+	devfn = bma_pci_dev->pdev->devfn;
+	if (devfn == PF7 || devfn == PF10) {
+		host_number = HOST_NUMBER_0;
+	} else if (devfn == PF4) {
+		host_number = HOST_NUMBER_1;
+	} else {
+		BMA_LOG(DLOG_DEBUG, "Treat as host0 because of unknown PF %u\n", devfn);
+		host_number = HOST_NUMBER_0;
+	}
+
+	for (i = 0; i < ARRAY_SIZE(addr_info); i++) {
+		if (pci_type == addr_info[i].pci_type &&
+		    host_number == addr_info[i].host_number && type == addr_info[i].addr_type) {
+			*addr = addr_info[i].addr;
+			return 0;
+		}
+	}
+
+	BMA_LOG(DLOG_DEBUG,
+		"Cannot find proper map address! pci_type: %u, host_number: %u, addr_type: %u\n",
+		pci_type, host_number, type);
+	return -EFAULT;
+}
+EXPORT_SYMBOL(bma_intf_get_map_address);
+
 int bma_intf_check_edma_supported(void)
 {
 	return !(!g_bma_dev);
@@ -350,13 +438,30 @@ EXPORT_SYMBOL(bma_intf_check_edma_supported);
 
 int bma_intf_check_dma_status(enum dma_direction_e dir)
 {
-	return edma_host_check_dma_status(dir);
+	enum pci_type_e pci_type = get_pci_type();
+
+	if (pci_type == PCI_TYPE_UNKNOWN) {
+		BMA_LOG(DLOG_ERROR, "pci type is UNKNOWN.\n");
+		return -EFAULT;
+	}
+
+	return get_bma_pci_dev_handler_s()[pci_type].check_dma(dir);
 }
 EXPORT_SYMBOL(bma_intf_check_dma_status);
 
 void bma_intf_reset_dma(enum dma_direction_e dir)
 {
-	edma_host_reset_dma(&g_bma_dev->edma_host, dir);
+	enum pci_type_e pci_type = get_pci_type();
+
+	if (!g_bma_dev)
+		return;
+
+	if (pci_type == PCI_TYPE_UNKNOWN) {
+		BMA_LOG(DLOG_ERROR, "pci type is UNKNOWN.\n");
+		return;
+	}
+
+	get_bma_pci_dev_handler_s()[pci_type].reset_dma(&g_bma_dev->edma_host, dir);
 }
 EXPORT_SYMBOL(bma_intf_reset_dma);
 
@@ -375,9 +480,15 @@ int bma_intf_start_dma(void *handle, struct bma_dma_transfer_s *dma_transfer)
 {
 	int ret = 0;
 	struct bma_priv_data_s *priv = (struct bma_priv_data_s *)handle;
+	enum pci_type_e pci_type = get_pci_type();
 
 	if (!handle || !dma_transfer)
 		return -EFAULT;
+
+	if (pci_type == PCI_TYPE_UNKNOWN) {
+		BMA_LOG(DLOG_ERROR, "pci type is UNKNOWN.\n");
+		return -EFAULT;
+	}
 
 	ret = edma_host_dma_start(&g_bma_dev->edma_host, priv);
 	if (ret) {
@@ -386,7 +497,8 @@ int bma_intf_start_dma(void *handle, struct bma_dma_transfer_s *dma_transfer)
 		return ret;
 	}
 
-	ret = edma_host_dma_transfer(&g_bma_dev->edma_host, priv, dma_transfer);
+	ret = get_bma_pci_dev_handler_s()[pci_type].transfer_edma_host(&g_bma_dev->edma_host, priv,
+								       dma_transfer);
 	if (ret)
 		BMA_LOG(DLOG_ERROR,
 			"edma_host_dma_transfer failed! ret = %d\n", ret);

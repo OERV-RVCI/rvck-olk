@@ -9707,6 +9707,12 @@ F:	drivers/net/ethernet/huawei/hinic3/cqm/
 F:	drivers/net/ethernet/huawei/hinic3/hw/
 F:	drivers/net/ethernet/huawei/hinic3/include/
 
+HUAWEI ETHERNET DRIVER
+M:	Huangjunhua <huangjunhua14@huawei.com>
+L:	netdev@vger.kernel.org
+S:	Maintained
+F:	drivers/net/ethernet/huawei/bma/
+
 HUAWEI BIFUR DRIVER
 M:	Xiaoping zheng <zhengxiaoping5@huawei.com>
 L:	netdev@vger.kernel.org

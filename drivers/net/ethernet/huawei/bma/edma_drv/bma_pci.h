@@ -18,6 +18,8 @@
 
 #include "bma_devintf.h"
 #include "bma_include.h"
+#include "../include/bma_ker_intf.h"
+#include "edma_host.h"
 #include <linux/netdevice.h>
 
 #define EDMA_SWAP_BASE_OFFSET	0x10000
@@ -25,10 +27,8 @@
 #define HOSTRTC_REG_BASE	0x2f000000
 #define HOSTRTC_REG_SIZE	EDMA_SWAP_BASE_OFFSET
 
-#define EDMA_SWAP_DATA_BASE	0x84810000
 #define EDMA_SWAP_DATA_SIZE	65536
 
-#define VETH_SWAP_DATA_BASE	0x84820000
 #define VETH_SWAP_DATA_SIZE	0xdf000
 
 #define ATU_VIEWPORT		0x900
@@ -71,7 +71,7 @@ struct bma_pci_dev_s {
 #ifdef DRV_VERSION
 #define BMA_VERSION MICRO_TO_STR(DRV_VERSION)
 #else
-#define BMA_VERSION "0.3.10"
+#define BMA_VERSION "0.4.0"
 #endif
 
 #ifdef CONFIG_ARM64
@@ -94,5 +94,32 @@ extern int debug;
 	} while (0)
 
 int edmainfo_show(char *buff);
+
+struct bma_pci_dev_s *get_bma_pci_dev(void);
+void set_bma_pci_dev(struct bma_pci_dev_s *bma_pci_dev);
+
+struct bma_pci_dev_handler_s {
+	int (*ioremap_bar_mem)(struct pci_dev *pdev, struct bma_pci_dev_s *bma_pci_dev);
+	void (*iounmap_bar_mem)(struct bma_pci_dev_s *bma_pci_dev);
+	int (*check_dma)(enum dma_direction_e dir);
+	int (*transfer_edma_host)(struct edma_host_s *edma_host, struct bma_priv_data_s *priv,
+				  struct bma_dma_transfer_s *dma_transfer);
+	void (*reset_dma)(struct edma_host_s *edma_host, enum dma_direction_e dir);
+};
+
+struct bma_pci_dev_handler_s *get_bma_pci_dev_handler_s(void);
+
+int ioremap_pme_bar_mem_v1(struct pci_dev *pdev, struct bma_pci_dev_s *bma_pci_dev);
+int ioremap_pme_bar_mem_v2(struct pci_dev *pdev, struct bma_pci_dev_s *bma_pci_dev);
+void iounmap_bar_mem_v1(struct bma_pci_dev_s *bma_pci_dev);
+void iounmap_bar_mem_v2(struct bma_pci_dev_s *bma_pci_dev);
+int edma_host_check_dma_status_v1(enum dma_direction_e dir);
+int edma_host_check_dma_status_v2(enum dma_direction_e dir);
+int edma_host_dma_transfer_v1(struct edma_host_s *edma_host, struct bma_priv_data_s *priv,
+			      struct bma_dma_transfer_s *dma_transfer);
+int edma_host_dma_transfer_v2(struct edma_host_s *edma_host, struct bma_priv_data_s *priv,
+			      struct bma_dma_transfer_s *dma_transfer);
+void edma_host_reset_dma_v1(struct edma_host_s *edma_host, enum dma_direction_e dir);
+void edma_host_reset_dma_v2(struct edma_host_s *edma_host, enum dma_direction_e dir);
 
 #endif
