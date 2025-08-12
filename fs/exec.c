@@ -75,7 +75,9 @@
 #include "internal.h"
 
 #include <trace/events/sched.h>
+#ifndef __GENKSYMS__
 #include <linux/bpf_sched.h>
+#endif
 
 static int bprm_creds_from_file(struct linux_binprm *bprm);
 
