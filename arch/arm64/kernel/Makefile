@@ -85,6 +85,7 @@ obj-$(CONFIG_IPI_AS_NMI)		+= ipi_nmi.o
 obj-$(CONFIG_HISI_VIRTCCA_GUEST)	+= virtcca_cvm_guest.o virtcca_cvm_tsi.o
 obj-$(CONFIG_HISI_VIRTCCA_HOST)		+= virtcca_cvm_host.o
 CFLAGS_patch-scs.o			+= -mbranch-protection=none
+obj-$(CONFIG_SCHED_PARAL)		+= prefer_numa.o
 
 # Force dependency (vdso*-wrap.S includes vdso.so through incbin)
 $(obj)/vdso-wrap.o: $(obj)/vdso/vdso.so
