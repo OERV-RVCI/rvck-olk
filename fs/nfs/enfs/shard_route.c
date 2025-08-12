@@ -1153,19 +1153,18 @@ static void debug_show_shardinfo(int argc, char *argv[])
 
 static int get_ip_to_str(struct sockaddr *addr, char *buf, int len)
 {
+	struct sockaddr_in *sin;
+	struct sockaddr_in6 *sin6;
+
 	switch (addr->sa_family) {
-	case AF_INET:{
-			struct sockaddr_in *sin = (struct sockaddr_in *)addr;
-
-			snprintf(buf, len, "%pI4", &sin->sin_addr);
-			return 0;
-		}
-	case AF_INET6:{
-			struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)addr;
-
-			snprintf(buf, len, "%pI6c", &sin6->sin6_addr);
-			return 0;
-		}
+	case AF_INET:
+		sin = (struct sockaddr_in *)addr;
+		snprintf(buf, len, "%pI4", &sin->sin_addr);
+		return 0;
+	case AF_INET6:
+		sin6 = (struct sockaddr_in6 *)addr;
+		snprintf(buf, len, "%pI6c", &sin6->sin6_addr);
+		return 0;
 	default:
 		break;
 	}
