@@ -210,18 +210,30 @@ __bpf_kfunc long bpf_sched_tag_of_entity(struct sched_entity *se)
 	return group_cfs_rq(se)->tg->tag;
 }
 
-BTF_SET8_START(sched_entity_kfunc_btf_ids)
+__bpf_kfunc int bpf_sched_set_task_prefer_nid(struct task_struct *task, int nid)
+{
+	if (!task)
+		return -EINVAL;
+
+	if ((unsigned int)nid >= nr_node_ids)
+		return -EINVAL;
+
+	return set_prefer_cpus_ptr(task, cpumask_of_node(nid));
+}
+
+BTF_SET8_START(sched_task_kfunc_btf_ids)
 BTF_ID_FLAGS(func, bpf_sched_entity_is_task)
 BTF_ID_FLAGS(func, bpf_sched_entity_to_task)
 BTF_ID_FLAGS(func, bpf_sched_tag_of_entity)
-BTF_SET8_END(sched_entity_kfunc_btf_ids)
+BTF_ID_FLAGS(func, bpf_sched_set_task_prefer_nid)
+BTF_SET8_END(sched_task_kfunc_btf_ids)
 
-static const struct btf_kfunc_id_set sched_entity_kfunc_set = {
+static const struct btf_kfunc_id_set sched_task_kfunc_set = {
 	.owner		= THIS_MODULE,
-	.set		= &sched_entity_kfunc_btf_ids,
+	.set		= &sched_task_kfunc_btf_ids,
 };
 
-BTF_ID_LIST(sched_entity_dtor_ids)
+BTF_ID_LIST(sched_task_dtor_ids)
 
 static int __init bpf_kfunc_init(void)
 {
@@ -232,10 +244,10 @@ static int __init bpf_kfunc_init(void)
 			.kfunc_btf_id = cpustats_dtor_ids[1]
 		},
 	};
-	const struct btf_id_dtor_kfunc sched_entity_dtors[] = {
+	const struct btf_id_dtor_kfunc sched_task_dtors[] = {
 		{
-			.btf_id	      = sched_entity_dtor_ids[0],
-			.kfunc_btf_id = sched_entity_dtor_ids[1]
+			.btf_id	      = sched_task_dtor_ids[0],
+			.kfunc_btf_id = sched_task_dtor_ids[1]
 		},
 	};
 
@@ -245,9 +257,9 @@ static int __init bpf_kfunc_init(void)
 	ret = ret ?: register_btf_id_dtor_kfuncs(cpustats_dtors,
 						ARRAY_SIZE(cpustats_dtors),
 						THIS_MODULE);
-	ret = ret ?: register_btf_kfunc_id_set(BPF_PROG_TYPE_SCHED, &sched_entity_kfunc_set);
-	return ret ?: register_btf_id_dtor_kfuncs(sched_entity_dtors,
-						ARRAY_SIZE(sched_entity_dtors),
+	ret = ret ?: register_btf_kfunc_id_set(BPF_PROG_TYPE_SCHED, &sched_task_kfunc_set);
+	return ret ?: register_btf_id_dtor_kfuncs(sched_task_dtors,
+						ARRAY_SIZE(sched_task_dtors),
 						THIS_MODULE);
 }
 late_initcall(bpf_kfunc_init);
