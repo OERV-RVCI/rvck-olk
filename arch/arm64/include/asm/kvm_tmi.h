@@ -313,6 +313,7 @@ struct tmi_tec_run {
 #define TMI_ABI_VERSION_GET_MINOR(_version) ((_version) & 0xFFFF)
 
 #define TMI_ABI_VERSION_MAJOR			U(0x2)
+#define TMI_ABI_VERSION_MINOR			U(0x2)
 
 /* KVM_CAP_ARM_TMM on VM fd */
 #define KVM_CAP_ARM_TMM_CONFIG_CVM_HOST		0
@@ -406,7 +407,7 @@ static inline bool is_armv8_4_sel2_present(void)
 u64 tmi_version(void);
 u64 tmi_data_create(u64 data, u64 rd, u64 map_addr, u64 src, u64 level);
 u64 tmi_cvm_activate(u64 rd);
-u64 tmi_cvm_create(u64 params_ptr, u64 numa_set);
+u64 tmi_cvm_create(u64 params_ptr, u64 numa_set, bool vtimer_adjust);
 u64 tmi_cvm_destroy(u64 rd);
 u64 tmi_tec_create(u64 numa_set, u64 rd, u64 mpidr, u64 params_ptr);
 u64 tmi_tec_destroy(u64 tec);

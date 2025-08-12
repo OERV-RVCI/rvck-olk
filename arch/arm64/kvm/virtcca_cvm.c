@@ -23,6 +23,7 @@
 static DEFINE_SPINLOCK(cvm_vmid_lock);
 static unsigned long *cvm_vmid_bitmap;
 DECLARE_STATIC_KEY_FALSE(virtcca_cvm_is_enable);
+static bool virtcca_vtimer_adjust;
 #define SIMD_PAGE_SIZE 0x3000
 #define UEFI_MAX_SIZE 0x8000000
 #define UEFI_DTB_START 0x40000000
@@ -167,7 +168,7 @@ int kvm_arm_create_cvm(struct kvm *kvm)
 	cvm->params->ns_vtcr = kvm->arch.vtcr;
 	cvm->params->vttbr_el2 = kvm->arch.mmu.pgd_phys;
 	memcpy(cvm->params->rpv, &cvm->cvm_vmid, sizeof(cvm->cvm_vmid));
-	cvm->rd = tmi_cvm_create(__pa(cvm->params), numa_set);
+	cvm->rd = tmi_cvm_create(__pa(cvm->params), numa_set, virtcca_vtimer_adjust);
 	if (!cvm->rd) {
 		kvm_err("KVM creates cVM failed: %d\n", cvm->cvm_vmid);
 		ret = -ENOMEM;
@@ -754,6 +755,10 @@ static int tmi_check_version(void)
 			 version_minor);
 		return -ENXIO;
 	}
+	if (version_minor < TMI_ABI_VERSION_MINOR)
+		virtcca_vtimer_adjust = false;
+	else
+		virtcca_vtimer_adjust = true;
 
 	kvm_info("TMI ABI version %d,%d\n", version_major, version_minor);
 	return 0;
