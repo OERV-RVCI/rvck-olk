@@ -69,7 +69,8 @@ void enfs_free_nfsclient_info(struct multipath_client_info *client_info)
 	kfree(client_info);
 }
 
-int nfs_multipath_client_mount_info_init(
+static int
+nfs_multipath_client_mount_info_init(
 	struct multipath_client_info *client_info,
 	const struct nfs_client_initdata *cl_init)
 {
@@ -170,8 +171,10 @@ int nfs_multipath_client_info_init(void **data,
 	return rc;
 }
 
-bool nfs_multipath_ip_list_info_match(const struct nfs_ip_list *ip_list_src,
-				      const struct nfs_ip_list *ip_list_dst)
+static bool
+nfs_multipath_ip_list_info_match(
+	const struct nfs_ip_list *ip_list_src,
+	const struct nfs_ip_list *ip_list_dst)
 {
 	int i;
 	int j;
@@ -307,8 +310,11 @@ int nfs4_multipath_client_info_match(void *src, void *dst)
 	return ret;
 }
 
-void print_ip_info(struct seq_file *seq, struct nfs_ip_list *ip_list,
-		   const char *type)
+static void
+print_ip_info(
+	struct seq_file *seq,
+	struct nfs_ip_list *ip_list,
+	const char *type)
 {
 	char buf[IP_ADDRESS_LEN_MAX + 1];
 	int len = 0;
@@ -333,8 +339,11 @@ void print_ip_info(struct seq_file *seq, struct nfs_ip_list *ip_list,
 	}
 }
 
-void print_dns_info(struct seq_file *seq, struct enfs_route_dns_info *pRemoteDnsInfo,
-		    const char *type)
+static void
+print_dns_info(
+	struct seq_file *seq,
+	struct enfs_route_dns_info *pRemoteDnsInfo,
+	const char *type)
 {
 	int i = 0;
 	char *name;
@@ -374,8 +383,11 @@ static void multipath_print_sockaddr(struct seq_file *seq,
 	enfs_log_error("unsupport family:%d\n", addr->sa_family);
 }
 
-void convert_lookup_cache_str(struct nfs_server *server, char **server_lookup,
-			      char **actual_lookup)
+static void
+convert_lookup_cache_str(
+	struct nfs_server *server,
+	char **server_lookup,
+	char **actual_lookup)
 {
 	if ((server->enfs_flags & NFS_MOUNT_LOOKUP_CACHE_NONEG) &&
 	    (server->enfs_flags & NFS_MOUNT_LOOKUP_CACHE_NONE)) {
