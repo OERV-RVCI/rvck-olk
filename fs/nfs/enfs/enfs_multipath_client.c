@@ -340,7 +340,8 @@ void print_dns_info(struct seq_file *seq, struct enfs_route_dns_info *pRemoteDns
 		name = pRemoteDnsInfo->routeRemoteDnsList[i].dnsname;
 		if (i == 0)
 			seq_printf(seq, "%s", name);
-		seq_printf(seq, "~%s", name);
+		else
+			seq_printf(seq, "~%s", name);
 	}
 }
 
