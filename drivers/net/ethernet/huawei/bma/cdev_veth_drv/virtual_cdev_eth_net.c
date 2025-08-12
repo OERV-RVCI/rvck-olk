@@ -151,6 +151,12 @@ int edma_veth_setup_all_tx_resources(struct edma_eth_dev_s *edma_eth)
 	u8 *shmq_head = NULL;
 	u8 *shmq_head_p = NULL;
 	struct edma_rxtx_q_s *tx_queue = NULL;
+	int ret = 0;
+	phys_addr_t veth_address = 0;
+
+	ret = bma_intf_get_map_address(TYPE_VETH_ADDR, &veth_address);
+	if (ret != 0)
+		return -EFAULT;
 
 	tx_queue = (struct edma_rxtx_q_s *)
 		   kmalloc(sizeof(struct edma_rxtx_q_s), GFP_KERNEL);
@@ -173,7 +179,7 @@ int edma_veth_setup_all_tx_resources(struct edma_eth_dev_s *edma_eth)
 
 	tx_queue->pdmalbase_v = (struct edma_dmal_s *)
 				(shmq_head + SHMDMAL_OFFSET);
-	tx_queue->pdmalbase_p = (u8 *)(VETH_SHAREPOOL_BASE_INBMC +
+	tx_queue->pdmalbase_p = (u8 *)(veth_address +
 				(MAX_SHAREQUEUE_SIZE * 0) + SHMDMAL_OFFSET);
 
 	memset(tx_queue->pdmalbase_v, 0, MAX_SHMDMAL_SIZE);
@@ -219,6 +225,12 @@ int edma_veth_setup_all_rx_resources(struct edma_eth_dev_s *edma_eth)
 	u8 *shmq_head = NULL;
 	u8 *shmq_head_p = NULL;
 	struct edma_rxtx_q_s *rx_queue = NULL;
+	int ret = 0;
+	phys_addr_t veth_address = 0;
+
+	ret = bma_intf_get_map_address(TYPE_VETH_ADDR, &veth_address);
+	if (ret != 0)
+		return -EFAULT;
 
 	rx_queue = (struct edma_rxtx_q_s *)
 		   kmalloc(sizeof(struct edma_rxtx_q_s), GFP_KERNEL);
@@ -241,7 +253,7 @@ int edma_veth_setup_all_rx_resources(struct edma_eth_dev_s *edma_eth)
 	/* DMA address list (only used in host). */
 	rx_queue->pdmalbase_v = (struct edma_dmal_s *)
 				(shmq_head + SHMDMAL_OFFSET);
-	rx_queue->pdmalbase_p = (u8 *)(VETH_SHAREPOOL_BASE_INBMC +
+	rx_queue->pdmalbase_p = (u8 *)(veth_address +
 				MAX_SHAREQUEUE_SIZE + SHMDMAL_OFFSET);
 	memset(rx_queue->pdmalbase_v, 0, MAX_SHMDMAL_SIZE);
 
@@ -1304,6 +1316,8 @@ int __start_dmalist_H_2(struct edma_rxtx_q_s *prxtx_queue, u32 type, u32 cnt)
 	dma_transfer.type = DMA_LIST;
 	dma_transfer.transfer.list.dma_addr =
 	    (dma_addr_t)prxtx_queue->pdmalbase_p;
+	dma_transfer.pdmalbase_v = (struct bspveth_dmal *)prxtx_queue->pdmalbase_v;
+	dma_transfer.dmal_cnt = prxtx_queue->dmal_cnt;
 
 	ret = bma_intf_start_dma(g_eth_edmaprivate.edma_priv, &dma_transfer);
 	LOG(DLOG_DEBUG, "after -> %u/%u/%u/%u, ret: %d",

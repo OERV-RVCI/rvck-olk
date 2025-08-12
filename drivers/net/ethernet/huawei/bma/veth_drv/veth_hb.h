@@ -31,7 +31,7 @@ extern "C" {
 #ifdef DRV_VERSION
 #define VETH_VERSION	MICRO_TO_STR(DRV_VERSION)
 #else
-#define VETH_VERSION	"0.3.10"
+#define VETH_VERSION	"0.4.0"
 #endif
 
 #define MODULE_NAME	"veth"
@@ -67,7 +67,6 @@ extern "C" {
 #define SYSCTL_REG_SIZE			(0x1000)
 #define PCIE1_REG_BASE			(0x29000000)
 #define PCIE1_REG_SIZE			(0x1000)
-#define VETH_SHAREPOOL_BASE_INBMC	(0x84820000)
 #define VETH_SHAREPOOL_SIZE		(0xdf000)
 #define VETH_SHAREPOOL_OFFSET		(0x10000)
 #define MAX_SHAREQUEUE_SIZE		(0x20000)
@@ -259,15 +258,6 @@ struct bspveth_dma_bd {
 	u64 dma_p;
 	u32 len;
 	u32 off;
-};
-
-struct bspveth_dmal {
-	u32 chl;
-	u32 len;
-	u32 slow;
-	u32 shi;
-	u32 dlow;
-	u32 dhi;
 };
 
 struct bspveth_rxtx_q {

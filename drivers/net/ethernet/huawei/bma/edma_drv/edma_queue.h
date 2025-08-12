@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /* Huawei iBMA driver.
- * Copyright (c) 2017, Huawei Technologies Co., Ltd.
+ * Copyright (c) 2025, Huawei Technologies Co., Ltd.
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -13,28 +13,17 @@
  * GNU General Public License for more details.
  */
 
-#ifndef _KBOX_INCLUDE_H_
-#define _KBOX_INCLUDE_H_
+#ifndef EDMA_QUEUE_H
+#define EDMA_QUEUE_H
+#include "edma_host.h"
 
-#include <linux/kernel.h>
-#include <linux/version.h>
-#include <linux/netdevice.h>
-
-#ifdef DRV_VERSION
-#define KBOX_VERSION MICRO_TO_STR(DRV_VERSION)
-#else
-#define KBOX_VERSION "0.4.0"
-#endif
-
-#define UNUSED(x) (x = x)
-#define KBOX_FALSE (-1)
-#define KBOX_TRUE 0
-
-#ifdef KBOX_DEBUG
-#define KBOX_MSG(fmt, args...) \
-	netdev_notice(0, "kbox: %s(), %d, " fmt, __func__, __LINE__, ## args)
-#else
-#define KBOX_MSG(fmt, args...)
-#endif
-
+s32 check_dma_queue_state(u32 state, u32 flag);
+void set_dma_queue_sq_base_l(u32 val);
+void set_dma_queue_sq_base_h(u32 val);
+void set_dma_queue_cq_base_l(u32 val);
+void set_dma_queue_cq_base_h(u32 val);
+void reset_edma_host(struct edma_host_s *edma_host);
+int transfer_edma_host(struct edma_host_s *host, struct bma_priv_data_s *priv,
+		       struct bma_dma_transfer_s *transfer);
+s32 transfer_dma_queue(struct bma_dma_transfer_s *dma_transfer);
 #endif

@@ -27,13 +27,20 @@
 
 #define PCI_VENDOR_ID_HUAWEI_PME	0x19e5
 #define PCI_DEVICE_ID_KBOX_0_PME	0x1710
+#define PCI_DEVICE_ID_EDMA_0		0x1712
 #define PCI_PME_USEABLE_SPACE		(4 * 1024 * 1024)
+
+#define HOSTRTC_OFFSET	0x10000
+#define EDMA_OFFSET	0x20000
+#define VETH_OFFSET	0x30000
+
 #define PME_DEV_CHECK(device, vendor) ((device) == PCI_DEVICE_ID_KBOX_0_PME && \
 				       (vendor) == PCI_VENDOR_ID_HUAWEI_PME)
 
 #define PCI_BAR0_PME_1710		0x85800000
 #define PCI_BAR0			0
 #define PCI_BAR1			1
+#define PCI_BAR2			2
 #define PCI_USING_DAC_DEFAULT 0
 
 #define GET_HIGH_ADDR(address)	((sizeof(unsigned long) == 8) ? \
@@ -51,15 +58,57 @@ int debug = DLOG_ERROR;
 MODULE_PARM_DESC(debug, "Debug switch (0=close debug, 1=open debug)");
 
 static struct bma_pci_dev_s *g_bma_pci_dev;
+struct bma_pci_dev_s *get_bma_pci_dev(void)
+{
+	return g_bma_pci_dev;
+}
+
+void set_bma_pci_dev(struct bma_pci_dev_s *bma_pci_dev)
+{
+	g_bma_pci_dev = bma_pci_dev;
+}
 
 static int bma_pci_suspend(struct pci_dev *pdev, pm_message_t state);
 static int bma_pci_resume(struct pci_dev *pdev);
 static int bma_pci_probe(struct pci_dev *pdev, const struct pci_device_id *ent);
 static void bma_pci_remove(struct pci_dev *pdev);
 
+static struct bma_pci_dev_handler_s g_bma_pci_dev_handler_s[] = {
+	// for placeholder
+	{
+		.ioremap_bar_mem = NULL,
+		.iounmap_bar_mem = NULL,
+		.check_dma = NULL,
+		.transfer_edma_host = NULL,
+		.reset_dma = NULL,
+	},
+	// for 1710/1711
+	{
+		.ioremap_bar_mem = ioremap_pme_bar_mem_v1,
+		.iounmap_bar_mem = iounmap_bar_mem_v1,
+		.check_dma = edma_host_check_dma_status_v1,
+		.transfer_edma_host = edma_host_dma_transfer_v1,
+		.reset_dma = edma_host_reset_dma_v1,
+	},
+	// for 1712
+	{
+		.ioremap_bar_mem = ioremap_pme_bar_mem_v2,
+		.iounmap_bar_mem = iounmap_bar_mem_v2,
+		.check_dma = edma_host_check_dma_status_v2,
+		.transfer_edma_host = edma_host_dma_transfer_v2,
+		.reset_dma = edma_host_reset_dma_v2,
+	}
+};
+
+struct bma_pci_dev_handler_s *get_bma_pci_dev_handler_s(void)
+{
+	return g_bma_pci_dev_handler_s;
+}
+
 static const struct pci_device_id bma_pci_tbl[] = {
 	{PCI_DEVICE(PCI_VENDOR_ID_HUAWEI_FPGA, PCI_DEVICE_ID_KBOX_0)},
 	{PCI_DEVICE(PCI_VENDOR_ID_HUAWEI_PME, PCI_DEVICE_ID_KBOX_0_PME)},
+	{ PCI_DEVICE(PCI_VENDOR_ID_HUAWEI_PME, PCI_DEVICE_ID_EDMA_0) },
 	{}
 };
 MODULE_DEVICE_TABLE(pci, bma_pci_tbl);
@@ -73,7 +122,7 @@ int edma_param_get_statics(char *buf, const struct kernel_param *kp)
 }
 
 module_param_call(statistics, NULL, edma_param_get_statics, &debug, 0444);
-MODULE_PARM_DESC(statistics, "Statistics info of edma driver,readonly");
+MODULE_PARM_DESC(statistics, "Statistics info of edma driver, readonly");
 
 int edma_param_set_debug(const char *buf, const struct kernel_param *kp)
 {
@@ -99,34 +148,40 @@ module_param_call(debug, &edma_param_set_debug, &param_get_int, &debug, 0644);
 
 void __iomem *kbox_get_base_addr(void)
 {
-	if (!g_bma_pci_dev || (!(g_bma_pci_dev->kbox_base_addr))) {
+	struct bma_pci_dev_s *bma_pci_dev = get_bma_pci_dev();
+
+	if (!bma_pci_dev || (!(bma_pci_dev->kbox_base_addr))) {
 		BMA_LOG(DLOG_ERROR, "kbox_base_addr NULL point\n");
 		return NULL;
 	}
 
-	return g_bma_pci_dev->kbox_base_addr;
+	return bma_pci_dev->kbox_base_addr;
 }
 EXPORT_SYMBOL_GPL(kbox_get_base_addr);
 
 unsigned long kbox_get_io_len(void)
 {
-	if (!g_bma_pci_dev) {
-		BMA_LOG(DLOG_ERROR, "kbox_io_len is error,can not get it\n");
+	struct bma_pci_dev_s *bma_pci_dev = get_bma_pci_dev();
+
+	if (!bma_pci_dev) {
+		BMA_LOG(DLOG_ERROR, "kbox_io_len is error, can not get it\n");
 		return 0;
 	}
 
-	return g_bma_pci_dev->kbox_base_len;
+	return bma_pci_dev->kbox_base_len;
 }
 EXPORT_SYMBOL_GPL(kbox_get_io_len);
 
 unsigned long kbox_get_base_phy_addr(void)
 {
-	if (!g_bma_pci_dev || !g_bma_pci_dev->kbox_base_phy_addr) {
+	struct bma_pci_dev_s *bma_pci_dev = get_bma_pci_dev();
+
+	if (!bma_pci_dev || bma_pci_dev->kbox_base_phy_addr == 0) {
 		BMA_LOG(DLOG_ERROR, "kbox_base_phy_addr NULL point\n");
 		return 0;
 	}
 
-	return g_bma_pci_dev->kbox_base_phy_addr;
+	return bma_pci_dev->kbox_base_phy_addr;
 }
 EXPORT_SYMBOL_GPL(kbox_get_base_phy_addr);
 
@@ -160,7 +215,7 @@ s32 __atu_config_H(struct pci_dev *pdev, unsigned int region,
 	return 0;
 }
 
-static void iounmap_bar_mem(struct bma_pci_dev_s *bma_pci_dev)
+void iounmap_bar_mem_v1(struct bma_pci_dev_s *bma_pci_dev)
 {
 	if (bma_pci_dev->kbox_base_addr) {
 		iounmap(bma_pci_dev->kbox_base_addr);
@@ -171,15 +226,84 @@ static void iounmap_bar_mem(struct bma_pci_dev_s *bma_pci_dev)
 		iounmap(bma_pci_dev->bma_base_addr);
 		bma_pci_dev->bma_base_addr = NULL;
 		bma_pci_dev->edma_swap_addr = NULL;
+		bma_pci_dev->veth_swap_addr = NULL;
 		bma_pci_dev->hostrtc_viraddr = NULL;
 	}
 }
 
-static int ioremap_pme_bar1_mem(struct pci_dev *pdev,
-				struct bma_pci_dev_s *bma_pci_dev)
+void iounmap_bar_mem_v2(struct bma_pci_dev_s *bma_pci_dev)
+{
+	if (bma_pci_dev->kbox_base_addr) {
+		iounmap(bma_pci_dev->kbox_base_addr);
+		bma_pci_dev->kbox_base_addr = NULL;
+	}
+
+	if (bma_pci_dev->bma_base_addr) {
+		iounmap(bma_pci_dev->bma_base_addr);
+		bma_pci_dev->bma_base_addr = NULL;
+	}
+
+	if (bma_pci_dev->hostrtc_viraddr) {
+		iounmap(bma_pci_dev->hostrtc_viraddr);
+		bma_pci_dev->hostrtc_viraddr = NULL;
+		bma_pci_dev->edma_swap_addr = NULL;
+		bma_pci_dev->veth_swap_addr = NULL;
+	}
+}
+
+static void iounmap_bar_mem(struct bma_pci_dev_s *bma_pci_dev)
+{
+	enum pci_type_e pci_type = get_pci_type();
+
+	if (pci_type == PCI_TYPE_UNKNOWN)
+		return;
+
+	g_bma_pci_dev_handler_s[pci_type].iounmap_bar_mem(bma_pci_dev);
+}
+
+static int config_atu(struct pci_dev *pdev, struct bma_pci_dev_s *bma_pci_dev)
+{
+	int ret = 0;
+	phys_addr_t edma_address = 0;
+	phys_addr_t veth_address = 0;
+
+	ret = bma_intf_get_map_address(TYPE_EDMA_ADDR, &edma_address);
+	if (ret != 0)
+		return ret;
+
+	ret = bma_intf_get_map_address(TYPE_VETH_ADDR, &veth_address);
+	if (ret != 0)
+		return ret;
+
+	__atu_config_H(pdev, 0,
+		       GET_HIGH_ADDR(bma_pci_dev->kbox_base_phy_addr),
+			(bma_pci_dev->kbox_base_phy_addr & 0xffffffff),
+		0, PCI_BAR0_PME_1710, PCI_PME_USEABLE_SPACE);
+
+	__atu_config_H(pdev, 1,
+		       GET_HIGH_ADDR(bma_pci_dev->hostrtc_phyaddr),
+			(bma_pci_dev->hostrtc_phyaddr & 0xffffffff),
+			0, HOSTRTC_REG_BASE, HOSTRTC_REG_SIZE);
+
+	__atu_config_H(pdev, 2,
+		       GET_HIGH_ADDR(bma_pci_dev->edma_swap_phy_addr),
+			(bma_pci_dev->edma_swap_phy_addr & 0xffffffff),
+			0, edma_address, EDMA_SWAP_DATA_SIZE);
+
+	__atu_config_H(pdev, 3,
+		       GET_HIGH_ADDR(bma_pci_dev->veth_swap_phy_addr),
+			(bma_pci_dev->veth_swap_phy_addr & 0xffffffff),
+			0, veth_address, VETH_SWAP_DATA_SIZE);
+
+	return ret;
+}
+
+// for 1710 1711
+int ioremap_pme_bar_mem_v1(struct pci_dev *pdev, struct bma_pci_dev_s *bma_pci_dev)
 {
 	unsigned long bar1_resource_flag = 0;
 	u32 data = 0;
+	int ret;
 
 	bma_pci_dev->kbox_base_len = PCI_PME_USEABLE_SPACE;
 	BMA_LOG(DLOG_DEBUG, "1710\n");
@@ -217,25 +341,11 @@ static int ioremap_pme_bar1_mem(struct pci_dev *pdev,
 		bma_pci_dev->edma_swap_phy_addr,
 		bma_pci_dev->veth_swap_phy_addr);
 
-	__atu_config_H(pdev, 0,
-		       GET_HIGH_ADDR(bma_pci_dev->kbox_base_phy_addr),
-			(bma_pci_dev->kbox_base_phy_addr & 0xffffffff),
-		0, PCI_BAR0_PME_1710, PCI_PME_USEABLE_SPACE);
-
-	__atu_config_H(pdev, 1,
-		       GET_HIGH_ADDR(bma_pci_dev->hostrtc_phyaddr),
-			(bma_pci_dev->hostrtc_phyaddr & 0xffffffff),
-			0, HOSTRTC_REG_BASE, HOSTRTC_REG_SIZE);
-
-	__atu_config_H(pdev, 2,
-		       GET_HIGH_ADDR(bma_pci_dev->edma_swap_phy_addr),
-			(bma_pci_dev->edma_swap_phy_addr & 0xffffffff),
-			0, EDMA_SWAP_DATA_BASE, EDMA_SWAP_DATA_SIZE);
-
-	__atu_config_H(pdev, 3,
-		       GET_HIGH_ADDR(bma_pci_dev->veth_swap_phy_addr),
-			(bma_pci_dev->veth_swap_phy_addr & 0xffffffff),
-			0, VETH_SWAP_DATA_BASE, VETH_SWAP_DATA_SIZE);
+	ret = config_atu(pdev, bma_pci_dev);
+	if (ret != 0) {
+		BMA_LOG(DLOG_DEBUG, "config atu failed.\n");
+		return ret;
+	}
 
 	if (bar1_resource_flag & IORESOURCE_CACHEABLE) {
 		bma_pci_dev->bma_base_addr =
@@ -250,7 +360,6 @@ static int ioremap_pme_bar1_mem(struct pci_dev *pdev,
 	if (!bma_pci_dev->bma_base_addr) {
 		BMA_LOG(DLOG_ERROR,
 			"Cannot map device registers, aborting\n");
-
 		return -ENODEV;
 	}
 
@@ -270,11 +379,80 @@ static int ioremap_pme_bar1_mem(struct pci_dev *pdev,
 	return 0;
 }
 
+// for 1712
+int ioremap_pme_bar_mem_v2(struct pci_dev *pdev, struct bma_pci_dev_s *bma_pci_dev)
+{
+	unsigned long bar2_resource_flag = 0;
+
+	bma_pci_dev->kbox_base_len = PCI_PME_USEABLE_SPACE;
+	BMA_LOG(DLOG_DEBUG, "1712\n");
+
+	bma_pci_dev->bma_base_phy_addr = (unsigned long)pci_resource_start(pdev, PCI_BAR2);
+	bar2_resource_flag = (unsigned long)pci_resource_flags(pdev, PCI_BAR2);
+	if (!(bar2_resource_flag & IORESOURCE_MEM)) {
+		BMA_LOG(DLOG_ERROR, "Cannot find proper PCI device base address, aborting\n");
+		return -ENODEV;
+	}
+
+	bma_pci_dev->bma_base_len = (unsigned long)pci_resource_len(pdev, PCI_BAR2);
+	bma_pci_dev->edma_swap_len = EDMA_SWAP_DATA_SIZE;
+	bma_pci_dev->veth_swap_len = VETH_SWAP_DATA_SIZE;
+
+	BMA_LOG(DLOG_DEBUG,
+		"bar2: bma_base_len = 0x%lx, edma_swap_len = %ld, veth_swap_len = %ld(0x%lx)\n",
+		bma_pci_dev->bma_base_len, bma_pci_dev->edma_swap_len, bma_pci_dev->veth_swap_len,
+		bma_pci_dev->veth_swap_len);
+
+	bma_pci_dev->hostrtc_phyaddr = bma_pci_dev->bma_base_phy_addr + HOSTRTC_OFFSET;
+	/* edma */
+	bma_pci_dev->edma_swap_phy_addr = bma_pci_dev->bma_base_phy_addr + EDMA_OFFSET;
+	/* veth */
+	bma_pci_dev->veth_swap_phy_addr = bma_pci_dev->bma_base_phy_addr + VETH_OFFSET;
+
+	BMA_LOG(DLOG_DEBUG,
+		"bar2: bma_base_phy_addr = 0x%lx, bma_base_len = %zu , hostrtc_phyaddr = 0x%lx, edma_swap_phy_addr = 0x%lx, veth_swap_phy_addr = 0x%lx\n",
+		bma_pci_dev->bma_base_phy_addr, bma_pci_dev->bma_base_len,
+		bma_pci_dev->hostrtc_phyaddr, bma_pci_dev->edma_swap_phy_addr,
+		bma_pci_dev->veth_swap_phy_addr);
+
+	bma_pci_dev->bma_base_addr = ioremap(bma_pci_dev->bma_base_phy_addr,
+					     bma_pci_dev->bma_base_len);
+	if (!bma_pci_dev->bma_base_addr) {
+		BMA_LOG(DLOG_ERROR, "Cannot map device registers, aborting\n");
+		return -ENODEV;
+	}
+
+	if (bar2_resource_flag & IORESOURCE_CACHEABLE) {
+		BMA_LOG(DLOG_DEBUG, "ioremap with cache, %d\n", IORESOURCE_CACHEABLE);
+		bma_pci_dev->hostrtc_viraddr = ioremap(bma_pci_dev->hostrtc_phyaddr,
+						       bma_pci_dev->bma_base_len - HOSTRTC_OFFSET);
+	} else {
+		BMA_LOG(DLOG_DEBUG, "ioremap without cache\n");
+		bma_pci_dev->hostrtc_viraddr = IOREMAP(bma_pci_dev->hostrtc_phyaddr,
+						       bma_pci_dev->bma_base_len - HOSTRTC_OFFSET);
+	}
+
+	if (!bma_pci_dev->hostrtc_viraddr) {
+		BMA_LOG(DLOG_ERROR, "Cannot map device registers, aborting\n");
+		iounmap(bma_pci_dev->bma_base_addr);
+		bma_pci_dev->bma_base_addr = NULL;
+		return -ENODEV;
+	}
+
+	bma_pci_dev->edma_swap_addr = (unsigned char *)bma_pci_dev->hostrtc_viraddr
+				      - HOSTRTC_OFFSET + EDMA_OFFSET;
+	bma_pci_dev->veth_swap_addr = (unsigned char *)bma_pci_dev->hostrtc_viraddr
+				      - HOSTRTC_OFFSET + VETH_OFFSET;
+
+	return 0;
+}
+
 static int ioremap_bar_mem(struct pci_dev *pdev,
 			   struct bma_pci_dev_s *bma_pci_dev)
 {
 	int err = 0;
 	unsigned long bar0_resource_flag = 0;
+	enum pci_type_e pci_type = get_pci_type();
 
 	bar0_resource_flag = pci_resource_flags(pdev, PCI_BAR0);
 
@@ -294,8 +472,8 @@ static int ioremap_bar_mem(struct pci_dev *pdev,
 		bma_pci_dev->kbox_base_phy_addr, bma_pci_dev->kbox_base_len,
 		bma_pci_dev->kbox_base_len);
 
-	if (PME_DEV_CHECK(pdev->device, pdev->vendor)) {
-		err = ioremap_pme_bar1_mem(pdev, bma_pci_dev);
+	if (pdev->vendor == PCI_VENDOR_ID_HUAWEI_PME && pci_type != PCI_TYPE_UNKNOWN) {
+		err = g_bma_pci_dev_handler_s[pci_type].ioremap_bar_mem(pdev, bma_pci_dev);
 		if (err != 0)
 			return err;
 	}
@@ -314,11 +492,7 @@ static int ioremap_bar_mem(struct pci_dev *pdev,
 
 	if (!bma_pci_dev->kbox_base_addr) {
 		BMA_LOG(DLOG_ERROR, "Cannot map device registers, aborting\n");
-
-		iounmap(bma_pci_dev->bma_base_addr);
-		bma_pci_dev->bma_base_addr = NULL;
-		bma_pci_dev->edma_swap_addr = NULL;
-		bma_pci_dev->hostrtc_viraddr = NULL;
+		iounmap_bar_mem(bma_pci_dev);
 		return -ENOMEM;
 	}
 
@@ -355,13 +529,14 @@ int pci_device_init(struct pci_dev *pdev, struct bma_pci_dev_s *bma_pci_dev)
 {
 	int err = 0;
 
-	if (PME_DEV_CHECK(pdev->device, pdev->vendor)) {
+	if ((pdev->device == PCI_DEVICE_ID_KBOX_0_PME || pdev->device == PCI_DEVICE_ID_EDMA_0) &&
+	    pdev->vendor == PCI_VENDOR_ID_HUAWEI_PME) {
 		err = bma_devinft_init(bma_pci_dev);
 		if (err) {
 			BMA_LOG(DLOG_ERROR, "bma_devinft_init failed\n");
 			bma_devinft_cleanup(bma_pci_dev);
 			iounmap_bar_mem(bma_pci_dev);
-			g_bma_pci_dev = NULL;
+			set_bma_pci_dev(NULL);
 			pci_release_regions(pdev);
 			kfree(bma_pci_dev);
 		#ifdef CONFIG_PCI_MSI
@@ -400,27 +575,25 @@ int pci_device_config(struct pci_dev *pdev)
 		goto err_out_free_dev;
 	}
 
+	set_bma_pci_dev(bma_pci_dev);
+
 	err = ioremap_bar_mem(pdev, bma_pci_dev);
 	if (err) {
 		BMA_LOG(DLOG_ERROR, "ioremap_edma_io_mem failed\n");
 		goto err_out_release_regions;
 	}
 
-	g_bma_pci_dev = bma_pci_dev;
-
 	if (SET_DMA_MASK(&pdev->dev)) {
 		BMA_LOG(DLOG_ERROR,
-			"No usable DMA ,configuration, aborting,goto failed2!!!\n");
+			"No usable DMA, configuration, aborting, goto failed2!!!\n");
 		goto err_out_unmap_bar;
 	}
-
-	g_bma_pci_dev = bma_pci_dev;
 
 	return pci_device_init(pdev, bma_pci_dev);
 
 err_out_unmap_bar:
 	iounmap_bar_mem(bma_pci_dev);
-	g_bma_pci_dev = NULL;
+	set_bma_pci_dev(NULL);
 err_out_release_regions:
 	pci_release_regions(pdev);
 err_out_free_dev:
@@ -442,16 +615,27 @@ static int bma_pci_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	UNUSED(ent);
 
-	if (g_bma_pci_dev)
+	if (get_bma_pci_dev())
 		return -EPERM;
 
 	err = pci_enable_device(pdev);
 	if (err) {
-		BMA_LOG(DLOG_ERROR, "Cannot enable PCI device,aborting\n");
+		BMA_LOG(DLOG_ERROR, "Cannot enable PCI device, aborting\n");
 		return err;
 	}
 
-	if (PME_DEV_CHECK(pdev->device, pdev->vendor)) {
+	switch (pdev->device) {
+	case PCI_DEVICE_ID_KBOX_0_PME:
+		set_pci_type(PCI_TYPE_171x);
+		break;
+	case PCI_DEVICE_ID_EDMA_0:
+		set_pci_type(PCI_TYPE_1712);
+		break;
+	default:
+		set_pci_type(PCI_TYPE_UNKNOWN);
+		break;
+	}
+	if (pdev->vendor == PCI_VENDOR_ID_HUAWEI_PME && get_pci_type() != PCI_TYPE_UNKNOWN) {
 		err = pme_pci_enable_msi(pdev);
 		if (err)
 			return err;
@@ -468,7 +652,7 @@ static void bma_pci_remove(struct pci_dev *pdev)
 	struct bma_pci_dev_s *bma_pci_dev =
 		(struct bma_pci_dev_s *)pci_get_drvdata(pdev);
 
-	g_bma_pci_dev = NULL;
+	set_bma_pci_dev(NULL);
 	(void)pci_set_drvdata(pdev, NULL);
 
 	if (bma_pci_dev) {

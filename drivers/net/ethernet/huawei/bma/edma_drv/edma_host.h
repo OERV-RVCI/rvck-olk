@@ -18,6 +18,8 @@
 
 #include "bma_include.h"
 #include "../include/bma_ker_intf.h"
+#include "edma_reg.h"
+#include "edma_drv.h"
 
 #define EDMA_TIMER
 
@@ -176,6 +178,13 @@
 #define U64ADDR_H(addr)			((((u64)addr) >> 32) & 0xffffffff)
 #define U64ADDR_L(addr)			((addr) & 0xffffffff)
 
+#define MAX_RESET_DMA_TIMES 10
+#define DELAY_BETWEEN_RESET_DMA 100
+#define PCI_VENDOR_ID_HUAWEI_PME 0x19e5
+#define PCI_DEVICE_ID_EDMA_0 0x1712
+#define SQ_DEPTH 128
+#define CQ_DEPTH 128
+
 struct bma_register_dev_type_s {
 	u32 type;
 	u32 sub_type;
@@ -263,6 +272,8 @@ struct edma_host_s {
 	void __iomem *edma_flag;
 	void __iomem *edma_send_addr;
 	void __iomem *edma_recv_addr;
+	void __iomem *edma_sq_addr;
+	void __iomem *edma_cq_addr;
 #ifdef USE_DMA
 	struct timer_list dma_timer;
 #endif
@@ -309,6 +320,8 @@ struct edma_user_inft_s {
 	int (*add_msg)(void *msg, size_t msg_len);
 };
 
+struct bma_dev_s *get_bma_dev(void);
+
 int is_edma_b2h_int(struct edma_host_s *edma_host);
 void edma_int_to_bmc(struct edma_host_s *edma_host);
 int edma_host_mmap(struct edma_host_s *edma_hos, struct file *filp,
@@ -336,7 +349,6 @@ int edma_host_user_unregister(u32 type);
 int edma_host_init(struct edma_host_s *edma_host);
 void edma_host_cleanup(struct edma_host_s *edma_host);
 int edma_host_send_driver_msg(const void *msg, size_t msg_len, int subtype);
-void edma_host_reset_dma(struct edma_host_s *edma_host, int dir);
 void clear_int_dmah2b(struct edma_host_s *edma_host);
 void clear_int_dmab2h(struct edma_host_s *edma_host);
 

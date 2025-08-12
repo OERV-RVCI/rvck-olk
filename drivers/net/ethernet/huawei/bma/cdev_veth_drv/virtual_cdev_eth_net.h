@@ -56,7 +56,6 @@
 #define BSP_ERR_AGAIN                  (BSP_ETH_ERR_BASE + 18)
 #define BSP_ERR_NOT_TO_HANDLE          (BSP_ETH_ERR_BASE + 19)
 
-#define VETH_SHAREPOOL_BASE_INBMC  (0x84820000)
 #define VETH_SHAREPOOL_SIZE        (0xdf000)
 #define VETH_SHAREPOOL_OFFSET      (0x10000)
 #define MAX_SHAREQUEUE_SIZE        (0x20000)
