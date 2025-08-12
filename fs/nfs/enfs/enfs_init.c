@@ -88,16 +88,6 @@ static struct enfs_init_entry init_entry[] = {
 	{ "dns", enfs_dns_init, enfs_dns_exit },
 };
 
-int32_t enfs_init(void)
-{
-	return init_helper_init(init_entry, ARRAY_SIZE(init_entry));
-}
-
-void enfs_fini(void)
-{
-	init_helper_finalize(init_entry, ARRAY_SIZE(init_entry));
-}
-
 static int __init init_enfs(void)
 {
 	int ret;
@@ -108,7 +98,7 @@ static int __init init_enfs(void)
 		return -1;
 	}
 
-	ret = enfs_init();
+	ret = init_helper_init(init_entry, ARRAY_SIZE(init_entry));
 	if (ret) {
 		enfs_adapter_unregister(&enfs_adapter);
 		return -1;
@@ -126,7 +116,7 @@ static int __init init_enfs(void)
 static void __exit exit_enfs(void)
 {
 	enfs_lookupcache_fini();
-	enfs_fini();
+	init_helper_finalize(init_entry, ARRAY_SIZE(init_entry));
 	enfs_adapter_unregister(&enfs_adapter);
 }
 
