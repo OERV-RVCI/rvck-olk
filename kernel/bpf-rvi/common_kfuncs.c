@@ -16,6 +16,7 @@
 #include <linux/timekeeping.h>
 #include <linux/time_namespace.h>
 #include <linux/cma.h>
+#include <linux/hugetlb.h>
 #include <linux/btf_ids.h>
 #include <linux/bpf.h>
 
@@ -186,6 +187,48 @@ __bpf_kfunc unsigned long bpf_mem_freecma(void)
 	return global_zone_page_state(NR_FREE_CMA_PAGES);
 }
 
+struct bpf_mem_hugepage {
+	unsigned long total;
+	unsigned long free;
+	unsigned long rsvd;
+	unsigned long surp;
+	unsigned long size;
+	unsigned long hugetlb;
+};
+
+#ifdef CONFIG_HUGETLB_PAGE
+__bpf_kfunc int bpf_hugetlb_report_meminfo(struct bpf_mem_hugepage *hugepage_info)
+{
+	struct hstate *h;
+	unsigned long total = 0;
+
+	if (!hugepages_supported())
+		return -1;
+
+	for_each_hstate(h) {
+		unsigned long count = h->nr_huge_pages;
+
+		total += huge_page_size(h) * count;
+
+		if (h == &default_hstate) {
+			hugepage_info->total = count;
+			hugepage_info->free = h->free_huge_pages;
+			hugepage_info->rsvd = h->resv_huge_pages;
+			hugepage_info->surp = h->surplus_huge_pages;
+			hugepage_info->size = huge_page_size(h) / SZ_1K;
+		}
+	}
+
+	hugepage_info->hugetlb = total / SZ_1K;
+	return 0;
+}
+#else
+__bpf_kfunc int bpf_hugetlb_report_meminfo(struct bpf_mem_hugepage *hugepage_info)
+{
+	return -1;
+}
+#endif
+
 BTF_SET8_START(bpf_common_kfuncs_ids)
 BTF_ID_FLAGS(func, bpf_mem_cgroup_from_task, KF_RET_NULL | KF_RCU)
 BTF_ID_FLAGS(func, bpf_task_active_pid_ns, KF_TRUSTED_ARGS)
@@ -207,6 +250,7 @@ BTF_ID_FLAGS(func, bpf_mem_file_pmdmapped)
 BTF_ID_FLAGS(func, bpf_mem_kreclaimable)
 BTF_ID_FLAGS(func, bpf_mem_totalcma)
 BTF_ID_FLAGS(func, bpf_mem_freecma)
+BTF_ID_FLAGS(func, bpf_hugetlb_report_meminfo, KF_TRUSTED_ARGS)
 BTF_SET8_END(bpf_common_kfuncs_ids)
 
 static const struct btf_kfunc_id_set bpf_common_kfuncs_set = {
