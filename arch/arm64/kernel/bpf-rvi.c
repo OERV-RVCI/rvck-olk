@@ -16,8 +16,38 @@ bool bpf_arm64_cpu_have_feature(unsigned int num)
 	return cpu_have_feature(num);
 }
 
+enum arch_flags_type {
+	ARM64_HWCAP,
+	ARM64_HWCAP_SIZE,
+	ARM64_COMPAT_HWCAP,
+	ARM64_COMPAT_HWCAP_SIZE,
+	ARM64_COMPAT_HWCAP2,
+	ARM64_COMPAT_HWCAP2_SIZE,
+};
+
+__bpf_kfunc const char *bpf_arch_flags(enum arch_flags_type t, int i)
+{
+	switch (t) {
+	case ARM64_HWCAP:
+		return hwcap_str[i];
+	case ARM64_HWCAP_SIZE:
+		return (void *)ARRAY_SIZE(hwcap_str);
+	case ARM64_COMPAT_HWCAP:
+		return compat_hwcap_str[i];
+	case ARM64_COMPAT_HWCAP_SIZE:
+		return (void *)ARRAY_SIZE(compat_hwcap_str);
+	case ARM64_COMPAT_HWCAP2:
+		return compat_hwcap2_str[i];
+	case ARM64_COMPAT_HWCAP2_SIZE:
+		return (void *)ARRAY_SIZE(compat_hwcap2_str);
+	default:
+		return NULL;
+	}
+}
+
 BTF_SET8_START(bpf_arm64_kfunc_ids)
 BTF_ID_FLAGS(func, bpf_arm64_cpu_have_feature, KF_RCU)
+BTF_ID_FLAGS(func, bpf_arch_flags)
 BTF_SET8_END(bpf_arm64_kfunc_ids)
 
 static const struct btf_kfunc_id_set bpf_arm64_kfunc_set = {
