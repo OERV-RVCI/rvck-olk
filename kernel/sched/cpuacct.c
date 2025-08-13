@@ -7,6 +7,12 @@
  * (balbir@in.ibm.com).
  */
 
+#ifdef CONFIG_BPF_RVI
+#include <linux/bpf.h>
+#include <linux/btf.h>
+#include <linux/btf_ids.h>
+#endif
+
 /* Time spent by the tasks of the CPU accounting group executing in ... */
 enum cpuacct_stat_index {
 	CPUACCT_STAT_USER,	/* ... user mode */
@@ -400,4 +406,28 @@ static int __init cgroup_v1_ifs_init(void)
 	return 0;
 }
 late_initcall_sync(cgroup_v1_ifs_init);
+#endif
+
+#ifdef CONFIG_BPF_RVI
+__bpf_kfunc void bpf_cpuacct_kcpustat_cpu_fetch(struct kernel_cpustat *dst,
+						struct cpuacct *ca, int cpu)
+{
+	memcpy(dst, per_cpu_ptr(ca->cpustat, cpu), sizeof(struct kernel_cpustat));
+}
+
+BTF_SET8_START(bpf_cpuacct_kfunc_ids)
+BTF_ID_FLAGS(func, bpf_cpuacct_kcpustat_cpu_fetch)
+BTF_SET8_END(bpf_cpuacct_kfunc_ids)
+
+static const struct btf_kfunc_id_set bpf_cpuacct_kfunc_set = {
+	.owner		= THIS_MODULE,
+	.set		= &bpf_cpuacct_kfunc_ids,
+};
+
+static int __init bpf_cpuacct_kfunc_init(void)
+{
+	return register_btf_kfunc_id_set(BPF_PROG_TYPE_TRACING,
+					 &bpf_cpuacct_kfunc_set);
+}
+late_initcall(bpf_cpuacct_kfunc_init);
 #endif
