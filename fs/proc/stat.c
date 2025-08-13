@@ -231,9 +231,15 @@ __bpf_kfunc u64 bpf_get_iowait_time(struct kernel_cpustat *kcs, int cpu)
 	return get_iowait_time(kcs, cpu);
 }
 
+__bpf_kfunc void bpf_show_all_irqs(struct seq_file *p)
+{
+	show_all_irqs(p);
+}
+
 BTF_SET8_START(bpf_proc_stat_kfunc_ids)
 BTF_ID_FLAGS(func, bpf_get_idle_time)
 BTF_ID_FLAGS(func, bpf_get_iowait_time)
+BTF_ID_FLAGS(func, bpf_show_all_irqs)
 BTF_SET8_END(bpf_proc_stat_kfunc_ids)
 
 static const struct btf_kfunc_id_set bpf_proc_stat_kfunc_set = {
