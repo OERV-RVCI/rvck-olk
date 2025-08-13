@@ -14,6 +14,11 @@
 #include <linux/irqnr.h>
 #include <linux/sched/cputime.h>
 #include <linux/tick.h>
+#ifdef CONFIG_BPF_RVI
+#include <linux/bpf.h>
+#include <linux/btf.h>
+#include <linux/btf_ids.h>
+#endif
 
 #ifndef arch_irq_stat_cpu
 #define arch_irq_stat_cpu(cpu) 0
@@ -214,3 +219,32 @@ static int __init proc_stat_init(void)
 	return 0;
 }
 fs_initcall(proc_stat_init);
+
+#ifdef CONFIG_BPF_RVI
+__bpf_kfunc u64 bpf_get_idle_time(struct kernel_cpustat *kcs, int cpu)
+{
+	return get_idle_time(kcs, cpu);
+}
+
+__bpf_kfunc u64 bpf_get_iowait_time(struct kernel_cpustat *kcs, int cpu)
+{
+	return get_iowait_time(kcs, cpu);
+}
+
+BTF_SET8_START(bpf_proc_stat_kfunc_ids)
+BTF_ID_FLAGS(func, bpf_get_idle_time)
+BTF_ID_FLAGS(func, bpf_get_iowait_time)
+BTF_SET8_END(bpf_proc_stat_kfunc_ids)
+
+static const struct btf_kfunc_id_set bpf_proc_stat_kfunc_set = {
+	.owner		= THIS_MODULE,
+	.set		= &bpf_proc_stat_kfunc_ids,
+};
+
+static int __init bpf_proc_stat_kfunc_init(void)
+{
+	return register_btf_kfunc_id_set(BPF_PROG_TYPE_TRACING,
+					 &bpf_proc_stat_kfunc_set);
+}
+late_initcall(bpf_proc_stat_kfunc_init);
+#endif /* CONFIG_BPF_RVI */
