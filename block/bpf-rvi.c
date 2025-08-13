@@ -4,6 +4,8 @@
 #include <linux/part_stat.h>
 #include <linux/pid_namespace.h>
 #include <linux/bpf.h>
+#include <linux/namei.h>
+#include <linux/fs_struct.h>
 
 #include "blk-mq.h"
 #include "blk-cgroup.h"
@@ -227,13 +229,127 @@ late_initcall(diskstats_iter_init);
  * Partitions
  */
 
+struct traverse_ctx {
+	struct dir_context ctx;
+	struct dentry *parent_dentry;
+	struct xarray *dev_list;
+	unsigned int index;
+};
+
+/*
+ * This is a dir iteration callback that only performs block device collection
+ * and counting, so it always returns true to keep the iteration go.
+ */
+static bool filldir_callback(struct dir_context *ctx, const char *name,
+			     int namelen, loff_t offset, u64 ino,
+			     unsigned int d_type)
+{
+	struct traverse_ctx *tctx = container_of(ctx, struct traverse_ctx, ctx);
+	struct dentry *child_dentry;
+	struct inode *inode;
+	struct bdev_handle *handle;
+	void *rc;
+
+	if (d_type != DT_BLK)
+		return true;
+
+	child_dentry = lookup_one_len(name, tctx->parent_dentry, namelen);
+	if (IS_ERR(child_dentry)) {
+		pr_warn("Lookup failed for %s: %ld\n", name, PTR_ERR(child_dentry));
+		return true;
+	}
+
+	// double check if it's block dev
+	inode = d_inode(child_dentry);
+	if (!S_ISBLK(inode->i_mode))
+		goto err_put;
+
+	handle = bdev_open_by_dev(inode->i_rdev, BLK_OPEN_READ, NULL, NULL);
+	if (IS_ERR(handle)) {
+		pr_err("Failed to open block device %s (err=%ld)\n",
+			name, PTR_ERR(handle));
+		goto err_put;
+	}
+
+	rc = xa_store(tctx->dev_list, tctx->index++, handle->bdev, GFP_KERNEL);
+	if (xa_is_err(rc))
+		pr_warn("xa_store() on %d failed\n", tctx->index - 1);
+
+	bdev_release(handle);
+err_put:
+	dput(child_dentry);
+	return true;
+}
+
+static unsigned int get_targeted_dev(struct xarray *dev_list)
+{
+	struct task_struct *reaper;
+	struct path root_path, dev_path;
+	struct file *dir;
+	int ret;
+	struct traverse_ctx buf = {
+		.ctx.actor = filldir_callback,
+		.dev_list = dev_list,
+		.index = 0,
+	};
+
+	xa_init(dev_list);
+	reaper = get_current_level1_reaper();
+	if (!reaper)
+		return 0;
+
+	/* Reference: get_task_root() */
+	task_lock(reaper);
+	if (!reaper->fs) {
+		task_unlock(reaper);
+		goto out_put_reaper;
+	}
+	get_fs_root(reaper->fs, &root_path);
+	task_unlock(reaper);
+
+	/*
+	 * For vfs_path_lookup(), @name being "dev" or "/dev" makes no
+	 * difference, since struct nameidata.root is preset.
+	 */
+	ret = vfs_path_lookup(root_path.dentry, root_path.mnt, "dev",
+			      LOOKUP_FOLLOW|LOOKUP_DIRECTORY, &dev_path);
+	if (ret)
+		goto out_put_root;
+
+	dir = dentry_open(&dev_path, O_RDONLY, current_cred());
+	if (IS_ERR(dir))
+		goto out_put_devpath;
+	buf.parent_dentry = dev_path.dentry;
+
+	iterate_dir(dir, &buf.ctx);
+
+	filp_close(dir, NULL);
+out_put_devpath:
+	path_put(&dev_path);
+out_put_root:
+	path_put(&root_path);
+out_put_reaper:
+	put_task_struct(reaper);
+	return buf.index;
+}
+
+struct partitions_seq_priv {
+	struct class_dev_iter iter; // must be the first
+	struct xarray dev_list;
+	unsigned int dev_list_size;
+};
+
 static void *bpf_show_partitions_start(struct seq_file *seqf, loff_t *pos)
 {
+	struct partitions_seq_priv *priv = seqf->private;
 	void *p;
 
 	p = bpf_disk_seqf_start(seqf, pos);
 	if (!IS_ERR_OR_NULL(p) && !*pos)
 		seq_puts(seqf, "major minor  #blocks  name\n\n");
+
+	priv->dev_list_size = get_targeted_dev(&priv->dev_list);
+
 	return p;
 }
 
@@ -273,6 +389,7 @@ static void __show_partition(struct seq_file *seqf, struct block_device *part)
 /* Inconvenient to operate Xarray in bpf progs. */
 static int bpf_show_partitions(struct seq_file *seqf, void *v)
 {
+	struct partitions_seq_priv *priv = seqf->private;
 	struct gendisk *sgp = v;
 	struct block_device *part;
 	unsigned long idx;
@@ -281,8 +398,11 @@ static int bpf_show_partitions(struct seq_file *seqf, void *v)
 		return 0;
 
 	rcu_read_lock();
-	xa_for_each(&sgp->part_tbl, idx, part)
-		__show_partition(seqf, part);
+	xa_for_each(&sgp->part_tbl, idx, part) {
+		for (int i = 0; i < priv->dev_list_size; ++i)
+			if (part == xa_load(&priv->dev_list, i))
+				__show_partition(seqf, part);
+	}
 	rcu_read_unlock();
 	return 0;
 }
@@ -298,7 +418,7 @@ static const struct bpf_iter_seq_info partitions_seq_info = {
 	.seq_ops		= &bpf_partitions_op,
 	.init_seq_private	= NULL,
 	.fini_seq_private	= NULL,
-	.seq_priv_size		= sizeof(struct class_dev_iter),
+	.seq_priv_size		= sizeof(struct partitions_seq_priv),
 };
 
 static struct bpf_iter_reg partitions_reg_info = {
