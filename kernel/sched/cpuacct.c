@@ -414,6 +414,13 @@ struct cpuacct *task_cpuacct(struct task_struct *tsk)
 	return tsk ? task_ca(tsk) : NULL;
 }
 
+__bpf_kfunc u64 bpf_task_ca_cpuusage(struct task_struct *p)
+{
+	if (!p)
+		return 0;
+	return cpuusage_read(task_css(p, cpuacct_cgrp_id), NULL);
+}
+
 __bpf_kfunc void bpf_cpuacct_kcpustat_cpu_fetch(struct kernel_cpustat *dst,
 						struct cpuacct *ca, int cpu)
 {
@@ -421,6 +428,7 @@ __bpf_kfunc void bpf_cpuacct_kcpustat_cpu_fetch(struct kernel_cpustat *dst,
 }
 
 BTF_SET8_START(bpf_cpuacct_kfunc_ids)
+BTF_ID_FLAGS(func, bpf_task_ca_cpuusage)
 BTF_ID_FLAGS(func, bpf_cpuacct_kcpustat_cpu_fetch)
 BTF_SET8_END(bpf_cpuacct_kfunc_ids)
 
