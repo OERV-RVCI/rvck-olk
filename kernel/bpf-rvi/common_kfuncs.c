@@ -11,6 +11,7 @@
 #include <linux/page_counter.h>
 #include <linux/seq_file.h>
 #include <linux/sched/stat.h>
+#include <linux/kernel_stat.h>
 #include <linux/time64.h>
 #include <linux/timekeeping.h>
 #include <linux/time_namespace.h>
@@ -123,6 +124,21 @@ __bpf_kfunc unsigned long bpf_get_total_forks(void)
 	return total_forks;
 }
 
+__bpf_kfunc unsigned int bpf_nr_running(void)
+{
+	return nr_running();
+}
+
+__bpf_kfunc unsigned long long bpf_nr_context_switches(void)
+{
+	return nr_context_switches();
+}
+
+__bpf_kfunc unsigned int bpf_nr_iowait(void)
+{
+	return nr_iowait();
+}
+
 BTF_SET8_START(bpf_common_kfuncs_ids)
 BTF_ID_FLAGS(func, bpf_mem_cgroup_from_task, KF_RET_NULL | KF_RCU)
 BTF_ID_FLAGS(func, bpf_task_active_pid_ns, KF_TRUSTED_ARGS)
@@ -133,6 +149,9 @@ BTF_ID_FLAGS(func, bpf_page_counter_read)
 BTF_ID_FLAGS(func, bpf_seq_file_append)
 BTF_ID_FLAGS(func, bpf_get_boottime_timens)
 BTF_ID_FLAGS(func, bpf_get_total_forks)
+BTF_ID_FLAGS(func, bpf_nr_running)
+BTF_ID_FLAGS(func, bpf_nr_context_switches)
+BTF_ID_FLAGS(func, bpf_nr_iowait)
 BTF_SET8_END(bpf_common_kfuncs_ids)
 
 static const struct btf_kfunc_id_set bpf_common_kfuncs_set = {
