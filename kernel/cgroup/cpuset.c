@@ -5214,8 +5214,10 @@ void task_effective_cpumask(struct task_struct *tsk, struct cpumask *pmask)
 {
 	struct cpuset *cs;
 
-	if (!tsk)
+	if (!tsk) {
 		cpumask_clear(pmask);
+		return;
+	}
 
 	rcu_read_lock();
 	cs = task_cs(tsk);
