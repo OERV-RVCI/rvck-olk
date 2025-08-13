@@ -18,6 +18,7 @@
 #include <linux/time_namespace.h>
 #include <linux/cma.h>
 #include <linux/hugetlb.h>
+#include <linux/vmalloc.h>
 #include <linux/btf_ids.h>
 #include <linux/bpf.h>
 
@@ -256,6 +257,16 @@ __bpf_kfunc unsigned long bpf_mem_committed(void)
 	return vm_memory_committed();
 }
 
+__bpf_kfunc unsigned long bpf_mem_vmalloc_used(void)
+{
+	return vmalloc_nr_pages();
+}
+
+__bpf_kfunc unsigned long bpf_mem_vmalloc_total(void)
+{
+	return (unsigned long)VMALLOC_TOTAL >> 10;
+}
+
 BTF_SET8_START(bpf_common_kfuncs_ids)
 BTF_ID_FLAGS(func, bpf_mem_cgroup_from_task, KF_RET_NULL | KF_RCU)
 BTF_ID_FLAGS(func, bpf_task_active_pid_ns, KF_TRUSTED_ARGS)
@@ -282,6 +293,8 @@ BTF_ID_FLAGS(func, bpf_mem_failure)
 BTF_ID_FLAGS(func, bpf_mem_percpu)
 BTF_ID_FLAGS(func, bpf_mem_commit_limit)
 BTF_ID_FLAGS(func, bpf_mem_committed)
+BTF_ID_FLAGS(func, bpf_mem_vmalloc_used)
+BTF_ID_FLAGS(func, bpf_mem_vmalloc_total)
 BTF_SET8_END(bpf_common_kfuncs_ids)
 
 static const struct btf_kfunc_id_set bpf_common_kfuncs_set = {
