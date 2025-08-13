@@ -18,6 +18,9 @@
 #include <linux/bpf.h>
 #include <linux/btf.h>
 #include <linux/btf_ids.h>
+#include <linux/pid_namespace.h>
+#include <linux/cgroup.h>
+#include <linux/cpuset.h>
 #endif
 
 #ifndef arch_irq_stat_cpu
@@ -253,4 +256,165 @@ static int __init bpf_proc_stat_kfunc_init(void)
 					 &bpf_proc_stat_kfunc_set);
 }
 late_initcall(bpf_proc_stat_kfunc_init);
+
+struct stat_sum_data {
+	u64 user, nice, system, idle, iowait, irq, softirq, steal;
+	u64 guest, guest_nice;
+	u64 sum;
+	u64 sum_softirq;
+	unsigned int per_softirq_sums[NR_SOFTIRQS];
+};
+
+struct stat_seq_priv {
+	cpumask_t allowed_mask;
+	struct cpuacct *cpuacct;
+	bool sum_printed;
+	struct task_struct *task;
+	struct seq_file seqf_pcpu;
+};
+
+static int seq_file_setup(struct seq_file *seq)
+{
+	seq->size = PAGE_SIZE << 3;
+	seq->buf = kvzalloc(seq->size, GFP_KERNEL);
+	if (!seq->buf)
+		return -ENOMEM;
+	return 0;
+}
+
+static void seq_file_destroy(struct seq_file *seq)
+{
+	if (seq->buf)
+		kvfree(seq->buf);
+}
+
+static void *bpf_c_start(struct seq_file *m, loff_t *pos)
+{
+	struct stat_seq_priv *priv = m->private;
+	struct task_struct *reaper = get_current_level1_reaper();
+
+	priv->task = reaper ?: current;
+	task_effective_cpumask(priv->task, &priv->allowed_mask);
+	priv->cpuacct = task_cpuacct(priv->task);
+	if (seq_file_setup(&priv->seqf_pcpu))
+		return NULL;
+
+	/*
+	 * DO NOT use cpumask_first() here: sys_read may start from somewhere in
+	 * the middle of the file, and *pos may contain a value from the last
+	 * read.
+	 */
+	*pos = cpumask_next(*pos - 1, &priv->allowed_mask);
+	if ((*pos) < nr_cpu_ids)
+		// avoid 0, which will be treated as NULL
+		return (void *)(unsigned long)((*pos) + 1);
+	return NULL;
+}
+
+static void *bpf_c_next(struct seq_file *m, void *v, loff_t *pos)
+{
+	struct stat_seq_priv *priv = m->private;
+
+	*pos = cpumask_next(*pos, &priv->allowed_mask);
+
+	if ((*pos) == nr_cpu_ids) {
+		if (!priv->sum_printed)
+			priv->sum_printed = true;
+		else {
+			++*pos; // just to silence "did not updated position index" msg
+			return NULL;
+		}
+	}
+
+	// avoid 0, which will be treated as NULL
+	return (void *)(unsigned long)((*pos) + 1);
+}
+
+struct bpf_iter__stat {
+	__bpf_md_ptr(struct bpf_iter_meta *, meta);
+	u64 cpuid __aligned(8);
+	__bpf_md_ptr(struct cpuacct *, cpuacct);
+	u64 arch_irq_stat_cpu __aligned(8);
+	u64 arch_irq_stat __aligned(8);
+	bool print_all __aligned(8);
+	__bpf_md_ptr(struct seq_file *, seqf_pcpu);
+};
+
+static int bpf_show_stat(struct seq_file *m, void *v)
+{
+	struct stat_seq_priv *priv = m->private;
+	struct bpf_iter__stat ctx;
+	struct bpf_iter_meta meta;
+	struct bpf_prog *prog;
+	u64 cpuid = (unsigned long)v - 1; // decode '+ 1'
+
+	meta.seq = m;
+	prog = bpf_iter_get_info(&meta, false);
+	if (!prog)
+		return show_stat(m, v);
+
+	ctx.meta = &meta;
+
+	ctx.cpuid = cpuid;
+	ctx.cpuacct = priv->cpuacct;
+	if (cpuid != nr_cpu_ids)
+		ctx.arch_irq_stat_cpu = arch_irq_stat_cpu(cpuid);
+	else
+		ctx.arch_irq_stat = arch_irq_stat();
+	ctx.print_all = (cpuid == nr_cpu_ids);
+	ctx.seqf_pcpu = &priv->seqf_pcpu;
+
+	return bpf_iter_run_prog(prog, &ctx);
+}
+
+static void bpf_c_stop(struct seq_file *m, void *v)
+{
+	struct stat_seq_priv *priv = m->private;
+
+	if (priv->task != current)
+		put_task_struct(priv->task);
+	seq_file_destroy(&priv->seqf_pcpu);
+}
+
+const struct seq_operations bpf_stat_ops = {
+	.start	= bpf_c_start,
+	.next	= bpf_c_next,
+	.stop	= bpf_c_stop,
+	.show	= bpf_show_stat,
+};
+
+DEFINE_BPF_ITER_FUNC(stat, struct bpf_iter_meta *meta,
+			   u64 cpuid,
+			   struct cpuacct *cpuacct,
+			   u64 arch_irq_stat_cpu,
+			   u64 arch_irq_stat,
+			   bool print_all,
+			   struct seq_file *seqf_pcpu)
+
+BTF_ID_LIST(btf_stat_id)
+BTF_ID(struct, cpuacct)
+
+static const struct bpf_iter_seq_info stat_seq_info = {
+	.seq_ops		= &bpf_stat_ops,
+	.init_seq_private	= NULL,
+	.fini_seq_private	= NULL,
+	.seq_priv_size		= sizeof(struct stat_seq_priv),
+};
+
+static struct bpf_iter_reg stat_reg_info = {
+	.target			= "stat",
+	.ctx_arg_info_size	= 1,
+	.ctx_arg_info		= {
+		{ offsetof(struct bpf_iter__stat, cpuacct),
+			PTR_TO_BTF_ID, },
+	},
+	.seq_info		= &stat_seq_info,
+};
+
+static int __init stat_iter_init(void)
+{
+	stat_reg_info.ctx_arg_info[0].btf_id = btf_stat_id[0];
+	return bpf_iter_reg_target(&stat_reg_info);
+}
+late_initcall(stat_iter_init);
 #endif /* CONFIG_BPF_RVI */
