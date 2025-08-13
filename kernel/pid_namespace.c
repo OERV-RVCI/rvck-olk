@@ -22,11 +22,18 @@
 #include <linux/export.h>
 #include <linux/sched/task.h>
 #include <linux/sched/signal.h>
+#ifdef CONFIG_BPF_RVI
+#include <linux/sched/loadavg.h>
+#endif
 #include <linux/idr.h>
 #include "pid_sysctl.h"
 
 static DEFINE_MUTEX(pid_caches_mutex);
 static struct kmem_cache *pid_ns_cachep;
+#ifdef CONFIG_BPF_RVI
+static struct kmem_cache *pidns_loadavg_cachep;
+static DEFINE_SPINLOCK(pidns_list_lock);
+#endif
 /* Write once array, filled from the beginning. */
 static struct kmem_cache *pid_cache[MAX_PID_NS_LEVEL];
 
@@ -116,6 +123,16 @@ static struct pid_namespace *create_pid_namespace(struct user_namespace *user_ns
 #if defined(CONFIG_SYSCTL) && defined(CONFIG_MEMFD_CREATE)
 	ns->memfd_noexec_scope = pidns_memfd_noexec_scope(parent_pid_ns);
 #endif
+
+#ifdef CONFIG_BPF_RVI
+	ns->loadavg = kmem_cache_zalloc(pidns_loadavg_cachep, GFP_KERNEL);
+	if (ns->loadavg == NULL)
+		goto out_free_idr;
+	spin_lock(&pidns_list_lock);
+	list_add_tail(&ns->loadavg->list, &init_pidns_loadavg.list);
+	spin_unlock(&pidns_list_lock);
+#endif
+
 	return ns;
 
 out_free_idr:
@@ -142,6 +159,16 @@ static void destroy_pid_namespace(struct pid_namespace *ns)
 	ns_free_inum(&ns->ns);
 
 	idr_destroy(&ns->idr);
+#ifdef CONFIG_BPF_RVI
+	/*
+	 * ns->loadavg's lifecycle aligns precisely with ns,
+	 * so don't need RCU delayed free.
+	 */
+	spin_lock(&pidns_list_lock);
+	list_del(&ns->loadavg->list);
+	spin_unlock(&pidns_list_lock);
+	kmem_cache_free(pidns_loadavg_cachep, ns->loadavg);
+#endif
 	call_rcu(&ns->rcu, delayed_free_pidns);
 }
 
@@ -481,6 +508,11 @@ const struct proc_ns_operations pidns_for_children_operations = {
 	.get_parent	= pidns_get_parent,
 };
 
+#ifdef CONFIG_BPF_RVI
+static void pidns_calc_loadavg_workfn(struct work_struct *work);
+static DECLARE_DELAYED_WORK(pidns_calc_loadavg_work, pidns_calc_loadavg_workfn);
+#endif
+
 static __init int pid_namespaces_init(void)
 {
 	pid_ns_cachep = KMEM_CACHE(pid_namespace, SLAB_PANIC | SLAB_ACCOUNT);
@@ -490,7 +522,80 @@ static __init int pid_namespaces_init(void)
 #endif
 
 	register_pid_ns_sysctl_table_vm();
+
+#ifdef CONFIG_BPF_RVI
+	pidns_loadavg_cachep = KMEM_CACHE(pidns_loadavg, SLAB_PANIC | SLAB_ACCOUNT);
+	schedule_delayed_work(&pidns_calc_loadavg_work, LOAD_FREQ);
+#endif
 	return 0;
 }
 
 __initcall(pid_namespaces_init);
+
+#ifdef CONFIG_BPF_RVI
+static void pidns_list_reset(void)
+{
+	struct list_head *pos, *tmp;
+
+	spin_lock(&pidns_list_lock);
+	list_for_each_safe(pos, tmp, &init_pidns_loadavg.list) {
+		struct pidns_loadavg *entry = list_entry(pos, struct pidns_loadavg, list);
+
+		entry->load_tasks = 0; // reset
+	}
+	spin_unlock(&pidns_list_lock);
+}
+
+static void pidns_update_load_tasks(void)
+{
+	struct task_struct *p, *t;
+
+	rcu_read_lock();
+	for_each_process_thread(p, t) {
+		// exists for sure, don't need get_pid_ns()
+		struct pid_namespace *pidns = task_active_pid_ns(t);
+		unsigned int state = READ_ONCE(t->__state) & TASK_REPORT;
+
+		if (state != TASK_UNINTERRUPTIBLE && state != TASK_RUNNING)
+			continue;
+
+		// Skip calculating init_pid_ns's loadavg. Meaningless.
+		while (pidns != &init_pid_ns) {
+			pidns->loadavg->load_tasks += 1;
+			pidns = pidns->parent;
+		}
+	}
+	rcu_read_unlock();
+}
+
+static void pidns_calc_avenrun(void)
+{
+	struct list_head *pos;
+
+	spin_lock(&pidns_list_lock);
+	/*
+	 * As the loadavg of init_pid_ns is exactly /proc/loadavg, avoid redundant
+	 * re-calculation for init_pid_ns, and reuse init_pidns_loadavg.list as the
+	 * list head.
+	 */
+	list_for_each(pos, &init_pidns_loadavg.list) {
+		struct pidns_loadavg *entry = list_entry(pos, struct pidns_loadavg, list);
+		long active = entry->load_tasks;
+
+		/* Reference: calc_global_load() */
+		active = active > 0 ? active * FIXED_1 : 0;
+		entry->avenrun[0] = calc_load(entry->avenrun[0], EXP_1, active);
+		entry->avenrun[1] = calc_load(entry->avenrun[1], EXP_5, active);
+		entry->avenrun[2] = calc_load(entry->avenrun[2], EXP_15, active);
+	}
+	spin_unlock(&pidns_list_lock);
+}
+
+static void pidns_calc_loadavg_workfn(struct work_struct *work)
+{
+	pidns_list_reset();
+	pidns_update_load_tasks();
+	pidns_calc_avenrun();
+	schedule_delayed_work(&pidns_calc_loadavg_work, LOAD_FREQ);
+}
+#endif /* CONFIG_BPF_RVI */

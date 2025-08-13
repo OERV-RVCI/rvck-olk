@@ -217,4 +217,9 @@ pid_t pid_vnr(struct pid *pid);
 		}							\
 		task = tg___;						\
 	} while_each_pid_task(pid, type, task)
+
+#ifdef CONFIG_BPF_RVI
+struct pidns_loadavg;
+extern struct pidns_loadavg init_pidns_loadavg;
+#endif
 #endif /* _LINUX_PID_H */
