@@ -155,6 +155,26 @@ __bpf_kfunc void bpf_kcpustat_cpu_fetch(struct kernel_cpustat *dst, int cpu)
 	kcpustat_cpu_fetch(dst, cpu);
 }
 
+/*
+ * Meminfo related kfuncs
+ */
+
+__bpf_kfunc unsigned long bpf_mem_file_hugepage(void)
+{
+	return global_node_page_state(NR_FILE_THPS);
+}
+
+__bpf_kfunc unsigned long bpf_mem_file_pmdmapped(void)
+{
+	return global_node_page_state(NR_FILE_PMDMAPPED);
+}
+
+__bpf_kfunc unsigned long bpf_mem_kreclaimable(void)
+{
+	return global_node_page_state_pages(NR_SLAB_RECLAIMABLE_B) +
+		global_node_page_state(NR_KERNEL_MISC_RECLAIMABLE);
+}
+
 BTF_SET8_START(bpf_common_kfuncs_ids)
 BTF_ID_FLAGS(func, bpf_mem_cgroup_from_task, KF_RET_NULL | KF_RCU)
 BTF_ID_FLAGS(func, bpf_task_active_pid_ns, KF_TRUSTED_ARGS)
@@ -171,6 +191,9 @@ BTF_ID_FLAGS(func, bpf_nr_iowait)
 BTF_ID_FLAGS(func, bpf_kstat_softirqs_cpu)
 BTF_ID_FLAGS(func, bpf_kstat_cpu_irqs_sum)
 BTF_ID_FLAGS(func, bpf_kcpustat_cpu_fetch)
+BTF_ID_FLAGS(func, bpf_mem_file_hugepage)
+BTF_ID_FLAGS(func, bpf_mem_file_pmdmapped)
+BTF_ID_FLAGS(func, bpf_mem_kreclaimable)
 BTF_SET8_END(bpf_common_kfuncs_ids)
 
 static const struct btf_kfunc_id_set bpf_common_kfuncs_set = {
