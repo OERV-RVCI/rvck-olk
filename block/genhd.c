@@ -97,8 +97,7 @@ bool set_capacity_and_notify(struct gendisk *disk, sector_t size)
 }
 EXPORT_SYMBOL_GPL(set_capacity_and_notify);
 
-static void part_stat_read_all(struct block_device *part,
-		struct disk_stats *stat)
+void part_stat_read_all(struct block_device *part, struct disk_stats *stat)
 {
 	int cpu;
 
