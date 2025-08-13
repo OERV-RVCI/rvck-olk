@@ -267,6 +267,19 @@ __bpf_kfunc unsigned long bpf_mem_vmalloc_total(void)
 	return (unsigned long)VMALLOC_TOTAL >> 10;
 }
 
+#ifdef CONFIG_X86
+const unsigned long *x86_get_direct_pages_count(void);
+
+__bpf_kfunc void bpf_x86_direct_pages(unsigned long *p)
+{
+	memcpy(p, x86_get_direct_pages_count(), PG_LEVEL_NUM);
+}
+#else
+__bpf_kfunc void bpf_x86_direct_pages(unsigned long *p)
+{
+}
+#endif
+
 BTF_SET8_START(bpf_common_kfuncs_ids)
 BTF_ID_FLAGS(func, bpf_mem_cgroup_from_task, KF_RET_NULL | KF_RCU)
 BTF_ID_FLAGS(func, bpf_task_active_pid_ns, KF_TRUSTED_ARGS)
@@ -295,6 +308,7 @@ BTF_ID_FLAGS(func, bpf_mem_commit_limit)
 BTF_ID_FLAGS(func, bpf_mem_committed)
 BTF_ID_FLAGS(func, bpf_mem_vmalloc_used)
 BTF_ID_FLAGS(func, bpf_mem_vmalloc_total)
+BTF_ID_FLAGS(func, bpf_x86_direct_pages, KF_TRUSTED_ARGS)
 BTF_SET8_END(bpf_common_kfuncs_ids)
 
 static const struct btf_kfunc_id_set bpf_common_kfuncs_set = {
