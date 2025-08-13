@@ -222,3 +222,101 @@ static int __init diskstats_iter_init(void)
 	return bpf_iter_reg_target(&diskstats_reg_info);
 }
 late_initcall(diskstats_iter_init);
+
+/*
+ * Partitions
+ */
+
+static void *bpf_show_partitions_start(struct seq_file *seqf, loff_t *pos)
+{
+	void *p;
+
+	p = bpf_disk_seqf_start(seqf, pos);
+	if (!IS_ERR_OR_NULL(p) && !*pos)
+		seq_puts(seqf, "major minor  #blocks  name\n\n");
+	return p;
+}
+
+struct bpf_iter__partitions {
+	__bpf_md_ptr(struct bpf_iter_meta *, meta);
+	__bpf_md_ptr(struct block_device *, part);
+};
+
+DEFINE_BPF_ITER_FUNC(partitions, struct bpf_iter_meta *meta,
+		     struct block_device *part)
+
+static void native_show_partition(struct seq_file *seqf, struct block_device *part)
+{
+	if (!bdev_nr_sectors(part))
+		return;
+	seq_printf(seqf, "%4d  %7d %10llu %pg\n",
+		   MAJOR(part->bd_dev), MINOR(part->bd_dev),
+		   bdev_nr_sectors(part) >> 1, part);
+}
+
+static void __show_partition(struct seq_file *seqf, struct block_device *part)
+{
+	struct bpf_iter__partitions ctx;
+	struct bpf_iter_meta meta;
+	struct bpf_prog *prog;
+
+	meta.seq = seqf;
+	prog = bpf_iter_get_info(&meta, false);
+	if (!prog)
+		return native_show_partition(seqf, part);
+
+	ctx.meta = &meta;
+	ctx.part = part;
+	bpf_iter_run_prog(prog, &ctx);
+}
+
+/* Inconvenient to operate Xarray in bpf progs. */
+static int bpf_show_partitions(struct seq_file *seqf, void *v)
+{
+	struct gendisk *sgp = v;
+	struct block_device *part;
+	unsigned long idx;
+
+	if (!get_capacity(sgp) || (sgp->flags & GENHD_FL_HIDDEN))
+		return 0;
+
+	rcu_read_lock();
+	xa_for_each(&sgp->part_tbl, idx, part)
+		__show_partition(seqf, part);
+	rcu_read_unlock();
+	return 0;
+}
+
+static const struct seq_operations bpf_partitions_op = {
+	.start	= bpf_show_partitions_start,
+	.next	= bpf_disk_seqf_next,
+	.stop	= bpf_disk_seqf_stop,
+	.show	= bpf_show_partitions
+};
+
+static const struct bpf_iter_seq_info partitions_seq_info = {
+	.seq_ops		= &bpf_partitions_op,
+	.init_seq_private	= NULL,
+	.fini_seq_private	= NULL,
+	.seq_priv_size		= sizeof(struct class_dev_iter),
+};
+
+static struct bpf_iter_reg partitions_reg_info = {
+	.target			= "partitions",
+	.ctx_arg_info_size	= 1,
+	.ctx_arg_info		= {
+		{ offsetof(struct bpf_iter__partitions, part),
+		  PTR_TO_BTF_ID }, // part won't be NULL
+	},
+	.seq_info		= &partitions_seq_info,
+};
+
+BTF_ID_LIST(btf_partitions_ids)
+BTF_ID(struct, block_device)
+
+static int __init partitions_iter_init(void)
+{
+	partitions_reg_info.ctx_arg_info[0].btf_id = btf_partitions_ids[0];
+	return bpf_iter_reg_target(&partitions_reg_info);
+}
+late_initcall(partitions_iter_init);
