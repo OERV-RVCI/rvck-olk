@@ -29,10 +29,19 @@
 #include <linux/resume_user_mode.h>
 #include <linux/psi.h>
 #include <linux/part_stat.h>
+#ifdef CONFIG_BPF_RVI
+#include <linux/bpf.h>
+#include <linux/btf.h>
+#include <linux/btf_ids.h>
+#endif
+
 #include "blk.h"
 #include "blk-cgroup.h"
 #include "blk-ioprio.h"
 #include "blk-throttle.h"
+#ifdef CONFIG_BPF_RVI
+#include "bfq-iosched.h"
+#endif
 
 static void __blkcg_rstat_flush(struct blkcg *blkcg, int cpu);
 
@@ -2207,6 +2216,155 @@ bool blk_cgroup_congested(void)
 	rcu_read_unlock();
 	return ret;
 }
+
+#ifdef CONFIG_BPF_RVI
+struct blkg_rw_iostat {
+	struct blkg_rwstat_sample throttle_bytes;
+	struct blkg_rwstat_sample throttle_ios;
+	struct blkg_rwstat_sample bfq_bytes;
+	struct blkg_rwstat_sample bfq_ios;
+	struct blkg_rwstat_sample bfq_service_time;
+	struct blkg_rwstat_sample bfq_wait_time;
+	struct blkg_rwstat_sample bfq_merged;
+	struct blkg_iostat        v2_iostat;
+};
+
+/*
+ * Getting:
+ *
+ *  - "throttle.io_{service_bytes,serviced}_recursive"
+ *    via offsetof(struct throtl_grp, stat_{bytes,ios})
+ *  - "bfq.io_{merged,{wait,service}_time,service_bytes,serviced}_recursive"
+ *    via offsetof(struct bfq_group, stats.{merged,{wait,service}_time,bytes,ios})
+ */
+static void blkcg_get_one_stat_v1(struct blkcg_gq *blkg, struct blkg_rw_iostat *iostat)
+{
+	struct blkcg_policy *pol __maybe_unused;
+
+#ifdef CONFIG_BLK_DEV_THROTTLING // what blkcg_policy_throtl depends on
+	pol = &blkcg_policy_throtl;
+	if (blkcg_policy_enabled(blkg->q, pol)) {
+		// throttle.io_service_bytes_recursive
+		blkg_rwstat_recursive_sum(blkg, pol,
+					  offsetof(struct throtl_grp, stat_bytes),
+					  &iostat->throttle_bytes);
+		// throttle.io_serviced_recursive
+		blkg_rwstat_recursive_sum(blkg, pol,
+					  offsetof(struct throtl_grp, stat_ios),
+					  &iostat->throttle_ios);
+	}
+#endif
+
+	/*
+	 * CONFIG_BPF_RVI_BLK_BFQ: blkcg_policy_bfq is in block/bfq-cgroup.c, which could be
+	 *                         built as a module if CONFIG_IOSCHED_BFQ=m
+	 * CONFIG_BFQ_GROUP_IOSCHED: what struct bfq_group.stats depends on
+	 */
+#if defined(CONFIG_BPF_RVI_BLK_BFQ) && defined(CONFIG_BFQ_GROUP_IOSCHED)
+	pol = &blkcg_policy_bfq;
+	if (blkcg_policy_enabled(blkg->q, pol)) {
+		// bfq.io_service_bytes_recursive
+		blkg_rwstat_recursive_sum(blkg, pol,
+					  offsetof(struct bfq_group, stats.bytes),
+					  &iostat->bfq_bytes);
+		// bfq.io_serviced_recursive
+		blkg_rwstat_recursive_sum(blkg, pol,
+					  offsetof(struct bfq_group, stats.ios),
+					  &iostat->bfq_ios);
+#ifdef CONFIG_BFQ_CGROUP_DEBUG
+		// bfq.io_service_time_recursive
+		blkg_rwstat_recursive_sum(blkg, pol,
+					  offsetof(struct bfq_group, stats.service_time),
+					  &iostat->bfq_service_time);
+		// bfq.io_wait_time_recursive
+		blkg_rwstat_recursive_sum(blkg, pol,
+					  offsetof(struct bfq_group, stats.wait_time),
+					  &iostat->bfq_wait_time);
+		// bfq.io_merged_recursive
+		blkg_rwstat_recursive_sum(blkg, pol,
+					  offsetof(struct bfq_group, stats.merged),
+					  &iostat->bfq_merged);
+#endif
+	}
+#endif
+}
+
+/* Reference: blkcg_print_one_stat() */
+static void blkcg_get_one_stat_v2(struct blkcg_gq *blkg, struct blkg_rw_iostat *iostat)
+{
+	struct blkg_iostat_set *bis = &blkg->iostat;
+	unsigned int seq;
+
+	if (!blkg->online)
+		return;
+
+	do {
+		seq = u64_stats_fetch_begin(&bis->sync);
+		iostat->v2_iostat = bis->cur;
+	} while (u64_stats_fetch_retry(&bis->sync, seq));
+}
+
+/*
+ * Basically inmitating:
+ *
+ *   - v1:
+ *     - tg_print_rwstat_recursive() in block/blk-throttle.c
+ *     - bfqg_print_rwstat_recursive() in block/bfq-cgroup.c
+ *   - v2:
+ *     - blkcg_print_stat()
+ *
+ * without the final printing (e.g. the __blkg_prfill_rwstat() part).
+ *
+ * Note that a subsystem can only exist in either cgroup v1 or v2 at the same time.
+ */
+__bpf_kfunc void bpf_blkcg_get_dev_iostat(struct blkcg *blkcg, int major, int minor,
+					  struct blkg_rw_iostat *iostat, bool is_v2)
+{
+	struct blkcg_gq *blkg;
+	char dev_name[64];
+
+	if (!blkcg || !iostat)
+		return;
+
+	if (is_v2) {
+		if (blkcg == &blkcg_root)
+			blkcg_fill_root_iostats();
+		else
+			cgroup_rstat_flush_atomic(blkcg->css.cgroup);
+	}
+
+	snprintf(dev_name, sizeof(dev_name), "%d:%d", major, minor);
+	rcu_read_lock();
+	hlist_for_each_entry_rcu(blkg, &blkcg->blkg_list, blkcg_node) {
+		if (strcmp(dev_name, blkg_dev_name(blkg)))
+			continue;
+		spin_lock_irq(&blkg->q->queue_lock);
+		if (is_v2)
+			blkcg_get_one_stat_v2(blkg, iostat);
+		else
+			blkcg_get_one_stat_v1(blkg, iostat);
+		spin_unlock_irq(&blkg->q->queue_lock);
+		break;
+	}
+	rcu_read_unlock();
+}
+
+BTF_SET8_START(bpf_blkcg_kfunc_ids)
+BTF_ID_FLAGS(func, bpf_blkcg_get_dev_iostat)
+BTF_SET8_END(bpf_blkcg_kfunc_ids)
+
+static const struct btf_kfunc_id_set bpf_blkcg_kfunc_set = {
+	.owner		= THIS_MODULE,
+	.set		= &bpf_blkcg_kfunc_ids,
+};
+
+static int __init bpf_blkcg_kfunc_init(void)
+{
+	return register_btf_kfunc_id_set(BPF_PROG_TYPE_TRACING,
+					 &bpf_blkcg_kfunc_set);
+}
+late_initcall(bpf_blkcg_kfunc_init);
+#endif /* CONFIG_BPF_RVI */
 
 module_param(blkcg_debug_stats, bool, 0644);
 MODULE_PARM_DESC(blkcg_debug_stats, "True if you want debug stats, false if not");

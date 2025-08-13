@@ -44,4 +44,7 @@ config BFQ_CGROUP_DEBUG
 	Enable some debugging help. Currently it exports additional stat
 	files in a cgroup which can be useful for debugging.
 
+config BPF_RVI_BLK_BFQ
+	bool
+
 endmenu
