@@ -598,4 +598,29 @@ static void pidns_calc_loadavg_workfn(struct work_struct *work)
 	pidns_calc_avenrun();
 	schedule_delayed_work(&pidns_calc_loadavg_work, LOAD_FREQ);
 }
+
+/* Reference: next_tgid() in fs/proc/base.c */
+struct pid_iter next_pid(struct pid_namespace *ns, struct pid_iter iter)
+{
+	struct pid *pid;
+
+	if (iter.task)
+		put_task_struct(iter.task);
+	rcu_read_lock();
+retry:
+	iter.task = NULL;
+	pid = find_ge_pid(iter.pid, ns);
+	if (pid) {
+		iter.pid = pid_nr_ns(pid, ns);
+		iter.task = pid_task(pid, PIDTYPE_PID);
+		// maybe don't need this
+		if (!iter.task) {
+			iter.pid += 1;
+			goto retry;
+		}
+		get_task_struct(iter.task);
+	}
+	rcu_read_unlock();
+	return iter;
+}
 #endif /* CONFIG_BPF_RVI */

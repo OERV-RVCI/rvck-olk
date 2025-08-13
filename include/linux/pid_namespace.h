@@ -149,6 +149,17 @@ struct pidns_loadavg {
 };
 
 extern struct pidns_loadavg init_pidns_loadavg;
+
+struct pid_iter {
+	unsigned int pid;
+	struct task_struct *task;
+};
+
+struct pid_iter next_pid(struct pid_namespace *ns, struct pid_iter iter);
+
+#define for_each_task_in_pidns(iter, ns)			\
+	for (iter = next_pid(ns, iter); iter.task;		\
+		iter.pid += 1, iter = next_pid(ns, iter))
 #endif
 
 #endif /* _LINUX_PID_NS_H */
