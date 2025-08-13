@@ -409,6 +409,11 @@ late_initcall_sync(cgroup_v1_ifs_init);
 #endif
 
 #ifdef CONFIG_BPF_RVI
+struct cpuacct *task_cpuacct(struct task_struct *tsk)
+{
+	return tsk ? task_ca(tsk) : NULL;
+}
+
 __bpf_kfunc void bpf_cpuacct_kcpustat_cpu_fetch(struct kernel_cpustat *dst,
 						struct cpuacct *ca, int cpu)
 {
