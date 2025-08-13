@@ -6,6 +6,7 @@
 #include <linux/pid_namespace.h>
 #include <linux/sched.h>
 #include <linux/mm.h>
+#include <linux/mman.h>
 #include <linux/swap.h>
 #include <linux/types.h>
 #include <linux/page_counter.h>
@@ -246,6 +247,15 @@ __bpf_kfunc unsigned long bpf_mem_percpu(void)
 	return pcpu_nr_pages();
 }
 
+__bpf_kfunc unsigned long bpf_mem_commit_limit(void)
+{
+	return vm_commit_limit();
+}
+__bpf_kfunc unsigned long bpf_mem_committed(void)
+{
+	return vm_memory_committed();
+}
+
 BTF_SET8_START(bpf_common_kfuncs_ids)
 BTF_ID_FLAGS(func, bpf_mem_cgroup_from_task, KF_RET_NULL | KF_RCU)
 BTF_ID_FLAGS(func, bpf_task_active_pid_ns, KF_TRUSTED_ARGS)
@@ -270,6 +280,8 @@ BTF_ID_FLAGS(func, bpf_mem_freecma)
 BTF_ID_FLAGS(func, bpf_hugetlb_report_meminfo, KF_TRUSTED_ARGS)
 BTF_ID_FLAGS(func, bpf_mem_failure)
 BTF_ID_FLAGS(func, bpf_mem_percpu)
+BTF_ID_FLAGS(func, bpf_mem_commit_limit)
+BTF_ID_FLAGS(func, bpf_mem_committed)
 BTF_SET8_END(bpf_common_kfuncs_ids)
 
 static const struct btf_kfunc_id_set bpf_common_kfuncs_set = {
