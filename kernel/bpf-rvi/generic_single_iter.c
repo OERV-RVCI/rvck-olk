@@ -51,6 +51,7 @@ static const struct seq_operations generic_single_seq_ops = {
  * Users of "generic_single" iter type:
  *  - cpu_online
  *  - loadavg
+ *  - uptime
  */
 DEFINE_BPF_ITER_FUNC(generic_single, struct bpf_iter_meta *meta)
 
