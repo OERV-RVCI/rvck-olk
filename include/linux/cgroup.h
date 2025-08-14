@@ -694,6 +694,9 @@ static inline void cgroup_path_from_kernfs_id(u64 id, char *buf, size_t buflen)
 void cgroup_rstat_updated(struct cgroup *cgrp, int cpu);
 void cgroup_rstat_flush(struct cgroup *cgrp);
 void cgroup_rstat_flush_hold(struct cgroup *cgrp);
+#if defined(CONFIG_BPF_RVI) && !defined(CONFIG_PREEMPT_RT)
+void cgroup_rstat_flush_atomic(struct cgroup *cgrp);
+#endif
 void cgroup_rstat_flush_release(void);
 
 /*
@@ -702,10 +705,19 @@ void cgroup_rstat_flush_release(void);
 #ifdef CONFIG_CGROUP_CPUACCT
 void cpuacct_charge(struct task_struct *tsk, u64 cputime);
 void cpuacct_account_field(struct task_struct *tsk, int index, u64 val);
+#ifdef CONFIG_BPF_RVI
+struct cpuacct *task_cpuacct(struct task_struct *tsk);
+#endif
 #else
 static inline void cpuacct_charge(struct task_struct *tsk, u64 cputime) {}
 static inline void cpuacct_account_field(struct task_struct *tsk, int index,
 					 u64 val) {}
+#ifdef CONFIG_BPF_RVI
+static inline struct cpuacct *task_cpuacct(struct task_struct *tsk)
+{
+	return NULL;
+}
+#endif
 #endif
 
 void __cgroup_account_cputime(struct cgroup *cgrp, u64 delta_exec);

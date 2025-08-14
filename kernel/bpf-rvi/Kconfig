@@ -7,6 +7,8 @@ config BPF_RVI
 	depends on BPF_SYSCALL
 	depends on BPF_JIT
 	depends on CPUSETS
+	depends on PID_NS
+	select BPF_RVI_BLK_BFQ if IOSCHED_BFQ = y # built-in required
 	default n
 	help
 	  A resource view is a bundle of interfaces under /proc and /sys

@@ -45,7 +45,11 @@ struct pid_namespace {
 #if defined(CONFIG_SYSCTL) && defined(CONFIG_MEMFD_CREATE)
 	int memfd_noexec_scope;
 #endif
+#ifdef CONFIG_BPF_RVI
+	KABI_USE(1, struct pidns_loadavg *loadavg)
+#else
 	KABI_RESERVE(1)
+#endif
 	KABI_RESERVE(2)
 	KABI_RESERVE(3)
 } __randomize_layout;
@@ -132,6 +136,30 @@ static inline bool task_is_in_init_pid_ns(struct task_struct *tsk)
 
 #ifdef CONFIG_BPF_RVI
 extern struct task_struct *get_current_level1_reaper(void);
+
+/*
+ * This struct should be viewed as an extension but not an entity.
+ * IOW it doesn't hold refcount to struct pid_namespace, and all its members are
+ * semantically embedded in struct pid_namespace.
+ */
+struct pidns_loadavg {
+	struct list_head list;
+	unsigned long load_tasks;
+	unsigned long avenrun[3];
+};
+
+extern struct pidns_loadavg init_pidns_loadavg;
+
+struct pid_iter {
+	unsigned int pid;
+	struct task_struct *task;
+};
+
+struct pid_iter next_pid(struct pid_namespace *ns, struct pid_iter iter);
+
+#define for_each_task_in_pidns(iter, ns)			\
+	for (iter = next_pid(ns, iter); iter.task;		\
+		iter.pid += 1, iter = next_pid(ns, iter))
 #endif
 
 #endif /* _LINUX_PID_NS_H */

@@ -93,8 +93,17 @@ struct pid_namespace init_pid_ns = {
 #if defined(CONFIG_SYSCTL) && defined(CONFIG_MEMFD_CREATE)
 	.memfd_noexec_scope = MEMFD_NOEXEC_SCOPE_EXEC,
 #endif
+#ifdef CONFIG_BPF_RVI
+	.loadavg = &init_pidns_loadavg,
+#endif
 };
 EXPORT_SYMBOL_GPL(init_pid_ns);
+
+#ifdef CONFIG_BPF_RVI
+struct pidns_loadavg init_pidns_loadavg = {
+	.list = LIST_HEAD_INIT(init_pidns_loadavg.list),
+};
+#endif
 
 /*
  * Note: disable interrupts while the pidmap_lock is held as an

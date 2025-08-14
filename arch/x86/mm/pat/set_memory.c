@@ -122,6 +122,13 @@ void arch_report_meminfo(struct seq_file *m)
 		seq_printf(m, "DirectMap1G:    %8lu kB\n",
 			direct_pages_count[PG_LEVEL_1G] << 20);
 }
+
+#ifdef CONFIG_BPF_RVI
+const unsigned long *x86_get_direct_pages_count(void)
+{
+	return direct_pages_count;
+}
+#endif
 #else
 static inline void split_page_count(int level) { }
 #endif

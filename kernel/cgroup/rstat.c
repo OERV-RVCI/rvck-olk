@@ -239,6 +239,21 @@ __bpf_kfunc void cgroup_rstat_flush(struct cgroup *cgrp)
 	spin_unlock_irq(&cgroup_rstat_lock);
 }
 
+#if defined(CONFIG_BPF_RVI) && !defined(CONFIG_PREEMPT_RT)
+/**
+ * cgroup_rstat_flush_atomic- atomic version of cgroup_rstat_flush()
+ * @cgrp: target cgroup
+ *
+ * This function can be called from any context.
+ */
+__bpf_kfunc void cgroup_rstat_flush_atomic(struct cgroup *cgrp)
+{
+	spin_lock_irq(&cgroup_rstat_lock);
+	cgroup_rstat_flush_locked(cgrp);
+	spin_unlock_irq(&cgroup_rstat_lock);
+}
+#endif
+
 /**
  * cgroup_rstat_flush_hold - flush stats in @cgrp's subtree and hold
  * @cgrp: target cgroup
@@ -525,6 +540,9 @@ void cgroup_base_stat_cputime_show(struct seq_file *seq)
 BTF_SET8_START(bpf_rstat_kfunc_ids)
 BTF_ID_FLAGS(func, cgroup_rstat_updated)
 BTF_ID_FLAGS(func, cgroup_rstat_flush, KF_SLEEPABLE)
+#if defined(CONFIG_BPF_RVI) && !defined(CONFIG_PREEMPT_RT)
+BTF_ID_FLAGS(func, cgroup_rstat_flush_atomic)
+#endif
 BTF_SET8_END(bpf_rstat_kfunc_ids)
 
 static const struct btf_kfunc_id_set bpf_rstat_kfunc_set = {
