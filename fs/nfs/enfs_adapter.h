@@ -47,9 +47,6 @@ struct enfs_adapter_ops {
 	void (*trigger_get_capability)(struct nfs_server *server);
 };
 
-void *enfs_adapter_get_data(void);
-void enfs_adapter_set_data(void *data);
-
 int enfs_parse_mount_options(enum nfsmultipathoptions option, char *str,
 			     struct nfs_fs_context *mnt, struct fs_context *fc);
 void enfs_free_mount_options(struct nfs_fs_context *data);

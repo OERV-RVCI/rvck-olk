@@ -669,13 +669,6 @@ struct xprts_options_and_clnt {
 	void *data;
 };
 
-static void set_clnt_enfs_flag(struct rpc_clnt *clnt)
-{
-	struct rpc_clnt_reserve *clnt_reserve = (struct rpc_clnt_reserve *)clnt;
-
-	clnt_reserve->cl_enfs = 1;
-}
-
 int enfs_config_xprt_create_args(struct xprt_create *xprtargs,
 				 struct rpc_create_args *args, char *servername,
 				 size_t length)
@@ -882,7 +875,7 @@ int enfs_multipath_create_thread(void *data)
 	if (errno != 0)
 		enfs_log_error("create clnt proc failed.\n");
 
-	set_clnt_enfs_flag(create_args->clnt);
+	create_args->clnt->cl_enfs = 1;
 	enfs_xprt_ippair_create(&xprtargs, create_args->clnt, mount_options);
 
 	kfree(create_args->args);

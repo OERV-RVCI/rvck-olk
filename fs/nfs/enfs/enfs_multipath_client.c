@@ -69,7 +69,8 @@ void enfs_free_nfsclient_info(struct multipath_client_info *client_info)
 	kfree(client_info);
 }
 
-int nfs_multipath_client_mount_info_init(
+static int
+nfs_multipath_client_mount_info_init(
 	struct multipath_client_info *client_info,
 	const struct nfs_client_initdata *cl_init)
 {
@@ -170,8 +171,10 @@ int nfs_multipath_client_info_init(void **data,
 	return rc;
 }
 
-bool nfs_multipath_ip_list_info_match(const struct nfs_ip_list *ip_list_src,
-				      const struct nfs_ip_list *ip_list_dst)
+static bool
+nfs_multipath_ip_list_info_match(
+	const struct nfs_ip_list *ip_list_src,
+	const struct nfs_ip_list *ip_list_dst)
 {
 	int i;
 	int j;
@@ -307,40 +310,54 @@ int nfs4_multipath_client_info_match(void *src, void *dst)
 	return ret;
 }
 
-void print_ip_info(struct seq_file *mount_option, struct nfs_ip_list *ip_list,
-		   const char *type)
+static void
+print_ip_info(
+	struct seq_file *seq,
+	struct nfs_ip_list *ip_list,
+	const char *type)
 {
 	char buf[IP_ADDRESS_LEN_MAX + 1];
 	int len = 0;
 	int i = 0;
 
-	seq_printf(mount_option, ",%s=", type);
+	if (seq)
+		seq_printf(seq, ",%s=", type);
+	enfs_log_debug("%s ip list:\n", type);
+
 	for (i = 0; i < ip_list->count; i++) {
 		len = rpc_ntop((struct sockaddr *)&ip_list->address[i], buf,
 			       IP_ADDRESS_LEN_MAX);
 		if (len > 0 && len < IP_ADDRESS_LEN_MAX)
 			buf[len] = '\0';
 
-		if (i == 0)
-			seq_printf(mount_option, "%s", buf);
-		else
-			seq_printf(mount_option, "~%s", buf);
-		enfs_log_debug("show nfs mount option type:%s %s\n", type, buf);
+		if (i != 0 && seq)
+			seq_printf(seq, "~");
+		if (seq)
+			seq_printf(seq, "%s", buf);
+
+		enfs_log_debug("\t%s\n", buf);
 	}
 }
 
-void print_dns_info(struct seq_file *seq, struct enfs_route_dns_info *pRemoteDnsInfo,
-		    const char *type)
+static void
+print_dns_info(
+	struct seq_file *seq,
+	struct enfs_route_dns_info *pRemoteDnsInfo,
+	const char *type)
 {
 	int i = 0;
 	char *name;
 
-	seq_printf(seq, ",%s=", type);
+	if (seq)
+		seq_printf(seq, ",%s=", type);
+	enfs_log_debug("%s dns list:\n", type);
 	for (i = 0; i < pRemoteDnsInfo->dnsNameCount; i++) {
 		name = pRemoteDnsInfo->routeRemoteDnsList[i].dnsname;
-		if (i == 0)
+		if (i != 0 && seq)
+			seq_printf(seq, "~");
+		if (seq)
 			seq_printf(seq, "%s", name);
-		seq_printf(seq, "~%s", name);
+		enfs_log_debug("\t%s\n", name);
 	}
 }
 
@@ -366,8 +383,11 @@ static void multipath_print_sockaddr(struct seq_file *seq,
 	enfs_log_error("unsupport family:%d\n", addr->sa_family);
 }
 
-void convert_lookup_cache_str(struct nfs_server *server, char **server_lookup,
-			      char **actual_lookup)
+static void
+convert_lookup_cache_str(
+	struct nfs_server *server,
+	char **server_lookup,
+	char **actual_lookup)
 {
 	if ((server->enfs_flags & NFS_MOUNT_LOOKUP_CACHE_NONEG) &&
 	    (server->enfs_flags & NFS_MOUNT_LOOKUP_CACHE_NONE)) {

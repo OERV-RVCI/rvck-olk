@@ -97,10 +97,8 @@ static int debug_show_xprt(struct rpc_clnt *clnt, struct rpc_xprt *xprt,
 
 static int debug_show_clnt(struct rpc_clnt *clnt, void *data)
 {
-	struct rpc_clnt_reserve *clnt_reserve = (struct rpc_clnt_reserve *)clnt;
-
 	enfs_log_info("clnt %d addr:%p enfs:%d\n", clnt->cl_clid, clnt,
-		      clnt_reserve->cl_enfs);
+		      clnt->cl_enfs);
 	rpc_clnt_iterate_for_each_xprt(clnt, debug_show_xprt, NULL);
 	return 0;
 }
@@ -504,9 +502,7 @@ int enfs_proc_create_clnt(struct rpc_clnt *clnt)
 
 void enfs_proc_delete_clnt(struct rpc_clnt *clnt)
 {
-	struct rpc_clnt_reserve *clnt_reserve = (struct rpc_clnt_reserve *)clnt;
-
-	if (clnt_reserve->cl_enfs == 1) {
+	if (clnt->cl_enfs == 1) {
 		enfs_proc_delete_file(clnt);
 		enfs_clnt_release_linkcap(clnt);
 	}
@@ -598,9 +594,7 @@ static void enfs_proc_delete_parent(void)
 
 static int enfs_proc_init_create_clnt(struct rpc_clnt *clnt, void *data)
 {
-	struct rpc_clnt_reserve *clnt_reserve = (struct rpc_clnt_reserve *)clnt;
-
-	if (clnt_reserve->cl_enfs == 1) {
+	if (clnt->cl_enfs == 1) {
 		enfs_proc_create_file(clnt);
 		enfs_clnt_get_linkcap(clnt);
 	}
@@ -609,9 +603,7 @@ static int enfs_proc_init_create_clnt(struct rpc_clnt *clnt, void *data)
 
 static int enfs_proc_destroy_clnt(struct rpc_clnt *clnt, void *data)
 {
-	struct rpc_clnt_reserve *clnt_reserve = (struct rpc_clnt_reserve *)clnt;
-
-	if (clnt_reserve->cl_enfs == 1)
+	if (clnt->cl_enfs == 1)
 		enfs_proc_delete_file(clnt);
 	return 0;
 }

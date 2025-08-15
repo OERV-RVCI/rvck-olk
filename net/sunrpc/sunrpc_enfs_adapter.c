@@ -216,11 +216,7 @@ void rpc_multipath_ops_update_rpc_program(struct rpc_task *task, u32 *cl_prog, u
 
 bool rpc_clnt_has_multipath(struct rpc_clnt *clnt)
 {
-	struct rpc_clnt_reserve *clnt_reserve;
-
-	clnt_reserve = (struct rpc_clnt_reserve *)clnt;
-
-	return clnt_reserve->cl_enfs ? true : false;
+	return clnt->cl_enfs ? true : false;
 }
 
 void rpc_multipath_ops_xprt_iostat(struct rpc_task *task)
