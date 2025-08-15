@@ -2006,7 +2006,7 @@ static int __init psi_proc_init(void)
 		proc_create("pressure/irq", 0666, NULL, &psi_irq_proc_ops);
 #endif
 #ifdef CONFIG_PSI_FINE_GRAINED
-		proc_create("pressure/stat", 0666, NULL, &psi_stat_proc_ops);
+		proc_create("pressure/stat", 0444, NULL, &psi_stat_proc_ops);
 #endif
 	}
 	return 0;
