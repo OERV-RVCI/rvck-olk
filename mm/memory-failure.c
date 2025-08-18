@@ -2305,6 +2305,17 @@ try_again:
 		}
 	}
 
+	/* filter pages that are protected from hwpoison test by users */
+	lock_page(p);
+	if (hwpoison_filter(p)) {
+		ClearPageHWPoison(p);
+		unlock_page(p);
+		put_page(p);
+		res = -EOPNOTSUPP;
+		goto unlock_mutex;
+	}
+	unlock_page(p);
+
 	hpage = compound_head(p);
 	if (PageTransHuge(hpage)) {
 		/*
@@ -2367,14 +2378,6 @@ try_again:
 	 * status correctly, we save a copy of the page flags at this time.
 	 */
 	page_flags = p->flags;
-
-	if (hwpoison_filter(p)) {
-		ClearPageHWPoison(p);
-		unlock_page(p);
-		put_page(p);
-		res = -EOPNOTSUPP;
-		goto unlock_mutex;
-	}
 
 	/*
 	 * __munlock_folio() may clear a writeback page's LRU flag without
