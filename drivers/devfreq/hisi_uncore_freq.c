@@ -47,7 +47,7 @@ enum hisi_uncore_pcc_cmd_type {
 	HUCF_PCC_CMD_SET_MODE,
 	HUCF_PCC_CMD_GET_PLAT_FREQ_NUM,
 	HUCF_PCC_CMD_GET_PLAT_FREQ_BY_IDX,
-	HUCF_PCC_CMD_MAX = 256,
+	HUCF_PCC_CMD_MAX = 256
 };
 
 static int hisi_platform_gov_usage;
@@ -56,7 +56,7 @@ static DEFINE_MUTEX(hisi_platform_gov_usage_lock);
 enum hisi_uncore_freq_mode {
 	HUCF_MODE_PLATFORM = 0,
 	HUCF_MODE_OS,
-	HUCF_MODE_MAX,
+	HUCF_MODE_MAX
 };
 
 #define HUCF_CAP_PLATFORM_CTRL	BIT(0)
@@ -72,7 +72,7 @@ enum hisi_uncore_freq_mode {
  * @devfreq:		devfreq data of this hisi_uncore_freq device
  * @related_cpus:	CPUs whose performance is majorly affected by this
  *			uncore frequency domain
- * @cap:		capabililty flag
+ * @cap:		capability flag
  */
 struct hisi_uncore_freq {
 	struct device *dev;
@@ -93,11 +93,22 @@ struct hisi_uncore_freq {
 /* Default polling interval in ms for devfreq governors*/
 #define HUCF_DEFAULT_POLLING_MS 100
 
+static void hisi_uncore_free_pcc_chan(struct hisi_uncore_freq *uncore)
+{
+	guard(mutex)(&uncore->pcc_lock);
+	pcc_mbox_free_channel(uncore->pchan);
+	uncore->pchan = NULL;
+}
+
+static void devm_hisi_uncore_free_pcc_chan(void *data)
+{
+	hisi_uncore_free_pcc_chan(data);
+}
+
 static int hisi_uncore_request_pcc_chan(struct hisi_uncore_freq *uncore)
 {
 	struct device *dev = uncore->dev;
 	struct pcc_mbox_chan *pcc_chan;
-	int rc;
 
 	uncore->cl = (struct mbox_client) {
 		.dev = dev,
@@ -123,27 +134,10 @@ static int hisi_uncore_request_pcc_chan(struct hisi_uncore_freq *uncore)
 			pcc_chan->shmem_size);
 	}
 
-	rc = devm_mutex_init(dev, &uncore->pcc_lock);
-	if (rc) {
-		pcc_mbox_free_channel(pcc_chan);
-		return rc;
-	}
-
 	uncore->pchan = pcc_chan;
 
-	return 0;
-}
-
-static void hisi_uncore_free_pcc_chan(struct hisi_uncore_freq *uncore)
-{
-	guard(mutex)(&uncore->pcc_lock);
-	pcc_mbox_free_channel(uncore->pchan);
-	uncore->pchan = NULL;
-}
-
-static void devm_hisi_uncore_free_pcc_chan(void *data)
-{
-	hisi_uncore_free_pcc_chan(data);
+	return devm_add_action_or_reset(uncore->dev,
+					devm_hisi_uncore_free_pcc_chan, uncore);
 }
 
 static acpi_status hisi_uncore_pcc_reg_scan(struct acpi_resource *res,
@@ -182,13 +176,12 @@ static int hisi_uncore_init_pcc_chan(struct hisi_uncore_freq *uncore)
 		return dev_err_probe(uncore->dev, -ENODEV,
 			"Failed to get a PCC channel\n");
 
-	rc = hisi_uncore_request_pcc_chan(uncore);
+
+	rc = devm_mutex_init(uncore->dev, &uncore->pcc_lock);
 	if (rc)
 		return rc;
 
-	return devm_add_action_or_reset(uncore->dev,
-					devm_hisi_uncore_free_pcc_chan,
-					uncore);
+	return hisi_uncore_request_pcc_chan(uncore);
 }
 
 static int hisi_uncore_cmd_send(struct hisi_uncore_freq *uncore,
@@ -214,8 +207,7 @@ static int hisi_uncore_cmd_send(struct hisi_uncore_freq *uncore,
 
 	/* Handle the Minimum Request Turnaround Time (MRTT) */
 	mrtt = pchan->min_turnaround_time;
-	time_delta = ktime_us_delta(ktime_get(),
-				    uncore->last_cmd_cmpl_time);
+	time_delta = ktime_us_delta(ktime_get(), uncore->last_cmd_cmpl_time);
 	if (mrtt > time_delta)
 		udelay(mrtt - time_delta);
 
@@ -317,8 +309,9 @@ static void devm_hisi_uncore_remove_opp(void *data)
 static int hisi_uncore_init_opp(struct hisi_uncore_freq *uncore)
 {
 	struct device *dev = uncore->dev;
-	u32 data = 0, num, index;
 	unsigned long freq_mhz;
+	u32 num, index;
+	u32 data = 0;
 	int rc;
 
 	rc = hisi_uncore_cmd_send(uncore, HUCF_PCC_CMD_GET_PLAT_FREQ_NUM,
@@ -340,7 +333,7 @@ static int hisi_uncore_init_opp(struct hisi_uncore_freq *uncore)
 		}
 		freq_mhz = data;
 
-		/* Don't care OPP votlage, take 1V as default */
+		/* Don't care OPP voltage, take 1V as default */
 		rc = dev_pm_opp_add(dev, freq_mhz * HZ_PER_MHZ, 1000000);
 		if (rc) {
 			dev_pm_opp_remove_all_dynamic(dev);
@@ -349,7 +342,8 @@ static int hisi_uncore_init_opp(struct hisi_uncore_freq *uncore)
 		}
 	}
 
-	return devm_add_action_or_reset(dev, devm_hisi_uncore_remove_opp, uncore);
+	return devm_add_action_or_reset(dev, devm_hisi_uncore_remove_opp,
+					uncore);
 }
 
 static int hisi_platform_gov_func(struct devfreq *df, unsigned long *freq)
@@ -377,17 +371,18 @@ static int hisi_platform_gov_handler(struct devfreq *df, unsigned int event,
 	case DEVFREQ_GOV_START:
 		data = HUCF_MODE_PLATFORM;
 		rc = hisi_uncore_cmd_send(uncore, HUCF_PCC_CMD_SET_MODE, &data);
+		if (rc)
+			dev_err(uncore->dev, "Failed to set platform mode (%d)\n", rc);
 		break;
 	case DEVFREQ_GOV_STOP:
 		data = HUCF_MODE_OS;
 		rc = hisi_uncore_cmd_send(uncore, HUCF_PCC_CMD_SET_MODE, &data);
+		if (rc)
+			dev_err(uncore->dev, "Failed to set os mode (%d)\n", rc);
 		break;
 	default:
 		break;
 	}
-
-	if (rc)
-		dev_err(uncore->dev, "Failed to set operate mode (%d)\n", rc);
 
 	return rc;
 }
@@ -402,7 +397,7 @@ static struct devfreq_governor hisi_platform_governor = {
 	.name = "hisi_platform",
 	/*
 	 * Set interrupt_driven to skip the devfreq monitor mechanism, though
-	 * this governor not interrupt-driven.
+	 * this governor is not interrupt-driven.
 	 */
 	.flags = DEVFREQ_GOV_FLAG_IRQ_DRIVEN,
 	.get_target_freq = hisi_platform_gov_func,
@@ -426,8 +421,8 @@ static void hisi_uncore_remove_platform_gov(struct hisi_uncore_freq *uncore)
 	}
 
 	/*
-	 * Set to the platform-controlled mode, if supported, so as to have a
-	 * certain behaviour when the driver is detached.
+	 * Set to the platform-controlled mode on exit if supported, so as to
+	 * have a certain behaviour when the driver is detached.
 	 */
 	rc = hisi_uncore_cmd_send(uncore, HUCF_PCC_CMD_SET_MODE, &data);
 	if (rc)
@@ -441,15 +436,14 @@ static void devm_hisi_uncore_remove_platform_gov(void *data)
 
 static int hisi_uncore_add_platform_gov(struct hisi_uncore_freq *uncore)
 {
-	int rc = 0;
-
 	if (!(uncore->cap & HUCF_CAP_PLATFORM_CTRL))
 		return 0;
 
 	guard(mutex)(&hisi_platform_gov_usage_lock);
 
 	if (hisi_platform_gov_usage == 0) {
-		rc = devfreq_add_governor(&hisi_platform_governor);
+		int rc = devfreq_add_governor(&hisi_platform_governor);
+
 		if (rc)
 			return rc;
 	}
@@ -460,6 +454,13 @@ static int hisi_uncore_add_platform_gov(struct hisi_uncore_freq *uncore)
 					uncore);
 }
 
+/*
+ * Returns:
+ * 0 if success, uncore->related_cpus is set.
+ * -EINVAL if property not found, or property found but without elements in it,
+ * or invalid arguments received in any of the subroutine.
+ * Other error codes if it goes wrong.
+ */
 static int hisi_uncore_mark_related_cpus(struct hisi_uncore_freq *uncore,
 				 char *property, int (*get_topo_id)(int cpu),
 				 const struct cpumask *(*get_cpumask)(int cpu))
@@ -485,12 +486,12 @@ static int hisi_uncore_mark_related_cpus(struct hisi_uncore_freq *uncore,
 
 	for (i = 0; i < len; i++) {
 		for_each_possible_cpu(cpu) {
-			if (get_topo_id(cpu) == num[i]) {
-				cpumask_or(&uncore->related_cpus,
-					   &uncore->related_cpus,
-					   get_cpumask(cpu));
-				break;
-			}
+			if (get_topo_id(cpu) != num[i])
+				continue;
+
+			cpumask_or(&uncore->related_cpus,
+				   &uncore->related_cpus, get_cpumask(cpu));
+			break;
 		}
 	}
 
@@ -526,9 +527,11 @@ static int hisi_uncore_mark_related_cpus_wrap(struct hisi_uncore_freq *uncore)
 	rc = hisi_uncore_mark_related_cpus(uncore, "related-package",
 					   get_package_id,
 					   get_package_cpumask);
-	if (rc == 0)
+	/* Success, or firmware probably broken */
+	if (!rc || rc != -EINVAL)
 		return rc;
 
+	/* Try another property name if rc == -EINVAL */
 	return hisi_uncore_mark_related_cpus(uncore, "related-cluster",
 					     get_cluster_id,
 					     get_cluster_cpumask);

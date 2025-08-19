@@ -139,5 +139,5 @@ Contact:	Linux power management list <linux-pm@vger.kernel.org>
 Description:	The list of CPUs whose performance is closely related to the
 		frequency of this devfreq domain.
 
-		This file is only present if the hisi_uncore_freq driver is in
-		use.
+		This file is only present if a specific devfreq device is
+		closely associated with a subset of CPUs.
