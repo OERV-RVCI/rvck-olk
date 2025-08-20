@@ -32,6 +32,10 @@
 #include <linux/acpi_iort.h>
 #include <linux/kmemleak.h>
 
+#ifdef CONFIG_PSWIOTLB
+#include <linux/pswiotlb.h>
+#endif
+
 #include <asm/boot.h>
 #include <asm/fixmap.h>
 #include <asm/kasan.h>
@@ -620,6 +624,13 @@ void __init mem_init(void)
 	swiotlb_update_mem_attributes();
 
 	swiotlb_cvm_update_mem_attributes();
+
+#ifdef CONFIG_PSWIOTLB
+	/* enable pswiotlb default */
+	if ((pswiotlb_force_disable != true) &&
+		is_phytium_ps_socs())
+		pswiotlb_init(1, PSWIOTLB_VERBOSE);
+#endif
 
 	/* this will put all unused low memory onto the freelists */
 	memblock_free_all();
