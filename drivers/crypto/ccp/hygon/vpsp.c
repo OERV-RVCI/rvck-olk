@@ -494,15 +494,28 @@ static int vpsp_try_bind_vtkm(struct kvm_vpsp *vpsp, struct vpsp_dev_ctx *vpsp_c
 	int ret;
 	struct vpsp_cmd *vcmd = (struct vpsp_cmd *)&cmd;
 
-	if (vpsp_ctx && !vpsp_ctx->vm_is_bound && vpsp->is_csv_guest) {
+	/**
+	 * The vpsp_ctx->locked ensures that kvm_bind_vtkm is
+	 * only executed once.
+	 *
+	 * otherwise error code -62 will be thrown.
+	 */
+	while (vpsp_ctx && !vpsp_ctx->vm_is_bound && vpsp->is_csv_guest) {
+		if (atomic64_xchg(&vpsp_ctx->locked, 1)) {
+			cond_resched();
+			continue;
+		}
+
 		ret = kvm_bind_vtkm(vpsp->vm_handle, vcmd->cmd_id,
 					vpsp_ctx->vid, psp_ret);
 		if (ret || *psp_ret) {
 			pr_err("[%s] kvm bind vtkm failed with ret: %d, pspret: %d\n",
 				__func__, ret, *psp_ret);
+			atomic64_xchg(&vpsp_ctx->locked, 0);
 			return ret;
 		}
 		vpsp_ctx->vm_is_bound = 1;
+		atomic64_xchg(&vpsp_ctx->locked, 0);
 	}
 	return 0;
 }
