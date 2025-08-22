@@ -851,6 +851,7 @@ struct iommu_device {
 	struct fwnode_handle *fwnode;
 	struct device *dev;
 	struct iommu_group *singleton_group;
+	KABI_FILL_HOLE(u32 min_pasids)
 	u32 max_pasids;
 
 	KABI_RESERVE(1)
@@ -917,7 +918,7 @@ struct dev_iommu {
 	u32				require_direct:1;
 	u32				shadow_on_flush:1;
 
-	KABI_RESERVE(1)
+	KABI_USE(1, u32 min_pasids)
 	KABI_RESERVE(2)
 };
 
