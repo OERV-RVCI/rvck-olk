@@ -55,12 +55,13 @@ struct xsk_buff_pool {
 	refcount_t users;
 	struct xdp_umem *umem;
 	struct work_struct work;
-	/* Protects generic receive in shared and non-shared umem mode. */
-	spinlock_t rx_lock;
 	struct list_head free_list;
 	struct list_head xskb_list;
 	u32 heads_cnt;
 	u16 queue_id;
+
+	/* Protects generic receive in shared and non-shared umem mode. */
+	KABI_FILL_HOLE(spinlock_t rx_lock)
 
 	/* Data path members as close to free_heads at the end as possible. */
 	struct xsk_queue *fq ____cacheline_aligned_in_smp;
