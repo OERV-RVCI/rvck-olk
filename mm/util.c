@@ -278,12 +278,7 @@ void *memdup_user_nul(const void __user *src, size_t len)
 {
 	char *p;
 
-	/*
-	 * Always use GFP_KERNEL, since copy_from_user() can sleep and
-	 * cause pagefault, which makes it pointless to use GFP_NOFS
-	 * or GFP_ATOMIC.
-	 */
-	p = kmalloc_track_caller(len + 1, GFP_KERNEL);
+	p = kmalloc_track_caller(len + 1, GFP_USER | __GFP_NOWARN);
 	if (!p)
 		return ERR_PTR(-ENOMEM);
 
