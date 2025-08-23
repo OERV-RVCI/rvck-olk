@@ -63,7 +63,7 @@ struct xdp_sock {
 
 	struct xsk_queue *tx ____cacheline_aligned_in_smp;
 	struct list_head tx_list;
-	/* Protects generic receive. */
+	/* Reserved for kabi consistency. */
 	spinlock_t rx_lock;
 
 	/* Statistics */
