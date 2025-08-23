@@ -4074,6 +4074,17 @@ static struct cftype dfl_files[] = {
 		.flags = CFTYPE_ONLY_ON_ROOT | CFTYPE_DEBUG,
 	},
 
+#ifdef CONFIG_QOS_SCHED_DYNAMIC_AFFINITY
+	{
+		.name = "preferred_cpus",
+		.seq_show = cpuset_common_seq_show,
+		.write = cpuset_write_resmask,
+		.max_write_len = (100U + 6 * NR_CPUS),
+		.private = FILE_DYNAMIC_CPULIST,
+		.flags = CFTYPE_NOT_ON_ROOT,
+	},
+#endif
+
 	{ }	/* terminate */
 };
 
