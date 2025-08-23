@@ -484,7 +484,11 @@ struct task_group {
 #else
 	KABI_RESERVE(1)
 #endif
+#ifdef CONFIG_SCHED_SOFT_QUOTA
+	KABI_USE(2, u64 soft_quota)
+#else
 	KABI_RESERVE(2)
+#endif
 	KABI_RESERVE(3)
 	KABI_RESERVE(4)
 	KABI_RESERVE(5)
@@ -576,6 +580,10 @@ static inline int init_auto_affinity(struct task_group *tg)
 
 static inline void tg_update_affinity_domains(int cpu, int online) {}
 static inline void offline_auto_affinity(struct task_group *tg) { }
+#endif
+
+#ifdef CONFIG_SCHED_SOFT_QUOTA
+extern bool unthrottle_cfs_rq_soft_quota(struct rq *rq);
 #endif
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
@@ -769,10 +777,17 @@ struct cfs_rq {
 		unsigned long           qos_idle_h_nr_running_padding;
 	};
 #endif
+#ifdef CONFIG_SCHED_SOFT_QUOTA
+	KABI_USE(1, u64 soft_quota_enable)
+	KABI_USE(2, u64 sum_soft_runtime)
+	KABI_REPLACE(_KABI_RESERVE(3); _KABI_RESERVE(4),
+		struct list_head soft_quota_throttled_list)
+#else
 	KABI_RESERVE(1)
 	KABI_RESERVE(2)
 	KABI_RESERVE(3)
 	KABI_RESERVE(4)
+#endif
 	KABI_RESERVE(5)
 	KABI_RESERVE(6)
 	KABI_RESERVE(7)

@@ -45,6 +45,26 @@ void noinstr arch_cpu_idle(void)
 }
 EXPORT_SYMBOL_GPL(arch_cpu_idle);
 
+#ifdef CONFIG_SCHED_SOFT_QUOTA
+static DEFINE_PER_CPU(int, sibling_idle) = 1;
+
+int is_sibling_idle(void)
+{
+	return this_cpu_read(sibling_idle);
+}
+
+static void smt_measurement_begin(void)
+{
+}
+
+static void smt_measurement_done(void)
+{
+}
+#else
+static inline void smt_measurement_begin(void) { }
+static inline void smt_measurement_done(void) { }
+#endif
+
 #ifdef CONFIG_ACTLR_XCALL_XINT
 struct arm_cpuidle_xcall_xint_context {
 	unsigned long actlr_el1;
@@ -56,6 +76,8 @@ DEFINE_PER_CPU_ALIGNED(struct arm_cpuidle_xcall_xint_context, contexts);
 void arch_cpu_idle_enter(void)
 {
 	struct arm_cpuidle_xcall_xint_context *context;
+
+	smt_measurement_begin();
 
 	if (!system_uses_xcall_xint())
 		return;
@@ -71,6 +93,8 @@ void arch_cpu_idle_exit(void)
 {
 	struct arm_cpuidle_xcall_xint_context *context;
 
+	smt_measurement_done();
+
 	if (!system_uses_xcall_xint())
 		return;
 
@@ -81,6 +105,13 @@ void arch_cpu_idle_exit(void)
 	put_cpu_var(contexts);
 }
 #else
-void arch_cpu_idle_enter(void) {}
-void arch_cpu_idle_exit(void) {}
+void arch_cpu_idle_enter(void)
+{
+	smt_measurement_begin();
+}
+
+void arch_cpu_idle_exit(void)
+{
+	smt_measurement_done();
+}
 #endif
