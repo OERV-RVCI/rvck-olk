@@ -1165,10 +1165,27 @@ int __weak kvm_arch_create_vm_debugfs(struct kvm *kvm)
 	return 0;
 }
 
+static struct kvm_shadow *kvm_create_shadow(struct kvm *kvm)
+{
+	struct kvm_shadow *ks;
+
+	ks = kzalloc(sizeof(*ks), GFP_KERNEL_ACCOUNT);
+	if (!ks)
+		return NULL;
+
+	INIT_LIST_HEAD(&ks->list);
+	INIT_LIST_HEAD(&ks->ioeventfds_shadow);
+	ks->kvm = kvm;
+	ks->in_shadow = false;
+
+	return ks;
+}
+
 static struct kvm *kvm_create_vm(unsigned long type, const char *fdname)
 {
 	struct kvm *kvm = kvm_arch_alloc_vm();
 	struct kvm_memslots *slots;
+	struct kvm_shadow *ks;
 	int r = -ENOMEM;
 	int i, j;
 
@@ -1261,12 +1278,19 @@ static struct kvm *kvm_create_vm(unsigned long type, const char *fdname)
 	if (r)
 		goto out_err_no_debugfs;
 
+	ks = kvm_create_shadow(kvm);
+	if (!ks) {
+		r = -ENOMEM;
+		goto out_shadow;
+	}
+
 	r = kvm_arch_post_init_vm(kvm);
 	if (r)
 		goto out_err;
 
 	mutex_lock(&kvm_lock);
 	list_add(&kvm->vm_list, &vm_list);
+	list_add_tail_rcu(&ks->list, &kvm_shadow_list);
 	mutex_unlock(&kvm_lock);
 
 	preempt_notifier_inc();
@@ -1275,6 +1299,8 @@ static struct kvm *kvm_create_vm(unsigned long type, const char *fdname)
 	return kvm;
 
 out_err:
+	kfree(ks);
+out_shadow:
 	kvm_destroy_vm_debugfs(kvm);
 out_err_no_debugfs:
 	kvm_coalesced_mmio_free(kvm);
@@ -1290,7 +1316,7 @@ out_err_no_disable:
 out_err_no_arch_destroy_vm:
 	WARN_ON_ONCE(!refcount_dec_and_test(&kvm->users_count));
 	for (i = 0; i < KVM_NR_BUSES; i++)
-		kfree(kvm_get_bus(kvm, i));
+		kfree(kvm_get_bus(kvm, i, false));
 	cleanup_srcu_struct(&kvm->irq_srcu);
 out_err_no_irq_srcu:
 	cleanup_srcu_struct(&kvm->srcu);
@@ -1327,26 +1353,36 @@ static void kvm_destroy_vm(struct kvm *kvm)
 	if (mm->kvm == kvm)
 		mm->kvm = NULL;
 	kvm_destroy_vm_debugfs(kvm);
+
+	/**
+	 * Release the temporarily stored eventfd information,
+	 * if it is currently in the eventfd batch process.
+	 * kvm_arch_sync_events() needs to access buses;
+	 * so exit shadow mode before kvm_arch_sync_events().
+	 */
+	mutex_lock(&kvm->slots_lock);
+	ks = kvm_find_shadow(kvm);
+	if (ks && ks->in_shadow) {
+		kvm_release_ioeventfds_shadow(ks);
+		ks->in_shadow = false;
+	}
+	mutex_unlock(&kvm->slots_lock);
+
 	kvm_arch_sync_events(kvm);
 	mutex_lock(&kvm_lock);
+	if (ks)
+		list_del_rcu(&ks->list);
 	list_del(&kvm->vm_list);
 	mutex_unlock(&kvm_lock);
 	kvm_arch_pre_destroy_vm(kvm);
 
+	synchronize_rcu();
+	kfree(ks);
+
 	kvm_free_irq_routing(kvm);
 
-	/**
-	 * Release the temporarily stored eventfd information,
-	 * if it is currently in the eventfd batch process
-	 */
-	ks = kvm_find_shadow(kvm);
-	if (ks) {
-		kvm_release_ioeventfds_shadow(kvm);
-		list_del_init(&ks->list);
-		kfree(ks);
-	}
 	for (i = 0; i < KVM_NR_BUSES; i++) {
-		struct kvm_io_bus *bus = kvm_get_bus(kvm, i);
+		struct kvm_io_bus *bus = kvm_get_bus(kvm, i, false);
 
 		if (bus)
 			kvm_io_bus_destroy(bus);
@@ -5452,7 +5488,7 @@ static void hardware_disable_all(void)
 
 static void kvm_iodevice_destructor(struct kvm_io_device *dev)
 {
-	if (dev->ops->destructor)
+	if (dev && dev->ops && dev->ops->destructor)
 		dev->ops->destructor(dev);
 }
 
@@ -5641,8 +5677,13 @@ int kvm_io_bus_register_dev(struct kvm *kvm, enum kvm_bus bus_idx, gpa_t addr,
 	struct kvm_io_bus *new_bus, *bus;
 	struct kvm_io_range range;
 	struct kvm_shadow *ks;
+	bool is_ioeventfd;
 
-	bus = kvm_get_bus(kvm, bus_idx);
+	if (!dev)
+		return -EINVAL;
+	is_ioeventfd = kvm_io_device_is_ioeventfd(dev);
+
+	bus = kvm_get_bus(kvm, bus_idx, is_ioeventfd);
 	if (!bus)
 		return -ENOMEM;
 
@@ -5671,7 +5712,7 @@ int kvm_io_bus_register_dev(struct kvm *kvm, enum kvm_bus bus_idx, gpa_t addr,
 	memcpy(new_bus->range + i + 1, bus->range + i,
 		(bus->dev_count - i) * sizeof(struct kvm_io_range));
 	ks = kvm_find_shadow(kvm);
-	if (ks) {
+	if (is_ioeventfd && ks && ks->in_shadow) {
 		ks->buses_shadow[bus_idx] = new_bus;
 	} else {
 		rcu_assign_pointer(kvm->buses[bus_idx], new_bus);
@@ -5688,10 +5729,15 @@ int kvm_io_bus_unregister_dev(struct kvm *kvm, enum kvm_bus bus_idx,
 	int i;
 	struct kvm_io_bus *new_bus, *bus;
 	struct kvm_shadow *ks;
+	bool is_ioeventfd;
+
+	if (!dev)
+		return -EINVAL;
+	is_ioeventfd = kvm_io_device_is_ioeventfd(dev);
 
 	lockdep_assert_held(&kvm->slots_lock);
 
-	bus = kvm_get_bus(kvm, bus_idx);
+	bus = kvm_get_bus(kvm, bus_idx, is_ioeventfd);
 	if (!bus)
 		return 0;
 
@@ -5714,7 +5760,7 @@ int kvm_io_bus_unregister_dev(struct kvm *kvm, enum kvm_bus bus_idx,
 	}
 
 	ks = kvm_find_shadow(kvm);
-	if (ks) {
+	if (is_ioeventfd && ks && ks->in_shadow) {
 		ks->buses_shadow[bus_idx] = new_bus;
 		kfree(bus);
 		return 0;
