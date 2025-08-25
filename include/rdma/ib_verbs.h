@@ -2748,7 +2748,6 @@ struct ib_device {
 	 * It is a NULL terminated array.
 	 */
 	const struct attribute_group	*groups[4];
-	u8				hw_stats_attr_index;
 
 	u64			     uverbs_cmd_mask;
 
@@ -2797,7 +2796,7 @@ struct ib_device {
 	char iw_ifname[IFNAMSIZ];
 	u32 iw_driver_flags;
 	u32 lag_flags;
-	KABI_RESERVE(1)
+	KABI_USE(1, u8 hw_stats_attr_index)
 	KABI_RESERVE(2)
 };
 
