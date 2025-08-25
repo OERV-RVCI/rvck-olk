@@ -551,6 +551,7 @@ static void pidns_update_load_tasks(void)
 	struct task_struct *p, *t;
 
 	rcu_read_lock();
+	read_lock(&tasklist_lock);
 	for_each_process_thread(p, t) {
 		// exists for sure, don't need get_pid_ns()
 		struct pid_namespace *pidns = task_active_pid_ns(t);
@@ -565,6 +566,7 @@ static void pidns_update_load_tasks(void)
 			pidns = pidns->parent;
 		}
 	}
+	read_unlock(&tasklist_lock);
 	rcu_read_unlock();
 }
 
