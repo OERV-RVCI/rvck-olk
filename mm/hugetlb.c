@@ -1952,6 +1952,7 @@ void free_huge_folio(struct folio *folio)
 					  pages_per_huge_page(h), folio);
 	mem_cgroup_uncharge(folio);
 	if (page_from_dynamic_pool(folio_page(folio, 0))) {
+		arch_clear_hugepage_flags(&folio->page);
 		list_del(&folio->lru);
 		spin_unlock_irqrestore(&hugetlb_lock, flags);
 		dynamic_pool_free_hugepage(folio, restore_reserve);
