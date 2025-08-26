@@ -1737,7 +1737,7 @@ void do_migrate_range(unsigned long start_pfn, unsigned long end_pfn)
 			if (WARN_ON(folio_test_lru(folio)))
 				folio_isolate_lru(folio);
 			if (folio_mapped(folio))
-				try_to_unmap(folio, TTU_IGNORE_MLOCK);
+				try_to_unmap(folio, TTU_IGNORE_MLOCK | TTU_HWPOISON);
 			continue;
 		}
 
