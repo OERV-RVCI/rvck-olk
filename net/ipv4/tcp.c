@@ -279,6 +279,7 @@
 #include <linux/uaccess.h>
 #include <asm/ioctls.h>
 #include <net/busy_poll.h>
+#include <trace/hooks/oenetcls.h>
 
 /* Track pending CMSGs. */
 enum {
@@ -2577,6 +2578,9 @@ int tcp_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 	if (unlikely(flags & MSG_ERRQUEUE))
 		return inet_recv_error(sk, msg, len, addr_len);
 
+#if IS_ENABLED(CONFIG_OENETCLS_HOOKS)
+	trace_oecls_flow_update(sk);
+#endif
 	if (sk_can_busy_loop(sk) &&
 	    skb_queue_empty_lockless(&sk->sk_receive_queue) &&
 	    sk->sk_state == TCP_ESTABLISHED)
@@ -2940,6 +2944,9 @@ out:
 void tcp_close(struct sock *sk, long timeout)
 {
 	lock_sock(sk);
+#if IS_ENABLED(CONFIG_OENETCLS_HOOKS)
+	trace_ethtool_cfg_rxcls(sk, 1);
+#endif
 	__tcp_close(sk, timeout);
 	release_sock(sk);
 	if (!sk->sk_net_refcnt)
