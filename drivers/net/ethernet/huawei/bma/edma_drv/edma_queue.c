@@ -406,6 +406,12 @@ static s32 submit_dma_queue_sq(u32 dir, struct bspveth_dmal pdmalbase_v, u32 pf)
 	BMA_LOG(DLOG_DEBUG, "submit dma queue sq, sq_tail change %d,\n", sq_tail);
 	wmb(); /* memory barriers. */
 
+	/* readl last u32 of sq buffer descriptor to confirm the sq buffer descriptor
+	 * write to local sq
+	 */
+	(void)readl((void __iomem *)(p_dma_sq + sq_tail + sizeof(struct dma_ch_sq_s)
+				     - sizeof(u32)));
+
 	(void)set_dma_queue_sq_tail(sq_tail);
 
 	return 0;
