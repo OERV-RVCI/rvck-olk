@@ -157,7 +157,7 @@ static int roce3_create_thread(struct sdk_thread_info *thread_info)
 {
 	thread_info->thread_obj = kthread_run(roce3_linux_thread_func,
 		thread_info, thread_info->name);
-	if (!thread_info->thread_obj) {
+	if (IS_ERR(thread_info->thread_obj)) {
 		pr_err("[ROCE, ERR] %s: Failed to create thread\n", __func__);
 		return (-EFAULT);
 	}
