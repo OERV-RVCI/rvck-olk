@@ -2796,7 +2796,7 @@ struct ib_device {
 	char iw_ifname[IFNAMSIZ];
 	u32 iw_driver_flags;
 	u32 lag_flags;
-	KABI_RESERVE(1)
+	KABI_USE(1, u8 hw_stats_attr_index)
 	KABI_RESERVE(2)
 };
 
