@@ -121,6 +121,7 @@
 #include <net/compat.h>
 
 #include <trace/events/sock.h>
+#include <trace/hooks/oenetcls.h>
 
 /* The inetsw table contains everything that inet_create needs to
  * build a new socket.
@@ -219,6 +220,9 @@ int __inet_listen_sk(struct sock *sk, int backlog)
 			return err;
 
 		tcp_call_bpf(sk, BPF_SOCK_OPS_TCP_LISTEN_CB, 0, NULL);
+#if IS_ENABLED(CONFIG_OENETCLS_HOOKS)
+		trace_ethtool_cfg_rxcls(sk, 0);
+#endif
 	}
 	return 0;
 }
