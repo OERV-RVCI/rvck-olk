@@ -123,6 +123,7 @@ static const char * const attach_type_name[] = {
 	[BPF_TCX_EGRESS]		= "tcx_egress",
 	[BPF_TRACE_UPROBE_MULTI]	= "trace_uprobe_multi",
 	[BPF_SCHED]			= "sched",
+	[BPF_HISOCK_EGRESS]		= "hisock_egress",
 };
 
 static const char * const link_type_name[] = {
@@ -212,6 +213,7 @@ static const char * const prog_type_name[] = {
 	[BPF_PROG_TYPE_SYSCALL]			= "syscall",
 	[BPF_PROG_TYPE_NETFILTER]		= "netfilter",
 	[BPF_PROG_TYPE_SCHED]			= "sched",
+	[BPF_PROG_TYPE_HISOCK]			= "hisock",
 };
 
 static int __base_pr(enum libbpf_print_level level, const char *format,
@@ -8873,6 +8875,7 @@ static const struct bpf_sec_def section_defs[] = {
 	SEC_DEF("sk_lookup",		SK_LOOKUP, BPF_SK_LOOKUP, SEC_ATTACHABLE),
 	SEC_DEF("netfilter",		NETFILTER, BPF_NETFILTER, SEC_NONE),
 	SEC_DEF("sched/",			SCHED, BPF_SCHED, SEC_ATTACH_BTF, attach_sched),
+	SEC_DEF("hisock_egress",	HISOCK, BPF_HISOCK_EGRESS, SEC_ATTACHABLE_OPT),
 };
 
 int libbpf_register_prog_handler(const char *sec,

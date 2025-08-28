@@ -1006,6 +1006,9 @@ enum bpf_prog_type {
 	BPF_PROG_TYPE_SYSCALL, /* a program that can execute syscalls */
 	BPF_PROG_TYPE_NETFILTER,
 	BPF_PROG_TYPE_SCHED,
+#ifndef __GENKSYMS__
+	BPF_PROG_TYPE_HISOCK,
+#endif
 };
 
 enum bpf_attach_type {
@@ -1059,6 +1062,9 @@ enum bpf_attach_type {
 	BPF_TCX_EGRESS,
 	BPF_TRACE_UPROBE_MULTI,
 	BPF_SCHED,
+#ifndef __GENKSYMS__
+	BPF_HISOCK_EGRESS,
+#endif
 	__MAX_BPF_ATTACH_TYPE
 };
 
@@ -6313,6 +6319,7 @@ enum xdp_action {
 	XDP_PASS,
 	XDP_TX,
 	XDP_REDIRECT,
+	XDP_HISOCK_REDIRECT = 100,
 };
 
 /* user accessible metadata for XDP packet hook
@@ -7354,5 +7361,12 @@ struct bpf_iter_num {
 	 */
 	__u64 __opaque[1];
 } __attribute__((aligned(8)));
+
+enum hisock_action {
+	HISOCK_PASS,
+	HISOCK_DROP,
+	HISOCK_REDIRECT,
+	__MAX_HISOCK_ACTION,
+};
 
 #endif /* _UAPI__LINUX_BPF_H__ */
