@@ -11682,6 +11682,30 @@ static inline s64 cpu_qos_read(struct cgroup_subsys_state *css,
 }
 #endif
 
+#ifdef CONFIG_SCHED_SOFT_QUOTA
+static int cpu_soft_quota_write(struct cgroup_subsys_state *css,
+			 struct cftype *cftype, s64 soft_quota)
+{
+	struct task_group *tg = css_tg(css);
+
+	if (soft_quota != 1 && soft_quota != 0)
+		return -EINVAL;
+
+	if (tg->soft_quota == soft_quota)
+		return 0;
+
+	tg->soft_quota = soft_quota;
+
+	return 0;
+}
+
+static inline s64 cpu_soft_quota_read(struct cgroup_subsys_state *css,
+			       struct cftype *cft)
+{
+	return css_tg(css)->soft_quota;
+}
+#endif
+
 #ifdef CONFIG_BPF_SCHED
 void sched_settag(struct task_struct *tsk, s64 tag)
 {
@@ -11926,6 +11950,14 @@ static struct cftype cpu_legacy_files[] = {
 		.flags = CFTYPE_NOT_ON_ROOT,
 		.read_s64 = cpu_qos_read,
 		.write_s64 = cpu_qos_write,
+	},
+#endif
+#ifdef CONFIG_SCHED_SOFT_QUOTA
+	{
+		.name = "soft_quota",
+		.flags = CFTYPE_NOT_ON_ROOT,
+		.read_s64 = cpu_soft_quota_read,
+		.write_s64 = cpu_soft_quota_write,
 	},
 #endif
 #ifdef CONFIG_BPF_SCHED
@@ -12247,6 +12279,14 @@ static struct cftype cpu_files[] = {
 		.flags = CFTYPE_NOT_ON_ROOT,
 		.seq_show = cpu_uclamp_max_show,
 		.write = cpu_uclamp_max_write,
+	},
+#endif
+#ifdef CONFIG_SCHED_SOFT_QUOTA
+	{
+		.name = "soft_quota",
+		.flags = CFTYPE_NOT_ON_ROOT,
+		.read_s64 = cpu_soft_quota_read,
+		.write_s64 = cpu_soft_quota_write,
 	},
 #endif
 	{ }	/* terminate */

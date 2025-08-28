@@ -190,6 +190,10 @@ unsigned int sysctl_qos_level_weights[5] = {
 static long qos_reweight(long shares, struct task_group *tg);
 #endif
 
+#ifdef CONFIG_SCHED_SOFT_QUOTA
+static DEFINE_PER_CPU_SHARED_ALIGNED(struct list_head, soft_quota_throttled_cfs_rq);
+#endif
+
 #ifdef CONFIG_CFS_BANDWIDTH
 /*
  * Amount of runtime to allocate from global (tg) to local (per-cfs_rq) pool
@@ -221,6 +225,10 @@ int sysctl_sched_util_low_pct = 85;
 #ifdef CONFIG_QOS_SCHED_SMART_GRID
 extern unsigned int sysctl_smart_grid_strategy_ctrl;
 static int sysctl_affinity_adjust_delay_ms = 5000;
+#endif
+
+#ifdef CONFIG_SCHED_SOFT_QUOTA
+unsigned int sysctl_soft_runtime_ratio = 20;
 #endif
 
 #ifdef CONFIG_SYSCTL
@@ -321,6 +329,17 @@ static struct ctl_table sched_fair_sysctls[] = {
 		.proc_handler   = proc_dointvec_minmax,
 		.extra1         = SYSCTL_ZERO,
 		.extra2		= &hundred_thousand,
+	},
+#endif
+#ifdef CONFIG_SCHED_SOFT_QUOTA
+	{
+		.procname       = "sched_soft_runtime_ratio",
+		.data           = &sysctl_soft_runtime_ratio,
+		.maxlen         = sizeof(sysctl_soft_runtime_ratio),
+		.mode           = 0644,
+		.proc_handler   = proc_dointvec_minmax,
+		.extra1         = SYSCTL_ONE,
+		.extra2         = SYSCTL_ONE_HUNDRED,
 	},
 #endif
 	{}
@@ -592,10 +611,11 @@ static inline struct sched_entity *parent_entity(const struct sched_entity *se)
 	return se->parent;
 }
 
-static void
+static bool
 find_matching_se(struct sched_entity **se, struct sched_entity **pse)
 {
 	int se_depth, pse_depth;
+	bool ret = false;
 
 	/*
 	 * preemption test can be made between sibling entities who are in the
@@ -609,6 +629,10 @@ find_matching_se(struct sched_entity **se, struct sched_entity **pse)
 	pse_depth = (*pse)->depth;
 
 	while (se_depth > pse_depth) {
+#ifdef CONFIG_SCHED_SOFT_QUOTA
+		if (!ret && cfs_rq_of(*se)->soft_quota_enable == 1)
+			ret = true;
+#endif
 		se_depth--;
 		*se = parent_entity(*se);
 	}
@@ -619,9 +643,15 @@ find_matching_se(struct sched_entity **se, struct sched_entity **pse)
 	}
 
 	while (!is_same_group(*se, *pse)) {
+#ifdef CONFIG_SCHED_SOFT_QUOTA
+		if (!ret && cfs_rq_of(*se)->soft_quota_enable == 1)
+			ret = true;
+#endif
 		*se = parent_entity(*se);
 		*pse = parent_entity(*pse);
 	}
+
+	return ret;
 }
 
 static int tg_is_idle(struct task_group *tg)
@@ -667,9 +697,10 @@ static inline struct sched_entity *parent_entity(struct sched_entity *se)
 	return NULL;
 }
 
-static inline void
+static inline bool
 find_matching_se(struct sched_entity **se, struct sched_entity **pse)
 {
+	return false;
 }
 
 static inline int tg_is_idle(struct task_group *tg)
@@ -6030,6 +6061,14 @@ done:
 	SCHED_WARN_ON(cfs_rq->throttled_clock);
 	if (cfs_rq->nr_running)
 		cfs_rq->throttled_clock = rq_clock(rq);
+
+#ifdef CONFIG_SCHED_SOFT_QUOTA
+	if (cfs_rq->tg->soft_quota == 1) {
+		list_add(&cfs_rq->soft_quota_throttled_list,
+			 &per_cpu(soft_quota_throttled_cfs_rq, cpu_of(rq)));
+	}
+#endif
+
 	return true;
 }
 
@@ -6045,6 +6084,10 @@ void unthrottle_cfs_rq(struct cfs_rq *cfs_rq)
 #endif
 
 	se = cfs_rq->tg->se[cpu_of(rq)];
+
+#ifdef CONFIG_SCHED_SOFT_QUOTA
+	list_del_init(&cfs_rq->soft_quota_throttled_list);
+#endif
 
 #ifdef CONFIG_QOS_SCHED
 	/*
@@ -6244,6 +6287,16 @@ static bool distribute_cfs_runtime(struct cfs_bandwidth *cfs_b)
 		}
 
 		rq_lock_irqsave(rq, &rf);
+
+#ifdef CONFIG_SCHED_SOFT_QUOTA
+		if (cfs_rq->soft_quota_enable == 1) {
+			if (cfs_rq->runtime_remaining > 0)
+				cfs_rq->runtime_remaining = 0;
+
+			cfs_rq->soft_quota_enable = 0;
+		}
+#endif
+
 		if (!cfs_rq_throttled(cfs_rq))
 			goto next;
 
@@ -6306,6 +6359,17 @@ next:
 	return throttled;
 }
 
+#ifdef CONFIG_SCHED_SOFT_QUOTA
+static inline void init_tg_sum_soft_runtime(struct cfs_bandwidth *cfs_b)
+{
+	unsigned int cpu;
+	struct task_group *tg = container_of(cfs_b, struct task_group, cfs_bandwidth);
+
+	for_each_possible_cpu(cpu)
+		tg->cfs_rq[cpu]->sum_soft_runtime = 0;
+}
+#endif
+
 /*
  * Responsible for refilling a task_group's bandwidth and unthrottling its
  * cfs_rqs as appropriate. If there has been no activity within the last
@@ -6322,6 +6386,10 @@ static int do_sched_cfs_period_timer(struct cfs_bandwidth *cfs_b, int overrun, u
 
 	throttled = !list_empty(&cfs_b->throttled_cfs_rq);
 	cfs_b->nr_periods += overrun;
+
+#ifdef CONFIG_SCHED_SOFT_QUOTA
+	init_tg_sum_soft_runtime(cfs_b);
+#endif
 
 	/* Refill extra burst quota even if cfs_b->idle */
 	__refill_cfs_bandwidth_runtime(cfs_b);
@@ -6636,6 +6704,9 @@ static void init_cfs_rq_runtime(struct cfs_rq *cfs_rq)
 #endif
 #ifdef CONFIG_QOS_SCHED
 	INIT_LIST_HEAD(&cfs_rq->qos_throttled_list);
+#endif
+#ifdef CONFIG_SCHED_SOFT_QUOTA
+	INIT_LIST_HEAD(&cfs_rq->soft_quota_throttled_list);
 #endif
 }
 
@@ -9457,6 +9528,7 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
 	struct cfs_rq *cfs_rq = task_cfs_rq(curr);
 	int next_buddy_marked = 0;
 	int cse_is_idle, pse_is_idle;
+	bool ret = 0;
 
 	if (unlikely(se == pse))
 		return;
@@ -9491,7 +9563,12 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
 	if (!sched_feat(WAKEUP_PREEMPTION))
 		return;
 
-	find_matching_se(&se, &pse);
+	ret = find_matching_se(&se, &pse);
+#ifdef CONFIG_SCHED_SOFT_QUOTA
+	if (ret)
+		goto preempt;
+#endif
+
 	WARN_ON_ONCE(!pse);
 
 	cse_is_idle = se_is_idle(se);
@@ -14982,6 +15059,9 @@ void unregister_fair_sched_group(struct task_group *tg)
 	unsigned long flags;
 	struct rq *rq;
 	int cpu;
+#ifdef CONFIG_SCHED_SOFT_QUOTA
+	struct cfs_rq *cfs_rq;
+#endif
 
 	destroy_cfs_bandwidth(tg_cfs_bandwidth(tg));
 	destroy_auto_affinity(tg);
@@ -14991,10 +15071,16 @@ void unregister_fair_sched_group(struct task_group *tg)
 		if (tg->se[cpu])
 			remove_entity_load_avg(tg->se[cpu]);
 
-		#ifdef CONFIG_QOS_SCHED
-			if (tg->cfs_rq && tg->cfs_rq[cpu])
-				unthrottle_qos_sched_group(tg->cfs_rq[cpu]);
-		#endif
+#ifdef CONFIG_QOS_SCHED
+		if (tg->cfs_rq && tg->cfs_rq[cpu])
+			unthrottle_qos_sched_group(tg->cfs_rq[cpu]);
+#endif
+#ifdef CONFIG_SCHED_SOFT_QUOTA
+		if (tg->cfs_rq && tg->cfs_rq[cpu]) {
+			cfs_rq = tg->cfs_rq[cpu];
+			list_del_init(&cfs_rq->soft_quota_throttled_list);
+		}
+#endif
 
 		/*
 		 * Only empty task groups can be destroyed; so we can speculatively
@@ -15309,6 +15395,11 @@ __init void init_sched_fair_class(void)
 		INIT_LIST_HEAD(&per_cpu(qos_throttled_cfs_rq, i));
 #endif
 
+#ifdef CONFIG_SCHED_SOFT_QUOTA
+	for_each_possible_cpu(i)
+		INIT_LIST_HEAD(&per_cpu(soft_quota_throttled_cfs_rq, i));
+#endif
+
 	open_softirq(SCHED_SOFTIRQ, run_rebalance_domains);
 
 #ifdef CONFIG_NO_HZ_COMMON
@@ -15319,3 +15410,66 @@ __init void init_sched_fair_class(void)
 #endif /* SMP */
 
 }
+
+#ifdef CONFIG_SCHED_SOFT_QUOTA
+static bool check_soft_runtime(struct task_group *tg, int slice)
+{
+	int cpu;
+	u64 sum_soft_runtime = slice;
+	struct cfs_bandwidth *cfs_b = &tg->cfs_bandwidth;
+
+	if (cfs_b->quota == RUNTIME_INF)
+		return true;
+
+	for_each_possible_cpu(cpu)
+		sum_soft_runtime += tg->cfs_rq[cpu]->sum_soft_runtime;
+
+	return sum_soft_runtime < sysctl_soft_runtime_ratio * cfs_b->quota / 100;
+}
+
+int __weak is_sibling_idle(void)
+{
+	return 0;
+}
+
+bool unthrottle_cfs_rq_soft_quota(struct rq *rq)
+{
+	int max_cnt = 0;
+	bool ret = false;
+	struct cfs_rq *cfs_rq, *tmp_rq;
+	struct cfs_bandwidth *cfs_b;
+	int slice = sched_cfs_bandwidth_slice();
+
+	if (!is_sibling_idle())
+		return ret;
+
+	list_for_each_entry_safe(cfs_rq, tmp_rq, &per_cpu(soft_quota_throttled_cfs_rq, cpu_of(rq)),
+				 soft_quota_throttled_list) {
+		if (max_cnt++ > 20)
+			break;
+
+		if (cfs_rq->throttled) {
+			cfs_b = tg_cfs_bandwidth(cfs_rq->tg);
+			raw_spin_lock(&cfs_b->lock);
+
+			if (!check_soft_runtime(cfs_rq->tg, slice)) {
+				raw_spin_unlock(&cfs_b->lock);
+				continue;
+			}
+
+			raw_spin_unlock(&cfs_b->lock);
+
+			if (cfs_rq->runtime_remaining + slice > 0) {
+				cfs_rq->runtime_remaining += slice;
+				cfs_rq->sum_soft_runtime += slice;
+				cfs_rq->soft_quota_enable = 1;
+				unthrottle_cfs_rq(cfs_rq);
+				ret = true;
+				break;
+			}
+		}
+	}
+
+	return ret;
+}
+#endif
