@@ -218,6 +218,9 @@ enum btf_kfunc_hook {
 	BTF_KFUNC_HOOK_LWT,
 	BTF_KFUNC_HOOK_NETFILTER,
 	BTF_KFUNC_HOOK_SCHED,
+#ifdef CONFIG_HISOCK
+	BTF_KFUNC_HOOK_HISOCK,
+#endif
 	BTF_KFUNC_HOOK_MAX,
 };
 
@@ -8117,6 +8120,10 @@ static int bpf_prog_type_to_kfunc_hook(enum bpf_prog_type prog_type)
 		return BTF_KFUNC_HOOK_NETFILTER;
 	case BPF_PROG_TYPE_SCHED:
 		return BTF_KFUNC_HOOK_SCHED;
+#ifdef CONFIG_HISOCK
+	case BPF_PROG_TYPE_HISOCK:
+		return BTF_KFUNC_HOOK_HISOCK;
+#endif
 	default:
 		return BTF_KFUNC_HOOK_MAX;
 	}
