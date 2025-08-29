@@ -205,6 +205,8 @@ struct ext4_allocation_context {
 	__u8 ac_2order;		/* if request is to allocate 2^N blocks and
 				 * N > 0, the field stores N, otherwise 0 */
 	__u8 ac_op;		/* operation, for history only */
+
+	struct ext4_buddy *ac_e4b;
 	struct page *ac_bitmap_page;
 	struct page *ac_buddy_page;
 	struct ext4_prealloc_space *ac_pa;
