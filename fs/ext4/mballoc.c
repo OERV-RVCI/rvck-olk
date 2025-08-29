@@ -2139,6 +2139,7 @@ static int mb_mark_used(struct ext4_buddy *e4b, struct ext4_free_extent *ex)
 static void ext4_mb_use_best_found(struct ext4_allocation_context *ac,
 					struct ext4_buddy *e4b)
 {
+	struct ext4_sb_info *sbi = EXT4_SB(ac->ac_sb);
 	int ret;
 
 	BUG_ON(ac->ac_b_ex.fe_group != e4b->bd_group);
@@ -2169,8 +2170,10 @@ static void ext4_mb_use_best_found(struct ext4_allocation_context *ac,
 	get_page(ac->ac_buddy_page);
 	/* store last allocated for subsequent stream allocation */
 	if (ac->ac_flags & EXT4_MB_STREAM_ALLOC) {
-		EXT4_I(ac->ac_inode)->i_mb_last_group = ac->ac_f_ex.fe_group;
-		EXT4_I(ac->ac_inode)->i_mb_last_start = ac->ac_f_ex.fe_start;
+		spin_lock(&sbi->s_md_lock);
+		sbi->s_mb_last_group = ac->ac_f_ex.fe_group;
+		sbi->s_mb_last_start = ac->ac_f_ex.fe_start;
+		spin_unlock(&sbi->s_md_lock);
 	}
 	/*
 	 * As we've just preallocated more space than
@@ -2842,14 +2845,13 @@ ext4_mb_regular_allocator(struct ext4_allocation_context *ac)
 							   MB_NUM_ORDERS(sb));
 	}
 
-	/* if stream allocation is enabled, use last goal */
+	/* if stream allocation is enabled, use global goal */
 	if (ac->ac_flags & EXT4_MB_STREAM_ALLOC) {
-		struct ext4_inode_info *ei = EXT4_I(ac->ac_inode);
-
-		if (ei->i_mb_last_group || ei->i_mb_last_start) {
-			ac->ac_g_ex.fe_group = ei->i_mb_last_group;
-			ac->ac_g_ex.fe_start = ei->i_mb_last_start;
-		}
+		/* TBD: may be hot point */
+		spin_lock(&sbi->s_md_lock);
+		ac->ac_g_ex.fe_group = sbi->s_mb_last_group;
+		ac->ac_g_ex.fe_start = sbi->s_mb_last_start;
+		spin_unlock(&sbi->s_md_lock);
 	}
 
 	/*

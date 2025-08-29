@@ -1517,8 +1517,6 @@ static struct inode *ext4_alloc_inode(struct super_block *sb)
 	INIT_WORK(&ei->i_iomap_ioend_work, ext4_iomap_end_io);
 	ext4_fc_init_inode(&ei->vfs_inode);
 	mutex_init(&ei->i_fc_lock);
-	ei->i_mb_last_group = 0;
-	ei->i_mb_last_start = 0;
 	return &ei->vfs_inode;
 }
 
