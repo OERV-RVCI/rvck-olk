@@ -1755,6 +1755,17 @@ retry:
 		if (!folio_trylock(folio))
 			goto keep;
 
+		if (folio_test_hwpoison(folio) ||
+		    (folio_test_large(folio) && folio_test_has_hwpoisoned(folio))) {
+			if (folio_test_large(folio))
+				goto keep_locked;
+
+			try_to_unmap(folio, TTU_IGNORE_MLOCK | TTU_HWPOISON);
+			folio_unlock(folio);
+			folio_put(folio);
+			continue;
+		}
+
 		VM_BUG_ON_FOLIO(folio_test_active(folio), folio);
 
 		nr_pages = folio_nr_pages(folio);
