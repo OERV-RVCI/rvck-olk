@@ -2715,24 +2715,43 @@ static void qm_uacce_api_ver_init(struct hisi_qm *qm)
 	if (uacce->flags & UACCE_DEV_IOMMU) {
 		qm->use_sva = uacce->flags & UACCE_DEV_SVA ? true : false;
 
-		if (qm->ver == QM_HW_V1)
+		switch (qm->ver) {
+		case QM_HW_V1:
 			uacce->api_ver = HISI_QM_API_VER_BASE;
-		else if (qm->ver == QM_HW_V2)
+			break;
+		case QM_HW_V2:
 			uacce->api_ver = HISI_QM_API_VER2_BASE;
-		else
+			break;
+		case QM_HW_V3:
+		case QM_HW_V4:
 			uacce->api_ver = HISI_QM_API_VER3_BASE;
+			break;
+		default:
+			uacce->api_ver = HISI_QM_API_VER5_BASE;
+			break;
+		}
 	} else {
 		qm->use_sva = false;
 
-		if (qm->ver == QM_HW_V1)
+		switch (qm->ver) {
+		case QM_HW_V1:
 			uacce->api_ver = HISI_QM_API_VER_BASE
-					 UACCE_API_VER_NOIOMMU_SUBFIX;
-		else if (qm->ver == QM_HW_V2)
+				 UACCE_API_VER_NOIOMMU_SUBFIX;
+			break;
+		case QM_HW_V2:
 			uacce->api_ver = HISI_QM_API_VER2_BASE
-					 UACCE_API_VER_NOIOMMU_SUBFIX;
-		else
+				 UACCE_API_VER_NOIOMMU_SUBFIX;
+			break;
+		case QM_HW_V3:
+		case QM_HW_V4:
 			uacce->api_ver = HISI_QM_API_VER3_BASE
-					 UACCE_API_VER_NOIOMMU_SUBFIX;
+				 UACCE_API_VER_NOIOMMU_SUBFIX;
+			break;
+		default:
+			uacce->api_ver = HISI_QM_API_VER5_BASE
+				 UACCE_API_VER_NOIOMMU_SUBFIX;
+			break;
+		}
 	}
 }
 
