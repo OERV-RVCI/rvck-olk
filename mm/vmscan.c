@@ -1757,6 +1757,9 @@ retry:
 
 		if (folio_test_hwpoison(folio) ||
 		    (folio_test_large(folio) && folio_test_has_hwpoisoned(folio))) {
+			if (folio_test_large(folio))
+				goto keep_locked;
+
 			try_to_unmap(folio, TTU_IGNORE_MLOCK | TTU_HWPOISON);
 			folio_unlock(folio);
 			folio_put(folio);
