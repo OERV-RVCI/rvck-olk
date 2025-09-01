@@ -1163,7 +1163,8 @@ EXPORT_SYMBOL_GPL(rpc_task_get_next_xprt);
 static
 void rpc_task_set_transport(struct rpc_task *task, struct rpc_clnt *clnt)
 {
-	rpc_multipath_ops_set_transport(task, clnt);
+	if (task->tk_msg.rpc_proc)
+		rpc_multipath_ops_set_transport(task, clnt);
 
 	if (task->tk_xprt) {
 		if (!(test_bit(XPRT_OFFLINE, &task->tk_xprt->state) &&
