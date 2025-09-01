@@ -485,7 +485,7 @@ static void enfs_proc_delete_file(struct rpc_clnt *clnt)
 	remove_proc_subtree(buf, enfs_proc_parent);
 }
 
-// create proc file "/porc/enfs/[mount_ip]_[id]/stat"
+// create proc file "/proc/enfs/[mount_ip]_[id]/stat"
 int enfs_proc_create_clnt(struct rpc_clnt *clnt)
 {
 	int err;
