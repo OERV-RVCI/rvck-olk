@@ -2523,10 +2523,6 @@ static void cpu_enable_arch_xcall_xint(const struct arm64_cpu_capabilities *__un
 
 	el = read_sysreg(CurrentEL);
 	if (el == CurrentEL_EL2) {
-		/*
-		 * Enable EL2 trap when access ACTLR_EL1 in guest kernel.
-		 */
-		write_sysreg_s(read_sysreg_s(SYS_HCR_EL2) | HCR_TACR, SYS_HCR_EL2);
 		actlr_el2 = read_sysreg(actlr_el2);
 		actlr_el2 |= ACTLR_ELx_XINT;
 		write_sysreg(actlr_el2, actlr_el2);
