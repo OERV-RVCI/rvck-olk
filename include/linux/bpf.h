@@ -304,6 +304,7 @@ struct bpf_map {
 	bool free_after_mult_rcu_gp;
 	KABI_FILL_HOLE(bool free_after_rcu_gp)
 	s64 __percpu *elem_count;
+	u64 cookie; /* write-once */
 
 	KABI_USE(1, atomic64_t sleepable_refcnt)
 	KABI_USE(2, const struct btf_type *attach_func_proto)
