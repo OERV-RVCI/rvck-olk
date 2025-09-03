@@ -303,6 +303,7 @@ struct bpf_map {
 	struct obj_cgroup *objcg;
 #endif
 	char name[BPF_OBJ_NAME_LEN];
+	KABI_FILL_HOLE(u64 cookie)
 	/* The 3rd and 4th cacheline with misc members to avoid false sharing
 	 * particularly with refcounting.
 	 */
@@ -315,14 +316,20 @@ struct bpf_map {
 	};
 	struct mutex freeze_mutex;
 	atomic64_t writecnt;
-	spinlock_t owner_lock;
+	KABI_BROKEN_REPLACE(
+	struct {
+		spinlock_t lock;
+		enum bpf_prog_type type;
+		bool jited;
+		bool xdp_has_frags;
+	} owner,
 	struct bpf_map_owner *owner;
+	spinlock_t owner_lock)
 	bool bypass_spec_v1;
 	bool frozen; /* write-once; write-protected by freeze_mutex */
 	bool free_after_mult_rcu_gp;
 	KABI_FILL_HOLE(bool free_after_rcu_gp)
 	s64 __percpu *elem_count;
-	u64 cookie; /* write-once */
 
 	KABI_USE(1, atomic64_t sleepable_refcnt)
 	KABI_USE(2, const struct btf_type *attach_func_proto)
