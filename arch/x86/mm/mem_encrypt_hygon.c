@@ -20,6 +20,9 @@
 #include <linux/memblock.h>
 #include <linux/cma.h>
 #include <linux/minmax.h>
+#include <linux/sysfs.h>
+#include <linux/kobject.h>
+#include <linux/module.h>
 #include <asm/io.h>
 #include <asm/cacheflush.h>
 #include <asm/set_memory.h>
@@ -194,12 +197,14 @@ EXPORT_SYMBOL_GPL(csv_smr_num);
 #ifdef CONFIG_CMA
 
 struct csv_cma {
+	int nid;
 	int fast;
 	struct cma *cma;
 };
 
 struct cma_array {
 	unsigned long count;
+	atomic64_t csv_free_size;
 	struct csv_cma csv_cma[];
 };
 
@@ -271,11 +276,13 @@ static void __init csv_cma_reserve_mem(void)
 		}
 
 		array->count = 0;
+		atomic64_set(&array->csv_free_size, 0);
 		csv_contiguous_pernuma_area[node] = array;
 
 		for (i = 0; i < count; i++) {
 			csv_cma = &array->csv_cma[i];
 			csv_cma->fast = 1;
+			csv_cma->nid = node;
 			snprintf(name, sizeof(name), "csv-n%dc%d", node, i);
 			ret = cma_declare_contiguous_nid(0, CSV_CMA_SIZE, 0,
 					1 << CSV_MR_ALIGN_BITS, PMD_SHIFT - PAGE_SHIFT,
@@ -285,6 +292,8 @@ static void __init csv_cma_reserve_mem(void)
 					1 << CSV_CMA_SHIFT, node);
 				break;
 			}
+
+			atomic64_add(CSV_CMA_SIZE, &array->csv_free_size);
 
 			if (start > cma_get_base(csv_cma->cma) || !start)
 				start = cma_get_base(csv_cma->cma);
@@ -352,6 +361,7 @@ phys_addr_t csv_alloc_from_contiguous(size_t size, nodemask_t *nodes_allowed,
 	int nid;
 	int nr_nodes;
 	struct page *page = NULL;
+	struct cma_array *array = NULL;
 	phys_addr_t phys_addr;
 	int count;
 	struct csv_cma *csv_cma;
@@ -373,7 +383,7 @@ retry:
 		nid = next_node_in(nid, *nodes_allowed);
 
 	for (; nr_nodes > 0; nid = next_node_in(nid, *nodes_allowed), nr_nodes--) {
-		struct cma_array *array = csv_contiguous_pernuma_area[nid];
+		array = csv_contiguous_pernuma_area[nid];
 
 		if (!array)
 			continue;
@@ -414,6 +424,7 @@ retry:
 	}
 
 success:
+	atomic64_sub(PAGE_ALIGN(size), &array->csv_free_size);
 	phys_addr = page_to_phys(page);
 	clflush_cache_range(__va(phys_addr), size);
 
@@ -424,6 +435,7 @@ EXPORT_SYMBOL_GPL(csv_alloc_from_contiguous);
 void csv_release_to_contiguous(phys_addr_t pa, size_t size)
 {
 	struct csv_cma *csv_cma;
+	struct cma_array *array = NULL;
 	struct page *page = pfn_to_page(pa >> PAGE_SHIFT);
 
 	WARN_ON(!page);
@@ -434,10 +446,109 @@ void csv_release_to_contiguous(phys_addr_t pa, size_t size)
 			page->private = 0;
 			csv_cma->fast = 1;
 			cma_release(csv_cma->cma, page, PAGE_ALIGN(size) >> PAGE_SHIFT);
+			array = csv_contiguous_pernuma_area[csv_cma->nid];
+			atomic64_add(PAGE_ALIGN(size), &array->csv_free_size);
 		}
 	}
 }
 EXPORT_SYMBOL_GPL(csv_release_to_contiguous);
+
+/*
+ * The "free_size" file where the free size of csv cma is read from.
+ */
+static ssize_t free_size_show(struct kobject *kobj,
+					struct kobj_attribute *attr, char *buf)
+{
+	int node;
+	int offset = 0;
+	unsigned long free_size, total_free_size = 0;
+	unsigned long csv_size, total_csv_size = 0;
+	struct cma_array *array = NULL;
+
+	for_each_node_state(node, N_ONLINE) {
+		array = csv_contiguous_pernuma_area[node];
+		if (array == NULL) {
+			csv_size = 0;
+			free_size = 0;
+
+			offset += snprintf(buf + offset, PAGE_SIZE - offset, "Node%d:\n", node);
+			offset += snprintf(buf + offset, PAGE_SIZE - offset,
+						" total: %8lu MiB\n", csv_size);
+			offset += snprintf(buf + offset, PAGE_SIZE - offset,
+						" free:  %8lu MiB\n", free_size);
+			continue;
+		}
+
+		free_size = atomic64_read(&array->csv_free_size);
+		csv_size = array->count * CSV_CMA_SIZE;
+		offset += snprintf(buf + offset, PAGE_SIZE - offset, "Node%d:\n", node);
+		offset += snprintf(buf + offset, PAGE_SIZE - offset,
+					" total: %8lu MiB\n", csv_size >> 20);
+		offset += snprintf(buf + offset, PAGE_SIZE - offset,
+					" free:  %8lu MiB\n", free_size >> 20);
+		total_free_size += free_size;
+		total_csv_size += csv_size;
+	}
+
+	offset += snprintf(buf + offset, PAGE_SIZE - offset, "All Nodes:\n");
+	offset += snprintf(buf + offset, PAGE_SIZE - offset,
+				" total: %8lu MiB\n", total_csv_size >> 20);
+	offset += snprintf(buf + offset, PAGE_SIZE - offset,
+				" free:  %8lu MiB\n", total_free_size >> 20);
+
+	return offset;
+}
+
+static struct kobj_attribute csv_cma_attr = __ATTR(free_size, 0444,	free_size_show, NULL);
+
+/*
+ * Create a group of attributes so that we can create and destroy them all
+ * at once.
+ */
+static struct attribute *csv_cma_attrs[] = {
+	&csv_cma_attr.attr,
+	NULL,	/* need to NULL terminate the list of attributes */
+};
+
+static const struct attribute_group csv_cma_attr_group = {
+	.attrs = csv_cma_attrs,
+};
+
+static struct kobject *csv_cma_kobj_root;
+
+static int __init csv_cma_sysfs_init(void)
+{
+	int err;
+
+	if (!is_x86_vendor_hygon() || !boot_cpu_has(X86_FEATURE_CSV3))
+		return 0;
+
+	csv_cma_kobj_root = kobject_create_and_add("csv3_cma", mm_kobj);
+	if (!csv_cma_kobj_root)
+		return -ENOMEM;
+
+	err = sysfs_create_group(csv_cma_kobj_root, &csv_cma_attr_group);
+	if (err)
+		goto out;
+
+	return 0;
+
+out:
+	kobject_put(csv_cma_kobj_root);
+	return err;
+}
+
+static void __exit csv_cma_sysfs_exit(void)
+{
+	if (!is_x86_vendor_hygon() || !boot_cpu_has(X86_FEATURE_CSV3))
+		return;
+
+	if (csv_cma_kobj_root != NULL)
+		kobject_put(csv_cma_kobj_root);
+}
+
+module_init(csv_cma_sysfs_init);
+module_exit(csv_cma_sysfs_exit);
 
 #else /* !CONFIG_CMA */
 
