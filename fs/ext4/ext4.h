@@ -168,7 +168,7 @@ enum criteria {
 
 	/*
 	 * Reads each block group sequentially, performing disk IO if
-	 * necessary, to find find_suitable block group. Tries to
+	 * necessary, to find suitable block group. Tries to
 	 * allocate goal length but might trim the request if nothing
 	 * is found after enough tries.
 	 */
@@ -196,14 +196,8 @@ enum criteria {
 
 /* prefer goal again. length */
 #define EXT4_MB_HINT_MERGE		0x0001
-/* blocks already reserved */
-#define EXT4_MB_HINT_RESERVED		0x0002
-/* metadata is being allocated */
-#define EXT4_MB_HINT_METADATA		0x0004
 /* first blocks in the file */
 #define EXT4_MB_HINT_FIRST		0x0008
-/* search for the best chunk */
-#define EXT4_MB_HINT_BEST		0x0010
 /* data is being allocated */
 #define EXT4_MB_HINT_DATA		0x0020
 /* don't preallocate (for tails) */
@@ -224,12 +218,6 @@ enum criteria {
 #define EXT4_MB_USE_RESERVED		0x2000
 /* Do strict check for free blocks while retrying block allocation */
 #define EXT4_MB_STRICT_CHECK		0x4000
-/* Large fragment size list lookup succeeded at least once for cr = 0 */
-#define EXT4_MB_CR_POWER2_ALIGNED_OPTIMIZED		0x8000
-/* Avg fragment size rb tree lookup succeeded at least once for cr = 1 */
-#define EXT4_MB_CR_GOAL_LEN_FAST_OPTIMIZED		0x00010000
-/* Avg fragment size rb tree lookup succeeded at least once for cr = 1.5 */
-#define EXT4_MB_CR_BEST_AVAIL_LEN_OPTIMIZED		0x00020000
 
 struct ext4_allocation_request {
 	/* target inode for block we're allocating */
@@ -1179,10 +1167,6 @@ struct ext4_inode_info {
 	__u32 i_csum_seed;
 
 	kprojid_t i_projid;
-
-	/* where last allocation was done - for stream allocation */
-	ext4_group_t i_mb_last_group;
-	ext4_grpblk_t i_mb_last_start;
 };
 
 /*
@@ -1594,16 +1578,14 @@ struct ext4_sb_info {
 	unsigned short *s_mb_offsets;
 	unsigned int *s_mb_maxs;
 	unsigned int s_group_info_size;
-	unsigned int s_mb_free_pending;
-	struct list_head s_freed_data_list;	/* List of blocks to be freed
+	atomic_t s_mb_free_pending;
+	struct list_head s_freed_data_list[2];	/* List of blocks to be freed
 						   after commit completed */
 	struct list_head s_discard_list;
 	struct work_struct s_discard_work;
 	atomic_t s_retry_alloc_pending;
-	struct list_head *s_mb_avg_fragment_size;
-	rwlock_t *s_mb_avg_fragment_size_locks;
-	struct list_head *s_mb_largest_free_orders;
-	rwlock_t *s_mb_largest_free_orders_locks;
+	struct xarray *s_mb_avg_fragment_size;
+	struct xarray *s_mb_largest_free_orders;
 
 	/* tunables */
 	unsigned long s_stripe;
@@ -1619,6 +1601,10 @@ struct ext4_sb_info {
 	unsigned int s_mb_prefetch_limit;
 	unsigned int s_mb_best_avail_max_trim_order;
 
+	/* where last allocation was done - for stream allocation */
+	ext4_group_t *s_mb_last_groups;
+	unsigned int s_mb_nr_global_goals;
+
 	/* stats for buddy allocator */
 	atomic_t s_bal_reqs;	/* number of reqs with len > 1 */
 	atomic_t s_bal_success;	/* we found long enough chunks */
@@ -1627,12 +1613,10 @@ struct ext4_sb_info {
 	atomic_t s_bal_cX_ex_scanned[EXT4_MB_NUM_CRS];	/* total extents scanned */
 	atomic_t s_bal_groups_scanned;	/* number of groups scanned */
 	atomic_t s_bal_goals;	/* goal hits */
+	atomic_t s_bal_stream_goals;	/* stream allocation global goal hits */
 	atomic_t s_bal_len_goals;	/* len goal hits */
 	atomic_t s_bal_breaks;	/* too long searches */
 	atomic_t s_bal_2orders;	/* 2^order hits */
-	atomic_t s_bal_p2_aligned_bad_suggestions;
-	atomic_t s_bal_goal_fast_bad_suggestions;
-	atomic_t s_bal_best_avail_bad_suggestions;
 	atomic64_t s_bal_cX_groups_considered[EXT4_MB_NUM_CRS];
 	atomic64_t s_bal_cX_hits[EXT4_MB_NUM_CRS];
 	atomic64_t s_bal_cX_failed[EXT4_MB_NUM_CRS];		/* cX loop didn't find blocks */
@@ -3436,8 +3420,6 @@ struct ext4_group_info {
 	void            *bb_bitmap;
 #endif
 	struct rw_semaphore alloc_sem;
-	struct list_head bb_avg_fragment_size_node;
-	struct list_head bb_largest_free_order_node;
 	ext4_grpblk_t	bb_counters[];	/* Nr of free power-of-two-block
 					 * regions, index is order.
 					 * bb_counters[3] = 5 means
