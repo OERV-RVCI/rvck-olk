@@ -5,7 +5,8 @@
 #ifndef _EXTEN_CALL_H_
 #define _EXTEN_CALL_H_
 
-#define IP_ADDRESS_LEN_MAX 64
+#include "enfs.h"
+
 #define FILE_UUID_BUFF_LEN 38
 #define MAX_SHARD_NUMBER_IN_CLUSTER_4FS (1024 * 64)
 #define MAX_GLOBAL_CTRL_NODE_NUM 2048
@@ -141,8 +142,6 @@ int dorado_query_dns(struct rpc_clnt *clnt,
 		     int *ipNumber);
 int dorado_query_lsId(struct rpc_clnt *clnt,
 		      struct enfs_get_ls_version_rsp **resDataOut);
-
-#define NFS3PROC_EXTEND 22
 
 #define DIR_BIT_POS 63
 #define NID_BITS_SZ 12
