@@ -5645,7 +5645,7 @@ leapioraid_scsihost_inquiry_vpd_sn(
 			len = strlen(&inq_data[4]) + 1;
 			*serial_number = kmalloc(len, GFP_KERNEL);
 			if (*serial_number)
-				strscpy(*serial_number, &inq_data[4], sizeof(*serial_number));
+				strscpy(*serial_number, &inq_data[4], len);
 		}
 		break;
 	case -EAGAIN:
