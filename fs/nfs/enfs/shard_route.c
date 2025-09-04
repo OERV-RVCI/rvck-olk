@@ -699,28 +699,10 @@ void enfs_print_uuid(struct enfs_file_uuid *file_uuid)
 static int get_uuid_from_task(struct rpc_clnt *clnt, struct rpc_task *task,
 				  struct enfs_file_uuid *file_uuid)
 {
-	// task is one pointer to rpc_task
-	// nfs3_procedure is one pointer to struct rpc_procinfo array
-	// which presents all procedure of nfsv3
-	int i;
 	struct rpc_message *msg = &task->tk_msg;
-	const struct rpc_procinfo *proc = msg->rpc_proc;
+	int cmd = msg->rpc_proc->p_proc;
 	const struct nfs_fh *fh;
 
-	// iterate through the nfs3_procedure array,
-	// find the same index of factor which is command word
-	int cmd = -1;
-	int nfs3proc_count = 22;
-
-	for (i = 0; i < nfs3proc_count; i++) {
-		if (proc == &nfs3_procedures[i]) {
-			cmd = i;
-			break;
-		}
-	}
-
-	if (cmd < 0 || cmd >= nfs3proc_count)
-		return -1;
 	if (cmd >= nfs3_parse_ops_size || nfs3_parse_ops[cmd].parse_fh == NULL)
 		return -1;
 
