@@ -8,6 +8,13 @@
 
 #include <linux/nfs_fs.h>
 
+static inline bool is_enfs_debug(void)
+{
+	ifdebug(ENFS)
+		return true;
+	return false;
+}
+
 #define enfs_log_info(fmt, ...) \
 	pr_info("enfs:[%s]" pr_fmt(fmt), __func__, ##__VA_ARGS__)
 #define enfs_log_error(fmt, ...) \

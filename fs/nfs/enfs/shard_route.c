@@ -681,7 +681,7 @@ void enfs_print_uuid(struct enfs_file_uuid *file_uuid)
 	char buf[80];		/* 80 uuid buf */
 	uint8_t *uuid = file_uuid->data;
 
-	ifdebug(ENFS)
+	if (!is_enfs_debug())
 		return;
 
 	enfs_log_debug("dev:%llu fs:%u dtree:%u snap:%u pfid:%llu fid:%llu\n",
