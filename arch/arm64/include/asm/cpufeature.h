@@ -880,6 +880,7 @@ static inline bool cpus_support_mpam(void)
 }
 
 bool mpam_detect_is_enabled(void);
+bool mpam_only_enable_mb(void);
 
 static inline bool system_supports_haft(void)
 {
