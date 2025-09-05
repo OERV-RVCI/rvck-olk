@@ -119,10 +119,9 @@ static int enfs_find_clnt_root(struct rpc_clnt *clnt, struct enfs_file_uuid *roo
 
 	read_lock(&shard_ctrl->clnt_info_lock);
 	list_for_each_entry(info, &shard_ctrl->clnt_info_list, next) {
-		if (info->clnt == clnt) {
-			*root_uuid = info->root_uuid;
+		if (info->clnt == clnt &&
+		    !memcmp(root_uuid, &info->root_uuid, sizeof(*root_uuid)))
 			goto out;
-		}
 	}
 	ret = -1;
 
@@ -668,9 +667,7 @@ static int query_and_update_shard(struct rpc_clnt *clnt, struct enfs_file_uuid *
 
 static void insert_and_update_shard(struct rpc_clnt *clnt, struct enfs_file_uuid *file_uuid)
 {
-	struct enfs_file_uuid root_uuid;
-
-	if (enfs_find_clnt_root(clnt, &root_uuid) != 0) {
+	if (enfs_find_clnt_root(clnt, file_uuid) != 0) {
 		enfs_insert_clnt_root(clnt, file_uuid);
 		query_and_update_shard(clnt, file_uuid, NULL);
 	}
