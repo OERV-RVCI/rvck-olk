@@ -19,6 +19,7 @@ struct cca_operations {
 	int (*enable_cap)(struct kvm *kvm, struct kvm_enable_cap *cap);
 	int (*init_realm_vm)(struct kvm *kvm);
 	int (*realm_vm_enter)(struct kvm_vcpu *vcpu);
+	int (*realm_vm_pre_enter)(struct kvm_vcpu *vcpu);
 	int (*realm_vm_exit)(struct kvm_vcpu *vcpu, int ret);
 	void (*init_sel2_hypervisor)(void);
 	int (*psci_complete)(struct kvm_vcpu *calling, struct kvm_vcpu *target,
@@ -45,6 +46,7 @@ int kvm_realm_enable_cap(struct kvm *kvm, struct kvm_enable_cap *cap);
 void kvm_init_rme(void);
 
 int kvm_rec_enter(struct kvm_vcpu *vcpu);
+int kvm_rec_pre_enter(struct kvm_vcpu *vcpu);
 int handle_rec_exit(struct kvm_vcpu *vcpu, int rec_run_ret);
 
 int kvm_init_realm_vm(struct kvm *kvm);
