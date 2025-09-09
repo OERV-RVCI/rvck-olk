@@ -715,6 +715,41 @@ static void udma_free_hugepage(struct udma_dev *dev, struct udma_hugepage *hugep
 	kfree(hugepage);
 }
 
+int udma_k_alloc_buf(struct udma_dev *dev, struct udma_buf *buf)
+{
+	uint32_t size = buf->entry_size * buf->entry_cnt;
+	uint32_t hugepage_size;
+	int ret = 0;
+
+	if (ubase_adev_prealloc_supported(dev->comdev.adev)) {
+		hugepage_size = ALIGN(size, UDMA_HW_PAGE_SIZE);
+		buf->hugepage = udma_alloc_hugepage(dev, hugepage_size);
+		if (buf->hugepage) {
+			buf->kva = buf->hugepage->va_start;
+			buf->addr = (uint64_t)buf->kva;
+			buf->is_hugepage = true;
+		} else {
+			dev_warn(dev->dev,
+				 "failed to alloc hugepage buf, switch to alloc normal buf.");
+			ret = udma_alloc_normal_buf(dev, size, buf);
+		}
+	} else {
+		ret = udma_alloc_normal_buf(dev, size, buf);
+	}
+
+	return ret;
+}
+
+void udma_k_free_buf(struct udma_dev *dev, struct udma_buf *buf)
+{
+	uint32_t size = buf->entry_cnt * buf->entry_size;
+
+	if (buf->is_hugepage)
+		udma_free_hugepage(dev, buf->hugepage);
+	else
+		udma_free_normal_buf(dev, size, buf);
+}
+
 void *udma_alloc_iova(struct udma_dev *udma_dev, size_t memory_size, dma_addr_t *addr)
 {
 	struct iova_slot *slot;
