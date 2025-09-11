@@ -108,6 +108,7 @@ int _kvm_create_rec(struct kvm_vcpu *vcpu);
 void _kvm_destroy_rec(struct kvm_vcpu *vcpu);
 
 int _kvm_rec_enter(struct kvm_vcpu *vcpu);
+int _kvm_rec_pre_enter(struct kvm_vcpu *vcpu);
 int _handle_rec_exit(struct kvm_vcpu *vcpu, int rec_run_status);
 
 void kvm_realm_unmap_range(struct kvm *kvm,
