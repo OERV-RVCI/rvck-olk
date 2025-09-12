@@ -184,7 +184,6 @@ static void pm_ping_execute_work(struct work_struct *work)
 	rpc_release_client(work_info->clnt);
 	xprt_put(work_info->xprt);
 	kfree(work_info);
-	work_info = NULL;
 }
 
 static bool pm_ping_workqueue_queue_work(struct work_struct *work)

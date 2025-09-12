@@ -775,7 +775,7 @@ int dorado_query_lsId(struct rpc_clnt *clnt, struct enfs_get_ls_version_rsp **re
 
 	// another err handle
 	if (ret) {
-		enfs_log_error("get fsInfo failed %d.\n", ret);
+		enfs_log_error("get extent failed %d.\n", ret);
 		kfree(args);
 		kfree(buf);
 		return ret;

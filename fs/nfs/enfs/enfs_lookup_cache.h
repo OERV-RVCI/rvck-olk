@@ -10,7 +10,6 @@
 #include <linux/nfs_fs.h>
 #include <linux/sunrpc/clnt.h>
 
-#define FILE_UUID_BUFF_LEN 38
 #define MAX_EXPID_LEN 32
 #define MAX_EXPSTR_LEN (MAX_EXPID_LEN * 2 + 1)
 #define ENFS_LOOKUP_CACHE_LEVEL 0

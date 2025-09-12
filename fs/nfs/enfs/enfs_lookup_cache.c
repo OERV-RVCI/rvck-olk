@@ -189,18 +189,15 @@ int enfs_query_lookup_cache(struct lookupcache_work *work_info)
 			if (pos != work_info->server)
 				continue;
 
-			if (!pos->super ||
-			    !(pos->super->s_flags & ENFS_LOOKUP_ACTIVE) ||
-			    !pos->super->s_root) {
-				break;
-			}
-
 			super = pos->super;
 			if (!super)
 				break;
 
 			s_root = super->s_root;
 			if (!s_root)
+				break;
+
+			if (!(pos->super->s_flags & ENFS_LOOKUP_ACTIVE))
 				break;
 
 			if (atomic_read(&super->s_active) == 0)
