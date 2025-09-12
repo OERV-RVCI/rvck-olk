@@ -96,8 +96,9 @@ static struct iopf_group *iopf_group_alloc(struct iommu_fault_param *iopf_param,
 		 * the request at the driver if it can't be handled.
 		 */
 		group = abort_group;
+	} else {
+		group = &group_extend->iopf_group;
 	}
-	group = &group_extend->iopf_group;
 
 	group->fault_param = iopf_param;
 	group->last_fault.fault = evt->fault;
