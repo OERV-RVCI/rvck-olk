@@ -81,10 +81,12 @@ u64 tmi_cvm_activate(u64 rd)
 	return res.a1;
 }
 
-u64 tmi_cvm_create(u64 params_ptr, u64 numa_set)
+u64 tmi_cvm_create(u64 params_ptr, u64 numa_set, bool vtimer_adjust)
 {
 	struct arm_smccc_res res;
 
+	/* vtimer_adjust enable to reduce vtimer irq */
+	params_ptr = params_ptr | (vtimer_adjust ? 1UL : 0UL);
 	arm_smccc_1_1_smc(TMI_TMM_CVM_CREATE, params_ptr, numa_set, &res);
 	return res.a1;
 }

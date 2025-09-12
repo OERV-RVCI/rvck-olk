@@ -177,11 +177,12 @@ static void timer_set_cval(struct arch_timer_context *ctxt, u64 cval)
 }
 
 #ifdef CONFIG_HISI_VIRTCCA_HOST
+
 static bool cvm_timer_irq_can_fire(struct arch_timer_context *timer_ctx)
 {
 	return timer_ctx &&
 		   ((timer_get_ctl(timer_ctx) &
-		    (ARCH_TIMER_CTRL_IT_MASK | ARCH_TIMER_CTRL_ENABLE)) == ARCH_TIMER_CTRL_ENABLE);
+		    (ARCH_TIMER_CTRL_ENABLE)) == ARCH_TIMER_CTRL_ENABLE);
 }
 
 void kvm_cvm_timers_update(struct kvm_vcpu *vcpu)

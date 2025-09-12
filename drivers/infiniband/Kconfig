@@ -87,6 +87,14 @@ config INFINIBAND_PEER_MEMORY
 config INFINIBAND_VIRT_DMA
 	def_bool !HIGHMEM
 
+config IB_CORE_CQ_POLL
+	tristate "Add InfiniBand cq poll method"
+	depends on INFINIBAND && ARM64 && HISI_VIRTCCA_GUEST
+	default m
+	help
+	  Add infiniband core cq poll method to acceleration
+	  rdma cq process.
+
 if INFINIBAND_USER_ACCESS || !INFINIBAND_USER_ACCESS
 if !UML
 source "drivers/infiniband/hw/bnxt_re/Kconfig"

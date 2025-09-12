@@ -7,6 +7,9 @@
 #include <rdma/ib_verbs.h>
 
 #include "core_priv.h"
+#ifdef CONFIG_HISI_VIRTCCA_GUEST
+#include "ib_core_cq.h"
+#endif
 
 #include <trace/events/rdma_core.h>
 /* Max size for shared CQ, may require tuning */
@@ -195,6 +198,46 @@ static void ib_cq_completion_workqueue(struct ib_cq *cq, void *private)
 	queue_work(cq->comp_wq, &cq->work);
 }
 
+#ifdef CONFIG_HISI_VIRTCCA_GUEST
+static struct polling_kthread ib_cq_polling_kthread;
+
+struct polling_kthread *get_kthread_polling_ctx(void)
+{
+	return &ib_cq_polling_kthread;
+}
+EXPORT_SYMBOL(get_kthread_polling_ctx);
+
+int ib_poll_cq_thread(void *data)
+{
+	int completed;
+	struct ib_wc wcs[IB_POLL_BATCH];
+	struct ib_cq *cq = (struct ib_cq *)data;
+	struct polling_kthread *ctx = get_kthread_polling_ctx();
+
+	memcpy(wcs, cq->wc, sizeof(wcs));
+	completed = __ib_process_cq(cq, IB_POLL_BUDGET_WORKQUEUE, wcs,
+					IB_POLL_BATCH);
+	if (ctx->debug_cq_poll_stat)
+		ctx->cqe_polling_cnt += completed;
+	return completed;
+}
+EXPORT_SYMBOL(ib_poll_cq_thread);
+
+static void ib_cq_add_to_poll_list(struct ib_cq *cq)
+{
+	if (ib_cq_polling_kthread.use_polling_kthread) {
+		cq->poll_ctx = IB_POLL_DIRECT;
+		ib_cq_polling_kthread.add_to_poll_list(cq);
+	}
+}
+
+static void ib_cq_del_from_poll_list(struct ib_cq *cq)
+{
+	if (ib_cq_polling_kthread.use_polling_kthread)
+		ib_cq_polling_kthread.del_from_poll_list(cq);
+}
+#endif
+
 /**
  * __ib_alloc_cq - allocate a completion queue
  * @dev:		device to allocate the CQ for
@@ -242,6 +285,10 @@ struct ib_cq *__ib_alloc_cq(struct ib_device *dev, void *private, int nr_cqe,
 		goto out_free_wc;
 
 	rdma_dim_init(cq);
+
+#ifdef CONFIG_HISI_VIRTCCA_GUEST
+	ib_cq_add_to_poll_list(cq);
+#endif
 
 	switch (cq->poll_ctx) {
 	case IB_POLL_DIRECT:
@@ -337,6 +384,10 @@ void ib_free_cq(struct ib_cq *cq)
 	default:
 		WARN_ON_ONCE(1);
 	}
+
+#ifdef CONFIG_HISI_VIRTCCA_GUEST
+	ib_cq_del_from_poll_list(cq);
+#endif
 
 	rdma_dim_destroy(cq);
 	trace_cq_free(cq);

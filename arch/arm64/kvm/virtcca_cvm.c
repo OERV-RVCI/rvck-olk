@@ -23,6 +23,7 @@
 static DEFINE_SPINLOCK(cvm_vmid_lock);
 static unsigned long *cvm_vmid_bitmap;
 DECLARE_STATIC_KEY_FALSE(virtcca_cvm_is_enable);
+static bool virtcca_vtimer_adjust;
 #define SIMD_PAGE_SIZE 0x3000
 #define UEFI_MAX_SIZE 0x8000000
 #define UEFI_DTB_START 0x40000000
@@ -167,7 +168,7 @@ int kvm_arm_create_cvm(struct kvm *kvm)
 	cvm->params->ns_vtcr = kvm->arch.vtcr;
 	cvm->params->vttbr_el2 = kvm->arch.mmu.pgd_phys;
 	memcpy(cvm->params->rpv, &cvm->cvm_vmid, sizeof(cvm->cvm_vmid));
-	cvm->rd = tmi_cvm_create(__pa(cvm->params), numa_set);
+	cvm->rd = tmi_cvm_create(__pa(cvm->params), numa_set, virtcca_vtimer_adjust);
 	if (!cvm->rd) {
 		kvm_err("KVM creates cVM failed: %d\n", cvm->cvm_vmid);
 		ret = -ENOMEM;
@@ -754,10 +755,50 @@ static int tmi_check_version(void)
 			 version_minor);
 		return -ENXIO;
 	}
+	if (version_minor < TMI_ABI_VERSION_MINOR)
+		virtcca_vtimer_adjust = false;
+	else
+		virtcca_vtimer_adjust = true;
 
 	kvm_info("TMI ABI version %d,%d\n", version_major, version_minor);
 	return 0;
 }
+
+static struct cpumask cvm_wfx_no_trap_mask;
+static DEFINE_SPINLOCK(cvm_wfx_config_lock);
+
+static ssize_t cvm_wfx_trap_config_store(struct kobject *kobj,
+								struct kobj_attribute *attr,
+								const char *buf, size_t count)
+{
+	spin_lock(&cvm_wfx_config_lock);
+	if (cpumask_parse(buf, &cvm_wfx_no_trap_mask) < 0)
+		return -EINVAL;
+	spin_unlock(&cvm_wfx_config_lock);
+
+	return count;
+}
+
+static ssize_t cvm_wfx_trap_config_show(struct kobject *kobj,
+								struct kobj_attribute *attr,
+								char *buf)
+{
+	int ret;
+
+	ret = scnprintf(buf, PAGE_SIZE, "%*pb\n", cpumask_pr_args(&cvm_wfx_no_trap_mask));
+
+	return ret;
+}
+
+static struct kobj_attribute cvm_wfx_trap_config_attr = __ATTR_RW(cvm_wfx_trap_config);
+
+static int __init cvm_wfx_trap_config_init(void)
+{
+	cpumask_clear(&cvm_wfx_no_trap_mask);
+
+	return sysfs_create_file(kernel_kobj, &cvm_wfx_trap_config_attr.attr);
+}
+late_initcall(cvm_wfx_trap_config_init);
 
 int kvm_tec_enter(struct kvm_vcpu *vcpu)
 {
@@ -770,12 +811,14 @@ int kvm_tec_enter(struct kvm_vcpu *vcpu)
 		return -EINVAL;
 
 	/* set/clear TWI TWE flags */
-	if (vcpu->arch.hcr_el2 & HCR_TWI)
+	if ((vcpu->arch.hcr_el2 & HCR_TWI) &&
+		!cpumask_test_cpu(vcpu->vcpu_id, &cvm_wfx_no_trap_mask))
 		run->enter.flags |= TEC_ENTRY_FLAG_TRAP_WFI;
 	else
 		run->enter.flags &= ~TEC_ENTRY_FLAG_TRAP_WFI;
 
-	if (vcpu->arch.hcr_el2 & HCR_TWE)
+	if ((vcpu->arch.hcr_el2 & HCR_TWE) &&
+		!cpumask_test_cpu(vcpu->vcpu_id, &cvm_wfx_no_trap_mask))
 		run->enter.flags |= TEC_ENTRY_FLAG_TRAP_WFE;
 	else
 		run->enter.flags &= ~TEC_ENTRY_FLAG_TRAP_WFE;

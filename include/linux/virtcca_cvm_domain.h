@@ -6,21 +6,13 @@
 #ifndef __VIRTCCA_CVM_DOMAIN_H
 #define __VIRTCCA_CVM_DOMAIN_H
 #include <linux/device.h>
-#ifdef CONFIG_HISI_VIRTCCA_GUEST
+#include <linux/virtcca_cvm_sched.h>
 
-#include <asm/virtcca_cvm_guest.h>
-static inline bool virtcca_cvm_domain(void)
-{
-	return is_virtcca_cvm_world();
-}
+#ifdef CONFIG_HISI_VIRTCCA_GUEST
 
 extern void enable_swiotlb_for_cvm_dev(struct device *dev, bool enable);
 
 #else
-static inline bool virtcca_cvm_domain(void)
-{
-	return false;
-}
 
 static inline void enable_swiotlb_for_cvm_dev(struct device *dev, bool enable) {}
 
