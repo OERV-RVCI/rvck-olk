@@ -327,8 +327,7 @@ int virtcca_create_vdev(struct device *dev)
 bool is_virtcca_secure_vf(struct device *dev, struct device_driver *drv)
 {
 	if (is_virtcca_pci_cc_dev(dev) &&
-	    strcmp(drv->name, "vfio-pci") &&
-	    to_pci_dev(dev) != pci_physfn(to_pci_dev(dev)))
+	    strcmp(drv->name, "vfio-pci"))
 		return true;
 	return false;
 }

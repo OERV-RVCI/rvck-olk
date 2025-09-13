@@ -881,18 +881,33 @@ static int virtcca_create_cc_dev_ste(struct arm_smmu_device *smmu, struct pci_de
 	return ret;
 }
 
-/* Unbind the VF's driver before switching to secure state */
-static int virtcca_unbind_vf_driver(struct pci_dev **pdevs, uint16_t nr)
+/* Unbind the drivers before switching to secure state.
+ * In SR-IOV scenaios： Unbind all VFs' native drivers.
+ * Otherwise: Unbind the PF's native drivers.
+ */
+static int virtcca_unbind_drivers(struct pci_dev **pdevs, uint16_t nr)
 {
+	bool is_sriov = false;
+
 	for (uint16_t i = 0; i < nr; i++) {
 		if (!pdevs[i])
 			return -EINVAL;
+		if (pdevs[i] == pci_physfn(pdevs[i]))
+			continue;
+		is_sriov = true;
 		/* Only unbind the VF with its own driver */
-		if (pdevs[i] == pci_physfn(pdevs[i]) ||
-		    !pdevs[i]->driver ||
+		if (!pdevs[i]->driver ||
 		    !strcmp(pdevs[i]->driver->name, "vfio-pci"))
 			continue;
 		device_release_driver(&pdevs[i]->dev);
+	}
+
+	if (is_sriov)
+		return 0;
+	for (uint16_t i = 0; i < nr; i++) {
+		if (pdevs[i] == pci_physfn(pdevs[i]) && pdevs[i]->driver
+		    && strcmp(pdevs[i]->driver->name, "vfio-pci"))
+			device_release_driver(&pdevs[i]->dev);
 	}
 	return 0;
 }
@@ -961,7 +976,7 @@ static int virtcca_attach_each_dev_to_cvm(struct device *dev, void *domain)
 		goto out;
 
 	if (!is_cc_root_bd(get_root_bd(dev)))
-		ret = virtcca_unbind_vf_driver(pdevs, params->num_dev);
+		ret = virtcca_unbind_drivers(pdevs, params->num_dev);
 	if (ret)
 		goto out;
 
