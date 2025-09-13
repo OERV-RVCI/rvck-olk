@@ -671,7 +671,7 @@ out:
 
 static int get_cluster_rxq(struct oecls_numa_bound_dev_info *bound_dev)
 {
-	int cpu = smp_processor_id();
+	int cpu = raw_smp_processor_id();
 	int cluster_id = cpu / oecls_cluster_cpu_num;
 	int i, j, rxq_id;
 
@@ -796,7 +796,7 @@ static int init_oecls_numa_info(void)
 		return ret;
 	}
 
-	oecls_cluster_cpu_num = cpumask_weight(topology_cluster_cpumask(smp_processor_id()));
+	oecls_cluster_cpu_num = cpumask_weight(topology_cluster_cpumask(raw_smp_processor_id()));
 	oecls_cluster_per_numa = (nr_cpu_ids / oecls_cluster_cpu_num) / oecls_numa_num;
 	oecls_debug("oecls_numa_num=%d cluster_cpu_num:%d cluster_cpu_num:%d\n",
 		    oecls_numa_num, oecls_cluster_per_numa, oecls_cluster_cpu_num);
@@ -1040,9 +1040,12 @@ static __init int oecls_init(void)
 #endif
 
 	if (mode == 0)
-		oecls_ntuple_res_init();
+		err = oecls_ntuple_res_init();
 	else
-		oecls_flow_res_init();
+		err = oecls_flow_res_init();
+
+	if (err)
+		goto clean_rxq;
 
 	return 0;
 

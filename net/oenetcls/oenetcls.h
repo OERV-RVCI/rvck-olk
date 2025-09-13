@@ -121,6 +121,16 @@ struct rmgr_ctrl {
 	__u32				size;
 };
 
+struct cfg_param {
+	struct work_struct work;
+	struct cmd_context ctx;
+	struct oecls_sk_rule *rule;
+	struct sock *sk;
+	bool is_del;
+	int devid;
+	int nid;
+};
+
 extern int match_ip_flag;
 extern int debug;
 extern int oecls_netdev_num;
@@ -169,9 +179,9 @@ int check_appname(char *task_name);
 int send_ethtool_ioctl(struct cmd_context *ctx, void *cmd);
 int alloc_rxq_id(int nid, int devid);
 void free_rxq_id(int nid, int devid, int rxq_id);
-void oecls_ntuple_res_init(void);
+int oecls_ntuple_res_init(void);
 void oecls_ntuple_res_clean(void);
-void oecls_flow_res_init(void);
+int oecls_flow_res_init(void);
 void oecls_flow_res_clean(void);
 
 #endif	/* _NET_OENETCLS_H */
