@@ -20,7 +20,6 @@
 
 static struct task_struct *lookupcache_thread;
 static struct workqueue_struct *lookupcache_workq;
-static spinlock_t lookupcache_workq_lock;
 static spinlock_t g_lookupcache_switch_lock;
 static int g_lookupcache_switch = ENFS_LOOKUPCACHE_ENABLE;
 static ktime_t start_query_lookup = { 0 };
@@ -285,19 +284,6 @@ stop:
 	work_info = NULL;
 }
 
-bool lookupcache_workqueue_queue_work(struct work_struct *work)
-{
-	bool ret = false;
-
-	spin_lock(&lookupcache_workq_lock);
-
-	if (lookupcache_workq != NULL)
-		ret = queue_work(lookupcache_workq, work);
-
-	spin_unlock(&lookupcache_workq_lock);
-	return ret;
-}
-
 int lookupcache_add_work(struct nfs_fh *fh, struct nfs_server *server,
 			 struct list_head *head)
 {
@@ -337,7 +323,7 @@ int lookupcache_add_work(struct nfs_fh *fh, struct nfs_server *server,
 
 	INIT_WORK(&work_info->work_lookup, lookupcache_execute_work);
 
-	ret = lookupcache_workqueue_queue_work(&work_info->work_lookup);
+	ret = queue_work(lookupcache_workq, &work_info->work_lookup);
 	if (!ret) {
 		item->clnt = work_info->cl_rpcclient;
 		list_add_tail(&item->node, head);
@@ -466,33 +452,21 @@ int lookupcache_start(void)
 
 int enfs_lookupcache_workqueue_init(void)
 {
-	struct workqueue_struct *queue = NULL;
-
-	queue = create_workqueue("enfs_lookupcache_workqueue");
-	if (queue == NULL) {
+	lookupcache_workq = create_workqueue("enfs_lookupcache_workqueue");
+	if (!lookupcache_workq) {
 		enfs_log_error("create enfs_lookupcache workqueue failed.\n");
 		return -ENOMEM;
 	}
 
-	spin_lock(&lookupcache_workq_lock);
-	lookupcache_workq = queue;
-	spin_unlock(&lookupcache_workq_lock);
 	return 0;
 }
 
 void lookupcache_workqueue_fini(void)
 {
-	struct workqueue_struct *queue = NULL;
-
-	spin_lock(&lookupcache_workq_lock);
-	queue = lookupcache_workq;
-	lookupcache_workq = NULL;
-	spin_unlock(&lookupcache_workq_lock);
-
 	enfs_log_debug("delete work queue\n");
 
-	if (queue != NULL)
-		destroy_workqueue(queue);
+	if (lookupcache_workq)
+		destroy_workqueue(lookupcache_workq);
 }
 
 int enfs_lookupcache_timer_init(void)
