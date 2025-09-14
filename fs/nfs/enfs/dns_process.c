@@ -945,8 +945,6 @@ void enfs_dns_exit(void)
 	if (dns_thread)
 		kthread_stop(dns_thread);
 
-	if (dns_workq) {
-		flush_workqueue(dns_workq);
+	if (dns_workq)
 		destroy_workqueue(dns_workq);
-	}
 }

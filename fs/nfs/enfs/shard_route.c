@@ -1836,10 +1836,8 @@ void enfs_shard_exit(void)
 	if (shard_thread)
 		kthread_stop(shard_thread);
 
-	if (shard_workq) {
-		flush_workqueue(shard_workq);
+	if (shard_workq)
 		destroy_workqueue(shard_workq);
-	}
 
 	if (shard_ctrl)
 		enfs_shard_ctrl_clear();

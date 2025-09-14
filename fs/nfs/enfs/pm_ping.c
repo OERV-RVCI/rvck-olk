@@ -381,10 +381,8 @@ static void pm_ping_workqueue_fini(void)
 
 	enfs_log_info("delete work queue\n");
 
-	if (queue != NULL) {
-		flush_workqueue(queue);
+	if (queue != NULL)
 		destroy_workqueue(queue);
-	}
 }
 
 // module exit func

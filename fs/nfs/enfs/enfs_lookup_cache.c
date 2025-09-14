@@ -491,10 +491,8 @@ void lookupcache_workqueue_fini(void)
 
 	enfs_log_debug("delete work queue\n");
 
-	if (queue != NULL) {
-		flush_workqueue(queue);
+	if (queue != NULL)
 		destroy_workqueue(queue);
-	}
 }
 
 int enfs_lookupcache_timer_init(void)
