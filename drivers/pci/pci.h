@@ -845,4 +845,10 @@ static inline pci_power_t mid_pci_get_power_state(struct pci_dev *pdev)
 	(PCI_CONF1_ADDRESS(bus, dev, func, reg) | \
 	 PCI_CONF1_EXT_REG(reg))
 
+#ifdef CONFIG_ARCH_PHYTIUM
+#define PHYTIUM_PCIE_HOTRESET 0
+#define PHYTIUM_PCIE_HOTPLUG 1
+	void phytium_clear_ctrl_prot(struct pci_dev *pdev, int op);
+#endif
+
 #endif /* DRIVERS_PCI_H */
