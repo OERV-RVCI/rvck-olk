@@ -80,7 +80,7 @@ int kvm_rec_pre_enter(struct kvm_vcpu *vcpu)
 {
 	if (g_cca_operations[cca_cvm_type]->realm_vm_pre_enter)
 		return g_cca_operations[cca_cvm_type]->realm_vm_pre_enter(vcpu);
-	return 0;
+	return 1;
 }
 
 int handle_rec_exit(struct kvm_vcpu *vcpu, int rec_run_ret)
