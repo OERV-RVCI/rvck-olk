@@ -93,7 +93,7 @@ int f2fs_build_fault_attr(struct f2fs_sb_info *sbi, unsigned long rate,
 #endif
 
 /* f2fs-wide shrinker description */
-static struct shrinker *f2fs_shrinker_info;
+static struct shrinker_v2 *f2fs_shrinker_info;
 
 static int __init f2fs_init_shrinker(void)
 {

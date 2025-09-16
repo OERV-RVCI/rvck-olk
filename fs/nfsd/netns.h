@@ -195,7 +195,7 @@ struct nfsd_net {
 	/* size of cache when we saw the longest hash chain */
 	unsigned int             longest_chain_cachesize;
 
-	struct shrinker		*nfsd_reply_cache_shrinker;
+	KABI_DEPRECATE(struct shrinker, nfsd_reply_cache_shrinker)
 
 	/* tracking server-to-server copy mounts */
 	spinlock_t              nfsd_ssc_lock;
@@ -213,8 +213,11 @@ struct nfsd_net {
 	int			nfs4_max_clients;
 
 	atomic_t		nfsd_courtesy_clients;
-	struct shrinker		*nfsd_client_shrinker;
+	KABI_DEPRECATE(struct shrinker, nfsd_client_shrinker)
 	struct work_struct	nfsd_shrinker_work;
+
+	KABI_EXTEND(struct shrinker_v2 *nfsd_reply_cache_shrinker)
+	KABI_EXTEND(struct shrinker_v2 *nfsd_client_shrinker)
 };
 
 /* Simple check to find out if a given net was properly initialized */

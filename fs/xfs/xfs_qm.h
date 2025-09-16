@@ -63,11 +63,13 @@ struct xfs_quotainfo {
 	struct xfs_def_quota	qi_usr_default;
 	struct xfs_def_quota	qi_grp_default;
 	struct xfs_def_quota	qi_prj_default;
-	struct shrinker		*qi_shrinker;
+	KABI_DEPRECATE(struct shrinker, qi_shrinker)
 
 	/* Minimum and maximum quota expiration timestamp values. */
 	time64_t		qi_expiry_min;
 	time64_t		qi_expiry_max;
+
+	KABI_EXTEND(struct shrinker_v2 *qi_shrinker)
 };
 
 static inline struct radix_tree_root *

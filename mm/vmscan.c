@@ -7597,3 +7597,26 @@ void check_move_unevictable_folios(struct folio_batch *fbatch)
 	}
 }
 EXPORT_SYMBOL_GPL(check_move_unevictable_folios);
+
+int register_shrinker(struct shrinker *shrinker, const char *fmt, ...)
+{
+	pr_warn_once("%s interface is deprecated. Please use instead shrinker_register()\n",
+		     __func__);
+	return  -ENOSYS;
+}
+EXPORT_SYMBOL(register_shrinker);
+
+void unregister_shrinker(struct shrinker *shrinker)
+{
+	pr_warn_once("%s interface is deprecated. Please use instead shrinker_free()\n",
+		     __func__);
+}
+EXPORT_SYMBOL(unregister_shrinker);
+
+void synchronize_shrinkers(void)
+{
+	pr_warn_once("%s interface is deprecated. Please use instead a rw semaphore.\n"
+		     "See ttm_pool_synchronize_shrinkers() at drivers/gpu/drm/ttm/ttm_pool.c.\n",
+		     __func__);
+}
+EXPORT_SYMBOL(synchronize_shrinkers);

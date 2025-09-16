@@ -187,7 +187,7 @@ struct dmz_metadata {
 	struct rb_root		mblk_rbtree;
 	struct list_head	mblk_lru_list;
 	struct list_head	mblk_dirty_list;
-	struct shrinker		*mblk_shrinker;
+	struct shrinker_v2		*mblk_shrinker;
 
 	/* Zone allocation management */
 	struct mutex		map_lock;
@@ -612,7 +612,7 @@ static unsigned long dmz_shrink_mblock_cache(struct dmz_metadata *zmd,
 /*
  * For mblock shrinker: get the number of unused metadata blocks in the cache.
  */
-static unsigned long dmz_mblock_shrinker_count(struct shrinker *shrink,
+static unsigned long dmz_mblock_shrinker_count(struct shrinker_v2 *shrink,
 					       struct shrink_control *sc)
 {
 	struct dmz_metadata *zmd = shrink->private_data;
@@ -623,7 +623,7 @@ static unsigned long dmz_mblock_shrinker_count(struct shrinker *shrink,
 /*
  * For mblock shrinker: scan unused metadata blocks and shrink the cache.
  */
-static unsigned long dmz_mblock_shrinker_scan(struct shrinker *shrink,
+static unsigned long dmz_mblock_shrinker_scan(struct shrinker_v2 *shrink,
 					      struct shrink_control *sc)
 {
 	struct dmz_metadata *zmd = shrink->private_data;

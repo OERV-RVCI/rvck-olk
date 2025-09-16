@@ -181,7 +181,7 @@ static void super_wake(struct super_block *sb, unsigned int flag)
  * shrinker path and that leads to deadlock on the shrinker_mutex. Hence we
  * take a passive reference to the superblock to avoid this from occurring.
  */
-static unsigned long super_cache_scan(struct shrinker *shrink,
+static unsigned long super_cache_scan(struct shrinker_v2 *shrink,
 				      struct shrink_control *sc)
 {
 	struct super_block *sb;
@@ -238,7 +238,7 @@ static unsigned long super_cache_scan(struct shrinker *shrink,
 	return freed;
 }
 
-static unsigned long super_cache_count(struct shrinker *shrink,
+static unsigned long super_cache_count(struct shrinker_v2 *shrink,
 				       struct shrink_control *sc)
 {
 	struct super_block *sb;

@@ -170,7 +170,7 @@ static enum lru_status gfs2_qd_isolate(struct list_head *item,
 	return status;
 }
 
-static unsigned long gfs2_qd_shrink_scan(struct shrinker *shrink,
+static unsigned long gfs2_qd_shrink_scan(struct shrinker_v2 *shrink,
 					 struct shrink_control *sc)
 {
 	LIST_HEAD(dispose);
@@ -187,13 +187,13 @@ static unsigned long gfs2_qd_shrink_scan(struct shrinker *shrink,
 	return freed;
 }
 
-static unsigned long gfs2_qd_shrink_count(struct shrinker *shrink,
+static unsigned long gfs2_qd_shrink_count(struct shrinker_v2 *shrink,
 					  struct shrink_control *sc)
 {
 	return vfs_pressure_ratio(list_lru_shrink_count(&gfs2_qd_lru, sc));
 }
 
-static struct shrinker *gfs2_qd_shrinker;
+static struct shrinker_v2 *gfs2_qd_shrinker;
 
 int __init gfs2_qd_shrinker_init(void)
 {

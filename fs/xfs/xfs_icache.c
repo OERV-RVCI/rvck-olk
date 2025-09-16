@@ -2170,7 +2170,7 @@ xfs_inode_mark_reclaimable(
 
 static unsigned long
 xfs_inodegc_shrinker_count(
-	struct shrinker		*shrink,
+	struct shrinker_v2		*shrink,
 	struct shrink_control	*sc)
 {
 	struct xfs_mount	*mp = shrink->private_data;
@@ -2191,7 +2191,7 @@ xfs_inodegc_shrinker_count(
 
 static unsigned long
 xfs_inodegc_shrinker_scan(
-	struct shrinker		*shrink,
+	struct shrinker_v2		*shrink,
 	struct shrink_control	*sc)
 {
 	struct xfs_mount	*mp = shrink->private_data;

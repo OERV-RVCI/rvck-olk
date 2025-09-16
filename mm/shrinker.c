@@ -222,7 +222,7 @@ void set_shrinker_bit(struct mem_cgroup *memcg, int nid, int shrinker_id)
 
 static DEFINE_IDR(shrinker_idr);
 
-static int shrinker_memcg_alloc(struct shrinker *shrinker)
+static int shrinker_memcg_alloc(struct shrinker_v2 *shrinker)
 {
 	int id, ret = -ENOMEM;
 
@@ -247,7 +247,7 @@ unlock:
 	return ret;
 }
 
-static void shrinker_memcg_remove(struct shrinker *shrinker)
+static void shrinker_memcg_remove(struct shrinker_v2 *shrinker)
 {
 	int id = shrinker->id;
 
@@ -258,7 +258,7 @@ static void shrinker_memcg_remove(struct shrinker *shrinker)
 	idr_remove(&shrinker_idr, id);
 }
 
-static long xchg_nr_deferred_memcg(int nid, struct shrinker *shrinker,
+static long xchg_nr_deferred_memcg(int nid, struct shrinker_v2 *shrinker,
 				   struct mem_cgroup *memcg)
 {
 	struct shrinker_info *info;
@@ -274,7 +274,7 @@ static long xchg_nr_deferred_memcg(int nid, struct shrinker *shrinker,
 	return nr_deferred;
 }
 
-static long add_nr_deferred_memcg(long nr, int nid, struct shrinker *shrinker,
+static long add_nr_deferred_memcg(long nr, int nid, struct shrinker_v2 *shrinker,
 				  struct mem_cgroup *memcg)
 {
 	struct shrinker_info *info;
@@ -320,29 +320,29 @@ void reparent_shrinker_deferred(struct mem_cgroup *memcg)
 	mutex_unlock(&shrinker_mutex);
 }
 #else
-static int shrinker_memcg_alloc(struct shrinker *shrinker)
+static int shrinker_memcg_alloc(struct shrinker_v2 *shrinker)
 {
 	return -ENOSYS;
 }
 
-static void shrinker_memcg_remove(struct shrinker *shrinker)
+static void shrinker_memcg_remove(struct shrinker_v2 *shrinker)
 {
 }
 
-static long xchg_nr_deferred_memcg(int nid, struct shrinker *shrinker,
+static long xchg_nr_deferred_memcg(int nid, struct shrinker_v2 *shrinker,
 				   struct mem_cgroup *memcg)
 {
 	return 0;
 }
 
-static long add_nr_deferred_memcg(long nr, int nid, struct shrinker *shrinker,
+static long add_nr_deferred_memcg(long nr, int nid, struct shrinker_v2 *shrinker,
 				  struct mem_cgroup *memcg)
 {
 	return 0;
 }
 #endif /* CONFIG_MEMCG */
 
-static long xchg_nr_deferred(struct shrinker *shrinker,
+static long xchg_nr_deferred(struct shrinker_v2 *shrinker,
 			     struct shrink_control *sc)
 {
 	int nid = sc->nid;
@@ -359,7 +359,7 @@ static long xchg_nr_deferred(struct shrinker *shrinker,
 }
 
 
-static long add_nr_deferred(long nr, struct shrinker *shrinker,
+static long add_nr_deferred(long nr, struct shrinker_v2 *shrinker,
 			    struct shrink_control *sc)
 {
 	int nid = sc->nid;
@@ -378,7 +378,7 @@ static long add_nr_deferred(long nr, struct shrinker *shrinker,
 #define SHRINK_BATCH 128
 
 static unsigned long do_shrink_slab(struct shrink_control *shrinkctl,
-				    struct shrinker *shrinker, int priority)
+				    struct shrinker_v2 *shrinker, int priority)
 {
 	unsigned long freed = 0;
 	unsigned long long delta;
@@ -539,7 +539,7 @@ again:
 				.nid = nid,
 				.memcg = memcg,
 			};
-			struct shrinker *shrinker;
+			struct shrinker_v2 *shrinker;
 			int shrinker_id = calc_shrinker_id(index, offset);
 
 			rcu_read_lock();
@@ -624,7 +624,7 @@ unsigned long shrink_slab(gfp_t gfp_mask, int nid, struct mem_cgroup *memcg,
 			  int priority)
 {
 	unsigned long ret, freed = 0;
-	struct shrinker *shrinker;
+	struct shrinker_v2 *shrinker;
 
 	/*
 	 * The root memcg might be allocated even though memcg is disabled
@@ -684,14 +684,14 @@ unsigned long shrink_slab(gfp_t gfp_mask, int nid, struct mem_cgroup *memcg,
 	return freed;
 }
 
-struct shrinker *shrinker_alloc(unsigned int flags, const char *fmt, ...)
+struct shrinker_v2 *shrinker_alloc(unsigned int flags, const char *fmt, ...)
 {
-	struct shrinker *shrinker;
+	struct shrinker_v2 *shrinker;
 	unsigned int size;
 	va_list ap;
 	int err;
 
-	shrinker = kzalloc(sizeof(struct shrinker), GFP_KERNEL);
+	shrinker = kzalloc(sizeof(struct shrinker_v2), GFP_KERNEL);
 	if (!shrinker)
 		return NULL;
 
@@ -744,7 +744,7 @@ err_name:
 }
 EXPORT_SYMBOL_GPL(shrinker_alloc);
 
-void shrinker_register(struct shrinker *shrinker)
+void shrinker_register(struct shrinker_v2 *shrinker)
 {
 	if (unlikely(!(shrinker->flags & SHRINKER_ALLOCATED))) {
 		pr_warn("Must use shrinker_alloc() to dynamically allocate the shrinker");
@@ -769,13 +769,13 @@ EXPORT_SYMBOL_GPL(shrinker_register);
 
 static void shrinker_free_rcu_cb(struct rcu_head *head)
 {
-	struct shrinker *shrinker = container_of(head, struct shrinker, rcu);
+	struct shrinker_v2 *shrinker = container_of(head, struct shrinker_v2, rcu);
 
 	kfree(shrinker->nr_deferred);
 	kfree(shrinker);
 }
 
-void shrinker_free(struct shrinker *shrinker)
+void shrinker_free(struct shrinker_v2 *shrinker)
 {
 	struct dentry *debugfs_entry = NULL;
 	int debugfs_id;

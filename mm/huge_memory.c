@@ -69,10 +69,10 @@ unsigned long transparent_hugepage_flags __read_mostly =
 	(1<<TRANSPARENT_HUGEPAGE_FILE_MTHP_FLAG)|
 	(1<<TRANSPARENT_HUGEPAGE_ANON_MAPPING_PMD_ALIGN_FLAG);
 
-static struct shrinker *deferred_split_shrinker;
-static unsigned long deferred_split_count(struct shrinker *shrink,
+static struct shrinker_v2 *deferred_split_shrinker;
+static unsigned long deferred_split_count(struct shrinker_v2 *shrink,
 					  struct shrink_control *sc);
-static unsigned long deferred_split_scan(struct shrinker *shrink,
+static unsigned long deferred_split_scan(struct shrinker_v2 *shrink,
 					 struct shrink_control *sc);
 
 static atomic_t huge_zero_refcount;
@@ -251,14 +251,14 @@ void mm_put_huge_zero_page(struct mm_struct *mm)
 		put_huge_zero_page();
 }
 
-static unsigned long shrink_huge_zero_page_count(struct shrinker *shrink,
+static unsigned long shrink_huge_zero_page_count(struct shrinker_v2 *shrink,
 					struct shrink_control *sc)
 {
 	/* we can free zero page only if last reference remains */
 	return atomic_read(&huge_zero_refcount) == 1 ? HPAGE_PMD_NR : 0;
 }
 
-static unsigned long shrink_huge_zero_page_scan(struct shrinker *shrink,
+static unsigned long shrink_huge_zero_page_scan(struct shrinker_v2 *shrink,
 				       struct shrink_control *sc)
 {
 	if (atomic_cmpxchg(&huge_zero_refcount, 1, 0) == 1) {
@@ -272,7 +272,7 @@ static unsigned long shrink_huge_zero_page_scan(struct shrinker *shrink,
 	return 0;
 }
 
-static struct shrinker *huge_zero_page_shrinker;
+static struct shrinker_v2 *huge_zero_page_shrinker;
 
 #ifdef CONFIG_SYSFS
 static ssize_t enabled_show(struct kobject *kobj,
@@ -3804,7 +3804,7 @@ void deferred_split_folio(struct folio *folio)
 	spin_unlock_irqrestore(&ds_queue->split_queue_lock, flags);
 }
 
-static unsigned long deferred_split_count(struct shrinker *shrink,
+static unsigned long deferred_split_count(struct shrinker_v2 *shrink,
 		struct shrink_control *sc)
 {
 	struct pglist_data *pgdata = NODE_DATA(sc->nid);
@@ -3817,7 +3817,7 @@ static unsigned long deferred_split_count(struct shrinker *shrink,
 	return READ_ONCE(ds_queue->split_queue_len);
 }
 
-static unsigned long deferred_split_scan(struct shrinker *shrink,
+static unsigned long deferred_split_scan(struct shrinker_v2 *shrink,
 		struct shrink_control *sc)
 {
 	struct pglist_data *pgdata = NODE_DATA(sc->nid);

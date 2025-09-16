@@ -282,7 +282,7 @@ unsigned long i915_gem_shrink_all(struct drm_i915_private *i915)
 }
 
 static unsigned long
-i915_gem_shrinker_count(struct shrinker *shrinker, struct shrink_control *sc)
+i915_gem_shrinker_count(struct shrinker_v2 *shrinker, struct shrink_control *sc)
 {
 	struct drm_i915_private *i915 = shrinker->private_data;
 	unsigned long num_objects;
@@ -310,7 +310,7 @@ i915_gem_shrinker_count(struct shrinker *shrinker, struct shrink_control *sc)
 }
 
 static unsigned long
-i915_gem_shrinker_scan(struct shrinker *shrinker, struct shrink_control *sc)
+i915_gem_shrinker_scan(struct shrinker_v2 *shrinker, struct shrink_control *sc)
 {
 	struct drm_i915_private *i915 = shrinker->private_data;
 	unsigned long freed;

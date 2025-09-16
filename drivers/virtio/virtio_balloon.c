@@ -111,7 +111,7 @@ struct virtio_balloon {
 	struct virtio_balloon_stat stats[VIRTIO_BALLOON_S_NR];
 
 	/* Shrinker to return free pages - VIRTIO_BALLOON_F_FREE_PAGE_HINT */
-	struct shrinker *shrinker;
+	struct shrinker_v2 *shrinker;
 
 	/* OOM notifier to deflate on OOM - VIRTIO_BALLOON_F_DEFLATE_ON_OOM */
 	struct notifier_block oom_nb;
@@ -817,7 +817,7 @@ static unsigned long shrink_free_pages(struct virtio_balloon *vb,
 	return blocks_freed * VIRTIO_BALLOON_HINT_BLOCK_PAGES;
 }
 
-static unsigned long virtio_balloon_shrinker_scan(struct shrinker *shrinker,
+static unsigned long virtio_balloon_shrinker_scan(struct shrinker_v2 *shrinker,
 						  struct shrink_control *sc)
 {
 	struct virtio_balloon *vb = shrinker->private_data;
@@ -825,7 +825,7 @@ static unsigned long virtio_balloon_shrinker_scan(struct shrinker *shrinker,
 	return shrink_free_pages(vb, sc->nr_to_scan);
 }
 
-static unsigned long virtio_balloon_shrinker_count(struct shrinker *shrinker,
+static unsigned long virtio_balloon_shrinker_count(struct shrinker_v2 *shrinker,
 						   struct shrink_control *sc)
 {
 	struct virtio_balloon *vb = shrinker->private_data;

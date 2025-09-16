@@ -4411,7 +4411,7 @@ out:
 }
 
 static unsigned long
-nfsd4_state_shrinker_count(struct shrinker *shrink, struct shrink_control *sc)
+nfsd4_state_shrinker_count(struct shrinker_v2 *shrink, struct shrink_control *sc)
 {
 	int count;
 	struct nfsd_net *nn = shrink->private_data;
@@ -4425,7 +4425,7 @@ nfsd4_state_shrinker_count(struct shrinker *shrink, struct shrink_control *sc)
 }
 
 static unsigned long
-nfsd4_state_shrinker_scan(struct shrinker *shrink, struct shrink_control *sc)
+nfsd4_state_shrinker_scan(struct shrinker_v2 *shrink, struct shrink_control *sc)
 {
 	return SHRINK_STOP;
 }

@@ -22,7 +22,11 @@
 #include <linux/writeback.h>
 #include <linux/page-flags.h>
 #include <linux/kabi.h>
-#include <linux/shrinker.h>
+
+#ifndef __GENKSYMS__
+#  include <linux/shrinker.h>
+#endif
+struct shrinker_info;
 
 struct mem_cgroup;
 struct obj_cgroup;

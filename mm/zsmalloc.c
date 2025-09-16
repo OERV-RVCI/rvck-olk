@@ -229,7 +229,7 @@ struct zs_pool {
 	struct zs_pool_stats stats;
 
 	/* Compact classes */
-	struct shrinker *shrinker;
+	KABI_DEPRECATE(struct shrinker, shrinker);
 
 #ifdef CONFIG_ZSMALLOC_STAT
 	struct dentry *stat_dentry;
@@ -239,6 +239,8 @@ struct zs_pool {
 #endif
 	spinlock_t lock;
 	atomic_t compaction_in_progress;
+
+	KABI_EXTEND(struct shrinker_v2 *shrinker)
 };
 
 struct zspage {
@@ -2082,7 +2084,7 @@ void zs_pool_stats(struct zs_pool *pool, struct zs_pool_stats *stats)
 }
 EXPORT_SYMBOL_GPL(zs_pool_stats);
 
-static unsigned long zs_shrinker_scan(struct shrinker *shrinker,
+static unsigned long zs_shrinker_scan(struct shrinker_v2 *shrinker,
 		struct shrink_control *sc)
 {
 	unsigned long pages_freed;
@@ -2098,7 +2100,7 @@ static unsigned long zs_shrinker_scan(struct shrinker *shrinker,
 	return pages_freed ? pages_freed : SHRINK_STOP;
 }
 
-static unsigned long zs_shrinker_count(struct shrinker *shrinker,
+static unsigned long zs_shrinker_count(struct shrinker_v2 *shrinker,
 		struct shrink_control *sc)
 {
 	int i;

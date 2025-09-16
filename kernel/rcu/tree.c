@@ -3494,7 +3494,7 @@ unlock_return:
 EXPORT_SYMBOL_GPL(kvfree_call_rcu);
 
 static unsigned long
-kfree_rcu_shrink_count(struct shrinker *shrink, struct shrink_control *sc)
+kfree_rcu_shrink_count(struct shrinker_v2 *shrink, struct shrink_control *sc)
 {
 	int cpu;
 	unsigned long count = 0;
@@ -3512,7 +3512,7 @@ kfree_rcu_shrink_count(struct shrinker *shrink, struct shrink_control *sc)
 }
 
 static unsigned long
-kfree_rcu_shrink_scan(struct shrinker *shrink, struct shrink_control *sc)
+kfree_rcu_shrink_scan(struct shrinker_v2 *shrink, struct shrink_control *sc)
 {
 	int cpu, freed = 0;
 
@@ -5024,7 +5024,7 @@ static void __init kfree_rcu_batch_init(void)
 {
 	int cpu;
 	int i, j;
-	struct shrinker *kfree_rcu_shrinker;
+	struct shrinker_v2 *kfree_rcu_shrinker;
 
 	/* Clamp it to [0:100] seconds interval. */
 	if (rcu_delay_page_cache_fill_msec < 0 ||

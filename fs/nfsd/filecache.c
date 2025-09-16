@@ -505,13 +505,13 @@ nfsd_file_gc_worker(struct work_struct *work)
 }
 
 static unsigned long
-nfsd_file_lru_count(struct shrinker *s, struct shrink_control *sc)
+nfsd_file_lru_count(struct shrinker_v2 *s, struct shrink_control *sc)
 {
 	return list_lru_count(&nfsd_file_lru);
 }
 
 static unsigned long
-nfsd_file_lru_scan(struct shrinker *s, struct shrink_control *sc)
+nfsd_file_lru_scan(struct shrinker_v2 *s, struct shrink_control *sc)
 {
 	LIST_HEAD(dispose);
 	unsigned long ret;
@@ -523,7 +523,7 @@ nfsd_file_lru_scan(struct shrinker *s, struct shrink_control *sc)
 	return ret;
 }
 
-static struct shrinker *nfsd_file_shrinker;
+static struct shrinker_v2 *nfsd_file_shrinker;
 
 /**
  * nfsd_file_cond_queue - conditionally unhash and queue a nfsd_file

@@ -73,7 +73,7 @@ static struct ttm_pool_type global_dma32_uncached[NR_PAGE_ORDERS];
 
 static spinlock_t shrinker_lock;
 static struct list_head shrinker_list;
-static struct shrinker *mm_shrinker;
+static struct shrinker_v2 *mm_shrinker;
 static DECLARE_RWSEM(pool_shrink_rwsem);
 
 /* Allocate pages of size 1 << order with the given gfp_flags */
@@ -613,7 +613,7 @@ void ttm_pool_fini(struct ttm_pool *pool)
 EXPORT_SYMBOL(ttm_pool_fini);
 
 /* As long as pages are available make sure to release at least one */
-static unsigned long ttm_pool_shrinker_scan(struct shrinker *shrink,
+static unsigned long ttm_pool_shrinker_scan(struct shrinker_v2 *shrink,
 					    struct shrink_control *sc)
 {
 	unsigned long num_freed = 0;
@@ -626,7 +626,7 @@ static unsigned long ttm_pool_shrinker_scan(struct shrinker *shrink,
 }
 
 /* Return the number of pages available or SHRINK_EMPTY if we have none */
-static unsigned long ttm_pool_shrinker_count(struct shrinker *shrink,
+static unsigned long ttm_pool_shrinker_count(struct shrinker_v2 *shrink,
 					     struct shrink_control *sc)
 {
 	unsigned long num_pages = atomic_long_read(&allocated_pages);

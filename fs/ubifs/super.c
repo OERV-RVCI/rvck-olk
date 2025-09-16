@@ -54,7 +54,7 @@ module_param_cb(default_version, &ubifs_default_version_ops, &ubifs_default_vers
 static struct kmem_cache *ubifs_inode_slab;
 
 /* UBIFS TNC shrinker description */
-static struct shrinker *ubifs_shrinker_info;
+static struct shrinker_v2 *ubifs_shrinker_info;
 
 /**
  * validate_inode - validate inode.

@@ -1918,9 +1918,9 @@ int ubifs_tnc_start_commit(struct ubifs_info *c, struct ubifs_zbranch *zroot);
 int ubifs_tnc_end_commit(struct ubifs_info *c);
 
 /* shrinker.c */
-unsigned long ubifs_shrink_scan(struct shrinker *shrink,
+unsigned long ubifs_shrink_scan(struct shrinker_v2 *shrink,
 				struct shrink_control *sc);
-unsigned long ubifs_shrink_count(struct shrinker *shrink,
+unsigned long ubifs_shrink_count(struct shrinker_v2 *shrink,
 				 struct shrink_control *sc);
 
 /* commit.c */

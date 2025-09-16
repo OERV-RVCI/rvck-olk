@@ -32,7 +32,7 @@ static bool can_block(struct shrink_control *sc)
 }
 
 static unsigned long
-msm_gem_shrinker_count(struct shrinker *shrinker, struct shrink_control *sc)
+msm_gem_shrinker_count(struct shrinker_v2 *shrinker, struct shrink_control *sc)
 {
 	struct msm_drm_private *priv = shrinker->private_data;
 	unsigned count = priv->lru.dontneed.count;
@@ -97,7 +97,7 @@ active_evict(struct drm_gem_object *obj)
 }
 
 static unsigned long
-msm_gem_shrinker_scan(struct shrinker *shrinker, struct shrink_control *sc)
+msm_gem_shrinker_scan(struct shrinker_v2 *shrinker, struct shrink_control *sc)
 {
 	struct msm_drm_private *priv = shrinker->private_data;
 	struct {

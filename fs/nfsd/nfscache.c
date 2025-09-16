@@ -38,9 +38,9 @@ struct nfsd_drc_bucket {
 static struct kmem_cache	*drc_slab;
 
 static int	nfsd_cache_append(struct svc_rqst *rqstp, struct kvec *vec);
-static unsigned long nfsd_reply_cache_count(struct shrinker *shrink,
+static unsigned long nfsd_reply_cache_count(struct shrinker_v2 *shrink,
 					    struct shrink_control *sc);
-static unsigned long nfsd_reply_cache_scan(struct shrinker *shrink,
+static unsigned long nfsd_reply_cache_scan(struct shrinker_v2 *shrink,
 					   struct shrink_control *sc);
 
 /*
@@ -303,7 +303,7 @@ nfsd_prune_bucket_locked(struct nfsd_net *nn, struct nfsd_drc_bucket *b,
  * nfsd_reply_cache_scan).
  */
 static unsigned long
-nfsd_reply_cache_count(struct shrinker *shrink, struct shrink_control *sc)
+nfsd_reply_cache_count(struct shrinker_v2 *shrink, struct shrink_control *sc)
 {
 	struct nfsd_net *nn = shrink->private_data;
 
@@ -322,7 +322,7 @@ nfsd_reply_cache_count(struct shrinker *shrink, struct shrink_control *sc)
  * Returns the number of entries released by this call.
  */
 static unsigned long
-nfsd_reply_cache_scan(struct shrinker *shrink, struct shrink_control *sc)
+nfsd_reply_cache_scan(struct shrinker_v2 *shrink, struct shrink_control *sc)
 {
 	struct nfsd_net *nn = shrink->private_data;
 	unsigned long freed = 0;

@@ -1915,7 +1915,7 @@ xfs_buftarg_isolate(
 
 static unsigned long
 xfs_buftarg_shrink_scan(
-	struct shrinker		*shrink,
+	struct shrinker_v2		*shrink,
 	struct shrink_control	*sc)
 {
 	struct xfs_buftarg	*btp = shrink->private_data;
@@ -1937,7 +1937,7 @@ xfs_buftarg_shrink_scan(
 
 static unsigned long
 xfs_buftarg_shrink_count(
-	struct shrinker		*shrink,
+	struct shrinker_v2		*shrink,
 	struct shrink_control	*sc)
 {
 	struct xfs_buftarg	*btp = shrink->private_data;

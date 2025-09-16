@@ -380,7 +380,7 @@ struct vmballoon {
 	/**
 	 * @shrinker: shrinker interface that is used to avoid over-inflation.
 	 */
-	struct shrinker *shrinker;
+	struct shrinker_v2 *shrinker;
 };
 
 static struct vmballoon balloon;
@@ -1507,7 +1507,7 @@ static void vmballoon_work(struct work_struct *work)
  *
  * Returns: number of pages that were freed during deflation.
  */
-static unsigned long vmballoon_shrinker_scan(struct shrinker *shrinker,
+static unsigned long vmballoon_shrinker_scan(struct shrinker_v2 *shrinker,
 					     struct shrink_control *sc)
 {
 	struct vmballoon *b = &balloon;
@@ -1549,7 +1549,7 @@ static unsigned long vmballoon_shrinker_scan(struct shrinker *shrinker,
  * Returns: number of 4k pages that are allocated for the balloon and can
  *	    therefore be reclaimed under pressure.
  */
-static unsigned long vmballoon_shrinker_count(struct shrinker *shrinker,
+static unsigned long vmballoon_shrinker_count(struct shrinker_v2 *shrinker,
 					      struct shrink_control *sc)
 {
 	struct vmballoon *b = &balloon;

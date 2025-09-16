@@ -472,7 +472,7 @@ rpcauth_cache_do_shrink(int nr_to_scan)
  * Run memory cache shrinker.
  */
 static unsigned long
-rpcauth_cache_shrink_scan(struct shrinker *shrink, struct shrink_control *sc)
+rpcauth_cache_shrink_scan(struct shrinker_v2 *shrink, struct shrink_control *sc)
 
 {
 	if ((sc->gfp_mask & GFP_KERNEL) != GFP_KERNEL)
@@ -486,7 +486,7 @@ rpcauth_cache_shrink_scan(struct shrinker *shrink, struct shrink_control *sc)
 }
 
 static unsigned long
-rpcauth_cache_shrink_count(struct shrinker *shrink, struct shrink_control *sc)
+rpcauth_cache_shrink_count(struct shrinker_v2 *shrink, struct shrink_control *sc)
 
 {
 	return number_cred_unused * sysctl_vfs_cache_pressure / 100;
@@ -863,7 +863,7 @@ rpcauth_uptodatecred(struct rpc_task *task)
 		test_bit(RPCAUTH_CRED_UPTODATE, &cred->cr_flags) != 0;
 }
 
-static struct shrinker *rpc_cred_shrinker;
+static struct shrinker_v2 *rpc_cred_shrinker;
 
 int __init rpcauth_init_module(void)
 {

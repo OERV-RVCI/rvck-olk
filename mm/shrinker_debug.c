@@ -15,7 +15,7 @@ extern struct list_head shrinker_list;
 static DEFINE_IDA(shrinker_debugfs_ida);
 static struct dentry *shrinker_debugfs_root;
 
-static unsigned long shrinker_count_objects(struct shrinker *shrinker,
+static unsigned long shrinker_count_objects(struct shrinker_v2 *shrinker,
 					    struct mem_cgroup *memcg,
 					    unsigned long *count_per_node)
 {
@@ -46,7 +46,7 @@ static unsigned long shrinker_count_objects(struct shrinker *shrinker,
 
 static int shrinker_debugfs_count_show(struct seq_file *m, void *v)
 {
-	struct shrinker *shrinker = m->private;
+	struct shrinker_v2 *shrinker = m->private;
 	unsigned long *count_per_node;
 	struct mem_cgroup *memcg;
 	unsigned long total;
@@ -105,7 +105,7 @@ static ssize_t shrinker_debugfs_scan_write(struct file *file,
 					   const char __user *buf,
 					   size_t size, loff_t *pos)
 {
-	struct shrinker *shrinker = file->private_data;
+	struct shrinker_v2 *shrinker = file->private_data;
 	unsigned long nr_to_scan = 0, ino, read_len;
 	struct shrink_control sc = {
 		.gfp_mask = GFP_KERNEL,
@@ -159,7 +159,7 @@ static const struct file_operations shrinker_debugfs_scan_fops = {
 	.write	 = shrinker_debugfs_scan_write,
 };
 
-int shrinker_debugfs_add(struct shrinker *shrinker)
+int shrinker_debugfs_add(struct shrinker_v2 *shrinker)
 {
 	struct dentry *entry;
 	char buf[128];
@@ -193,7 +193,7 @@ int shrinker_debugfs_add(struct shrinker *shrinker)
 	return 0;
 }
 
-int shrinker_debugfs_rename(struct shrinker *shrinker, const char *fmt, ...)
+int shrinker_debugfs_rename(struct shrinker_v2 *shrinker, const char *fmt, ...)
 {
 	struct dentry *entry;
 	char buf[128];
@@ -234,7 +234,7 @@ int shrinker_debugfs_rename(struct shrinker *shrinker, const char *fmt, ...)
 }
 EXPORT_SYMBOL(shrinker_debugfs_rename);
 
-struct dentry *shrinker_debugfs_detach(struct shrinker *shrinker,
+struct dentry *shrinker_debugfs_detach(struct shrinker_v2 *shrinker,
 				       int *debugfs_id)
 {
 	struct dentry *entry = shrinker->debugfs_entry;
@@ -255,7 +255,7 @@ void shrinker_debugfs_remove(struct dentry *debugfs_entry, int debugfs_id)
 
 static int __init shrinker_debugfs_init(void)
 {
-	struct shrinker *shrinker;
+	struct shrinker_v2 *shrinker;
 	struct dentry *dentry;
 	int ret = 0;
 

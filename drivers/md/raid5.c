@@ -7325,7 +7325,7 @@ static int raid5_alloc_percpu(struct r5conf *conf)
 	return err;
 }
 
-static unsigned long raid5_cache_scan(struct shrinker *shrink,
+static unsigned long raid5_cache_scan(struct shrinker_v2 *shrink,
 				      struct shrink_control *sc)
 {
 	struct r5conf *conf = shrink->private_data;
@@ -7346,7 +7346,7 @@ static unsigned long raid5_cache_scan(struct shrinker *shrink,
 	return ret;
 }
 
-static unsigned long raid5_cache_count(struct shrinker *shrink,
+static unsigned long raid5_cache_count(struct shrinker_v2 *shrink,
 				       struct shrink_control *sc)
 {
 	struct r5conf *conf = shrink->private_data;

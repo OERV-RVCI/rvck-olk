@@ -276,7 +276,7 @@ static int backend_reclaim_memory(struct device *dev, void *data)
  * Returns 0 always because we are using shrinker to only detect memory
  * pressure.
  */
-static unsigned long backend_shrink_memory_count(struct shrinker *shrinker,
+static unsigned long backend_shrink_memory_count(struct shrinker_v2 *shrinker,
 				struct shrink_control *sc)
 {
 	bus_for_each_dev(&xenbus_backend.bus, NULL, NULL,
@@ -286,7 +286,7 @@ static unsigned long backend_shrink_memory_count(struct shrinker *shrinker,
 
 static int __init xenbus_probe_backend_init(void)
 {
-	struct shrinker *backend_memory_shrinker;
+	struct shrinker_v2 *backend_memory_shrinker;
 	static struct notifier_block xenstore_notifier = {
 		.notifier_call = backend_probe_and_watch
 	};

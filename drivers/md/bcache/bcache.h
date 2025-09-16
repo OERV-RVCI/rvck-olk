@@ -544,7 +544,7 @@ struct cache_set {
 	struct bio_set		bio_split;
 
 	/* For the btree cache */
-	struct shrinker		*shrink;
+	KABI_DEPRECATE(struct shrinker, shrink)
 
 	/* For the btree cache and anything allocation related */
 	struct mutex		bucket_lock;
@@ -739,6 +739,8 @@ struct cache_set {
 
 #define BUCKET_HASH_BITS	12
 	struct hlist_head	bucket_hash[1 << BUCKET_HASH_BITS];
+
+	KABI_EXTEND(struct shrinker_v2 *shrink)
 };
 
 struct bbio {

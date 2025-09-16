@@ -16,7 +16,7 @@
 #include "panfrost_mmu.h"
 
 static unsigned long
-panfrost_gem_shrinker_count(struct shrinker *shrinker, struct shrink_control *sc)
+panfrost_gem_shrinker_count(struct shrinker_v2 *shrinker, struct shrink_control *sc)
 {
 	struct panfrost_device *pfdev = shrinker->private_data;
 	struct drm_gem_shmem_object *shmem;
@@ -62,7 +62,7 @@ unlock_mappings:
 }
 
 static unsigned long
-panfrost_gem_shrinker_scan(struct shrinker *shrinker, struct shrink_control *sc)
+panfrost_gem_shrinker_scan(struct shrinker_v2 *shrinker, struct shrink_control *sc)
 {
 	struct panfrost_device *pfdev = shrinker->private_data;
 	struct drm_gem_shmem_object *shmem, *tmp;

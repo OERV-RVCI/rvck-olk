@@ -666,7 +666,7 @@ struct r5conf {
 	wait_queue_head_t	wait_for_stripe;
 	wait_queue_head_t	wait_for_overlap;
 	unsigned long		cache_state;
-	struct shrinker		*shrinker;
+	KABI_DEPRECATE(struct shrinker, shrinker)
 	int			pool_size; /* number of disks in stripeheads in pool */
 	spinlock_t		device_lock;
 	struct disk_info	*disks;
@@ -690,6 +690,8 @@ struct r5conf {
 	struct list_head	pending_list;
 	int			pending_data_cnt;
 	struct r5pending_data	*next_pending_data;
+
+	KABI_EXTEND(struct shrinker_v2 *shrinker)
 };
 
 #if PAGE_SIZE == DEFAULT_STRIPE_SIZE

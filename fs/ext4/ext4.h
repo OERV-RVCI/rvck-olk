@@ -1665,7 +1665,7 @@ struct ext4_sb_info {
 	__u32 s_csum_seed;
 
 	/* Reclaim extents from extent status tree */
-	struct shrinker *s_es_shrinker;
+	KABI_DEPRECATE(struct shrinker, s_es_shrinker)
 	struct list_head s_es_list;	/* List of inodes with reclaimable extents */
 	long s_es_nr_inode;
 	struct ext4_es_stats s_es_stats;
@@ -1752,6 +1752,8 @@ struct ext4_sb_info {
 	int s_fc_debug_max_replay;
 #endif
 	struct ext4_fc_replay_state s_fc_replay_state;
+
+	KABI_EXTEND(struct shrinker_v2 *s_es_shrinker)
 };
 
 static inline struct ext4_sb_info *EXT4_SB(struct super_block *sb)

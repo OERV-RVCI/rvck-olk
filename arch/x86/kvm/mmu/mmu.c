@@ -6731,7 +6731,7 @@ void kvm_mmu_invalidate_mmio_sptes(struct kvm *kvm, u64 gen)
 	}
 }
 
-static unsigned long mmu_shrink_scan(struct shrinker *shrink,
+static unsigned long mmu_shrink_scan(struct shrinker_v2 *shrink,
 				     struct shrink_control *sc)
 {
 	struct kvm *kvm;
@@ -6790,13 +6790,13 @@ unlock:
 	return freed;
 }
 
-static unsigned long mmu_shrink_count(struct shrinker *shrink,
+static unsigned long mmu_shrink_count(struct shrinker_v2 *shrink,
 				      struct shrink_control *sc)
 {
 	return percpu_counter_read_positive(&kvm_total_used_mmu_pages);
 }
 
-static struct shrinker *mmu_shrinker;
+static struct shrinker_v2 *mmu_shrinker;
 
 static void mmu_destroy_caches(void)
 {

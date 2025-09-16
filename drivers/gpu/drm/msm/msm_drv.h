@@ -209,7 +209,7 @@ struct msm_drm_private {
 	} vram;
 
 	struct notifier_block vmap_notifier;
-	struct shrinker *shrinker;
+	KABI_DEPRECATE(struct shrinker, shrinker)
 
 	struct drm_atomic_state *pm_state;
 
@@ -238,6 +238,7 @@ struct msm_drm_private {
 	 * the sw hangcheck mechanism.
 	 */
 	bool disable_err_irq;
+	KABI_EXTEND(struct shrinker_v2 *shrinker)
 };
 
 struct msm_format {

@@ -781,7 +781,7 @@ int dquot_quota_sync(struct super_block *sb, int type)
 EXPORT_SYMBOL(dquot_quota_sync);
 
 static unsigned long
-dqcache_shrink_scan(struct shrinker *shrink, struct shrink_control *sc)
+dqcache_shrink_scan(struct shrinker_v2 *shrink, struct shrink_control *sc)
 {
 	struct dquot *dquot;
 	unsigned long freed = 0;
@@ -801,7 +801,7 @@ dqcache_shrink_scan(struct shrinker *shrink, struct shrink_control *sc)
 }
 
 static unsigned long
-dqcache_shrink_count(struct shrinker *shrink, struct shrink_control *sc)
+dqcache_shrink_count(struct shrinker_v2 *shrink, struct shrink_control *sc)
 {
 	return vfs_pressure_ratio(
 	percpu_counter_read_positive(&dqstats.counter[DQST_FREE_DQUOTS]));
@@ -3004,7 +3004,7 @@ static int __init dquot_init(void)
 {
 	int i, ret;
 	unsigned long nr_hash, order;
-	struct shrinker *dqcache_shrinker;
+	struct shrinker_v2 *dqcache_shrinker;
 
 	printk(KERN_NOTICE "VFS: Disk quotas %s\n", __DQUOT_VERSION__);
 

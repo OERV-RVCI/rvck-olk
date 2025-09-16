@@ -197,7 +197,7 @@ DEFINE_EVENT(mm_vmscan_direct_reclaim_end_template, mm_vmscan_memcg_softlimit_re
 #endif /* CONFIG_MEMCG */
 
 TRACE_EVENT(mm_shrink_slab_start,
-	TP_PROTO(struct shrinker *shr, struct shrink_control *sc,
+	TP_PROTO(struct shrinker_v2 *shr, struct shrink_control *sc,
 		long nr_objects_to_shrink, unsigned long cache_items,
 		unsigned long long delta, unsigned long total_scan,
 		int priority),
@@ -206,7 +206,7 @@ TRACE_EVENT(mm_shrink_slab_start,
 		priority),
 
 	TP_STRUCT__entry(
-		__field(struct shrinker *, shr)
+		__field(struct shrinker_v2 *, shr)
 		__field(void *, shrink)
 		__field(int, nid)
 		__field(long, nr_objects_to_shrink)
@@ -242,14 +242,14 @@ TRACE_EVENT(mm_shrink_slab_start,
 );
 
 TRACE_EVENT(mm_shrink_slab_end,
-	TP_PROTO(struct shrinker *shr, int nid, int shrinker_retval,
+	TP_PROTO(struct shrinker_v2 *shr, int nid, int shrinker_retval,
 		long unused_scan_cnt, long new_scan_cnt, long total_scan),
 
 	TP_ARGS(shr, nid, shrinker_retval, unused_scan_cnt, new_scan_cnt,
 		total_scan),
 
 	TP_STRUCT__entry(
-		__field(struct shrinker *, shr)
+		__field(struct shrinker_v2 *, shr)
 		__field(int, nid)
 		__field(void *, shrink)
 		__field(long, unused_scan)

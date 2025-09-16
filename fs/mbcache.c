@@ -37,7 +37,7 @@ struct mb_cache {
 	struct list_head	c_list;
 	/* Number of entries in cache */
 	unsigned long		c_entry_count;
-	struct shrinker		*c_shrink;
+	struct shrinker_v2		*c_shrink;
 	/* Work for shrinking when the cache has too many entries */
 	struct work_struct	c_shrink_work;
 };
@@ -290,7 +290,7 @@ void mb_cache_entry_touch(struct mb_cache *cache,
 }
 EXPORT_SYMBOL(mb_cache_entry_touch);
 
-static unsigned long mb_cache_count(struct shrinker *shrink,
+static unsigned long mb_cache_count(struct shrinker_v2 *shrink,
 				    struct shrink_control *sc)
 {
 	struct mb_cache *cache = shrink->private_data;
@@ -329,7 +329,7 @@ static unsigned long mb_cache_shrink(struct mb_cache *cache,
 	return shrunk;
 }
 
-static unsigned long mb_cache_scan(struct shrinker *shrink,
+static unsigned long mb_cache_scan(struct shrinker_v2 *shrink,
 				   struct shrink_control *sc)
 {
 	struct mb_cache *cache = shrink->private_data;

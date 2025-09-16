@@ -2067,7 +2067,7 @@ static long gfs2_scan_glock_lru(int nr)
 	return freed;
 }
 
-static unsigned long gfs2_glock_shrink_scan(struct shrinker *shrink,
+static unsigned long gfs2_glock_shrink_scan(struct shrinker_v2 *shrink,
 					    struct shrink_control *sc)
 {
 	if (!(sc->gfp_mask & __GFP_FS))
@@ -2075,13 +2075,13 @@ static unsigned long gfs2_glock_shrink_scan(struct shrinker *shrink,
 	return gfs2_scan_glock_lru(sc->nr_to_scan);
 }
 
-static unsigned long gfs2_glock_shrink_count(struct shrinker *shrink,
+static unsigned long gfs2_glock_shrink_count(struct shrinker_v2 *shrink,
 					     struct shrink_control *sc)
 {
 	return vfs_pressure_ratio(atomic_read(&lru_count));
 }
 
-static struct shrinker *glock_shrinker;
+static struct shrinker_v2 *glock_shrinker;
 
 /**
  * glock_hash_walk - Call a function for glock in a hash bucket

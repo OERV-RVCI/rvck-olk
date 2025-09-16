@@ -627,7 +627,7 @@ void workingset_update_node(struct xa_node *node)
 	}
 }
 
-static unsigned long count_shadow_nodes(struct shrinker *shrinker,
+static unsigned long count_shadow_nodes(struct shrinker_v2 *shrinker,
 					struct shrink_control *sc)
 {
 	unsigned long max_nodes;
@@ -756,7 +756,7 @@ out:
 	return ret;
 }
 
-static unsigned long scan_shadow_nodes(struct shrinker *shrinker,
+static unsigned long scan_shadow_nodes(struct shrinker_v2 *shrinker,
 				       struct shrink_control *sc)
 {
 	/* list_lru lock nests inside the IRQ-safe i_pages lock */
@@ -772,7 +772,7 @@ static struct lock_class_key shadow_nodes_key;
 
 static int __init workingset_init(void)
 {
-	struct shrinker *workingset_shadow_shrinker;
+	struct shrinker_v2 *workingset_shadow_shrinker;
 	unsigned int timestamp_bits;
 	unsigned int max_order;
 	int ret = -ENOMEM;

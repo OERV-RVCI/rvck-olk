@@ -1302,7 +1302,7 @@ EXPORT_SYMBOL_GPL(rcu_nocb_cpu_offload);
 
 #ifdef CONFIG_RCU_LAZY
 static unsigned long
-lazy_rcu_shrink_count(struct shrinker *shrink, struct shrink_control *sc)
+lazy_rcu_shrink_count(struct shrinker_v2 *shrink, struct shrink_control *sc)
 {
 	int cpu;
 	unsigned long count = 0;
@@ -1327,7 +1327,7 @@ lazy_rcu_shrink_count(struct shrinker *shrink, struct shrink_control *sc)
 }
 
 static unsigned long
-lazy_rcu_shrink_scan(struct shrinker *shrink, struct shrink_control *sc)
+lazy_rcu_shrink_scan(struct shrinker_v2 *shrink, struct shrink_control *sc)
 {
 	int cpu;
 	unsigned long flags;
@@ -1391,7 +1391,7 @@ void __init rcu_init_nohz(void)
 	int cpu;
 	struct rcu_data *rdp;
 	const struct cpumask *cpumask = NULL;
-	struct shrinker * __maybe_unused lazy_rcu_shrinker;
+	struct shrinker_v2 * __maybe_unused lazy_rcu_shrinker;
 
 #if defined(CONFIG_NO_HZ_FULL)
 	if (tick_nohz_full_running && !cpumask_empty(tick_nohz_full_mask))

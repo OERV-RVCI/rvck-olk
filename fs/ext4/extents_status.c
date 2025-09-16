@@ -1638,7 +1638,7 @@ out:
 	return nr_shrunk;
 }
 
-static unsigned long ext4_es_count(struct shrinker *shrink,
+static unsigned long ext4_es_count(struct shrinker_v2 *shrink,
 				   struct shrink_control *sc)
 {
 	unsigned long nr;
@@ -1650,7 +1650,7 @@ static unsigned long ext4_es_count(struct shrinker *shrink,
 	return nr;
 }
 
-static unsigned long ext4_es_scan(struct shrinker *shrink,
+static unsigned long ext4_es_scan(struct shrinker_v2 *shrink,
 				  struct shrink_control *sc)
 {
 	struct ext4_sb_info *sbi = shrink->private_data;

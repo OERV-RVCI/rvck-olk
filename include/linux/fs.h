@@ -1311,7 +1311,8 @@ struct super_block {
 
 	const struct dentry_operations *s_d_op; /* default d_op for dentries */
 
-	struct shrinker *s_shrink;	/* per-sb shrinker handle */
+	/* per-sb shrinker handle */
+	KABI_DEPRECATE(struct shrinker, s_shrink)
 
 	/* Number of inodes with nlink == 0 but still referenced */
 	atomic_long_t s_remove_count;
@@ -1363,8 +1364,9 @@ struct super_block {
 	spinlock_t		s_inode_wblist_lock;
 	struct list_head	s_inodes_wb;	/* writeback inodes */
 
-	KABI_RESERVE(1)
+	KABI_USE(1, struct shrinker_v2 *s_shrink)
 	KABI_RESERVE(2)
+
 } __randomize_layout;
 
 static inline struct user_namespace *i_user_ns(const struct inode *inode)

@@ -130,7 +130,7 @@ static void nfs_ssc_unregister_ops(void)
 }
 #endif /* CONFIG_NFS_V4_2 */
 
-static struct shrinker *acl_shrinker;
+static struct shrinker_v2 *acl_shrinker;
 
 /*
  * Register the NFS filesystems

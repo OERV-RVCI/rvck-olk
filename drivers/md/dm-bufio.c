@@ -1001,7 +1001,7 @@ struct dm_bufio_client {
 
 	sector_t start;
 
-	struct shrinker *shrinker;
+	struct shrinker_v2 *shrinker;
 	struct work_struct shrink_work;
 	atomic_long_t need_shrink;
 
@@ -2401,7 +2401,7 @@ static void shrink_work(struct work_struct *w)
 	dm_bufio_unlock(c);
 }
 
-static unsigned long dm_bufio_shrink_scan(struct shrinker *shrink, struct shrink_control *sc)
+static unsigned long dm_bufio_shrink_scan(struct shrinker_v2 *shrink, struct shrink_control *sc)
 {
 	struct dm_bufio_client *c;
 
@@ -2412,7 +2412,7 @@ static unsigned long dm_bufio_shrink_scan(struct shrinker *shrink, struct shrink
 	return sc->nr_to_scan;
 }
 
-static unsigned long dm_bufio_shrink_count(struct shrinker *shrink, struct shrink_control *sc)
+static unsigned long dm_bufio_shrink_count(struct shrinker_v2 *shrink, struct shrink_control *sc)
 {
 	struct dm_bufio_client *c = shrink->private_data;
 	unsigned long count = cache_total(&c->cache);

@@ -664,7 +664,7 @@ out_unlock:
 	return -ENOMEM;
 }
 
-static unsigned long bch_mca_scan(struct shrinker *shrink,
+static unsigned long bch_mca_scan(struct shrinker_v2 *shrink,
 				  struct shrink_control *sc)
 {
 	struct cache_set *c = shrink->private_data;
@@ -731,7 +731,7 @@ out:
 	return freed * c->btree_pages;
 }
 
-static unsigned long bch_mca_count(struct shrinker *shrink,
+static unsigned long bch_mca_count(struct shrinker_v2 *shrink,
 				   struct shrink_control *sc)
 {
 	struct cache_set *c = shrink->private_data;

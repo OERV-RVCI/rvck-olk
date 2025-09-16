@@ -2911,7 +2911,7 @@ remove_lru_entry:
 }
 
 unsigned long
-nfs_access_cache_scan(struct shrinker *shrink, struct shrink_control *sc)
+nfs_access_cache_scan(struct shrinker_v2 *shrink, struct shrink_control *sc)
 {
 	int nr_to_scan = sc->nr_to_scan;
 	gfp_t gfp_mask = sc->gfp_mask;
@@ -2923,7 +2923,7 @@ nfs_access_cache_scan(struct shrinker *shrink, struct shrink_control *sc)
 
 
 unsigned long
-nfs_access_cache_count(struct shrinker *shrink, struct shrink_control *sc)
+nfs_access_cache_count(struct shrinker_v2 *shrink, struct shrink_control *sc)
 {
 	return vfs_pressure_ratio(atomic_long_read(&nfs_access_nr_entries));
 }

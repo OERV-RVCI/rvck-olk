@@ -1277,7 +1277,7 @@ static int jbd2_min_tag_size(void)
  * Scan the checkpointed buffer on the checkpoint list and release the
  * journal_head.
  */
-static unsigned long jbd2_journal_shrink_scan(struct shrinker *shrink,
+static unsigned long jbd2_journal_shrink_scan(struct shrinker_v2 *shrink,
 					      struct shrink_control *sc)
 {
 	journal_t *journal = shrink->private_data;
@@ -1303,7 +1303,7 @@ static unsigned long jbd2_journal_shrink_scan(struct shrinker *shrink,
  *
  * Count the number of checkpoint buffers on the checkpoint list.
  */
-static unsigned long jbd2_journal_shrink_count(struct shrinker *shrink,
+static unsigned long jbd2_journal_shrink_count(struct shrinker_v2 *shrink,
 					       struct shrink_control *sc)
 {
 	journal_t *journal = shrink->private_data;

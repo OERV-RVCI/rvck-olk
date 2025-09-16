@@ -5268,7 +5268,7 @@ static void vmap_init_nodes(void)
 }
 
 static unsigned long
-vmap_node_shrink_count(struct shrinker *shrink, struct shrink_control *sc)
+vmap_node_shrink_count(struct shrinker_v2 *shrink, struct shrink_control *sc)
 {
 	unsigned long count;
 	struct vmap_node *vn;
@@ -5285,7 +5285,7 @@ vmap_node_shrink_count(struct shrinker *shrink, struct shrink_control *sc)
 }
 
 static unsigned long
-vmap_node_shrink_scan(struct shrinker *shrink, struct shrink_control *sc)
+vmap_node_shrink_scan(struct shrinker_v2 *shrink, struct shrink_control *sc)
 {
 	int i;
 
@@ -5297,7 +5297,7 @@ vmap_node_shrink_scan(struct shrinker *shrink, struct shrink_control *sc)
 
 void __init vmalloc_init(void)
 {
-	struct shrinker *vmap_node_shrinker;
+	struct shrinker_v2 *vmap_node_shrinker;
 	struct vmap_area *va;
 	struct vmap_node *vn;
 	struct vm_struct *tmp;

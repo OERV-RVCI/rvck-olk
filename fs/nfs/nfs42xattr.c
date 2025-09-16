@@ -787,18 +787,18 @@ void nfs4_xattr_cache_zap(struct inode *inode)
  * pruning all but one entry.
  */
 
-static unsigned long nfs4_xattr_cache_count(struct shrinker *shrink,
+static unsigned long nfs4_xattr_cache_count(struct shrinker_v2 *shrink,
 					    struct shrink_control *sc);
-static unsigned long nfs4_xattr_entry_count(struct shrinker *shrink,
+static unsigned long nfs4_xattr_entry_count(struct shrinker_v2 *shrink,
 					    struct shrink_control *sc);
-static unsigned long nfs4_xattr_cache_scan(struct shrinker *shrink,
+static unsigned long nfs4_xattr_cache_scan(struct shrinker_v2 *shrink,
 					   struct shrink_control *sc);
-static unsigned long nfs4_xattr_entry_scan(struct shrinker *shrink,
+static unsigned long nfs4_xattr_entry_scan(struct shrinker_v2 *shrink,
 					   struct shrink_control *sc);
 
-static struct shrinker *nfs4_xattr_cache_shrinker;
-static struct shrinker *nfs4_xattr_entry_shrinker;
-static struct shrinker *nfs4_xattr_large_entry_shrinker;
+static struct shrinker_v2 *nfs4_xattr_cache_shrinker;
+static struct shrinker_v2 *nfs4_xattr_entry_shrinker;
+static struct shrinker_v2 *nfs4_xattr_large_entry_shrinker;
 
 static enum lru_status
 cache_lru_isolate(struct list_head *item,
@@ -836,7 +836,7 @@ cache_lru_isolate(struct list_head *item,
 }
 
 static unsigned long
-nfs4_xattr_cache_scan(struct shrinker *shrink, struct shrink_control *sc)
+nfs4_xattr_cache_scan(struct shrinker_v2 *shrink, struct shrink_control *sc)
 {
 	LIST_HEAD(dispose);
 	unsigned long freed;
@@ -857,7 +857,7 @@ nfs4_xattr_cache_scan(struct shrinker *shrink, struct shrink_control *sc)
 
 
 static unsigned long
-nfs4_xattr_cache_count(struct shrinker *shrink, struct shrink_control *sc)
+nfs4_xattr_cache_count(struct shrinker_v2 *shrink, struct shrink_control *sc)
 {
 	unsigned long count;
 
@@ -917,7 +917,7 @@ entry_lru_isolate(struct list_head *item,
 }
 
 static unsigned long
-nfs4_xattr_entry_scan(struct shrinker *shrink, struct shrink_control *sc)
+nfs4_xattr_entry_scan(struct shrinker_v2 *shrink, struct shrink_control *sc)
 {
 	LIST_HEAD(dispose);
 	unsigned long freed;
@@ -947,7 +947,7 @@ nfs4_xattr_entry_scan(struct shrinker *shrink, struct shrink_control *sc)
 }
 
 static unsigned long
-nfs4_xattr_entry_count(struct shrinker *shrink, struct shrink_control *sc)
+nfs4_xattr_entry_count(struct shrinker_v2 *shrink, struct shrink_control *sc)
 {
 	unsigned long count;
 	struct list_lru *lru;
@@ -972,12 +972,12 @@ static void nfs4_xattr_cache_init_once(void *p)
 	INIT_LIST_HEAD(&cache->dispose);
 }
 
-typedef unsigned long (*count_objects_cb)(struct shrinker *s,
+typedef unsigned long (*count_objects_cb)(struct shrinker_v2 *s,
 					  struct shrink_control *sc);
-typedef unsigned long (*scan_objects_cb)(struct shrinker *s,
+typedef unsigned long (*scan_objects_cb)(struct shrinker_v2 *s,
 					 struct shrink_control *sc);
 
-static int __init nfs4_xattr_shrinker_init(struct shrinker **shrinker,
+static int __init nfs4_xattr_shrinker_init(struct shrinker_v2 **shrinker,
 					   struct list_lru *lru, const char *name,
 					   count_objects_cb count,
 					   scan_objects_cb scan, long batch, int seeks)
@@ -1004,7 +1004,7 @@ static int __init nfs4_xattr_shrinker_init(struct shrinker **shrinker,
 	return ret;
 }
 
-static void nfs4_xattr_shrinker_destroy(struct shrinker *shrinker,
+static void nfs4_xattr_shrinker_destroy(struct shrinker_v2 *shrinker,
 					struct list_lru *lru)
 {
 	shrinker_free(shrinker);

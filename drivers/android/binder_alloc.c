@@ -1043,19 +1043,19 @@ err_get_alloc_mutex_failed:
 }
 
 static unsigned long
-binder_shrink_count(struct shrinker *shrink, struct shrink_control *sc)
+binder_shrink_count(struct shrinker_v2 *shrink, struct shrink_control *sc)
 {
 	return list_lru_count(&binder_alloc_lru);
 }
 
 static unsigned long
-binder_shrink_scan(struct shrinker *shrink, struct shrink_control *sc)
+binder_shrink_scan(struct shrinker_v2 *shrink, struct shrink_control *sc)
 {
 	return list_lru_walk(&binder_alloc_lru, binder_alloc_free_page,
 			    NULL, sc->nr_to_scan);
 }
 
-static struct shrinker *binder_shrinker;
+static struct shrinker_v2 *binder_shrinker;
 
 /**
  * binder_alloc_init() - called by binder_open() for per-proc initialization

@@ -109,11 +109,13 @@ typedef struct xfs_buftarg {
 	size_t			bt_logical_sectormask;
 
 	/* LRU control structures */
-	struct shrinker		*bt_shrinker;
+	KABI_DEPRECATE(struct shrinker, bt_shrinker)
 	struct list_lru		bt_lru;
 
 	struct percpu_counter	bt_io_count;
 	struct ratelimit_state	bt_ioerror_rl;
+
+	KABI_EXTEND(struct shrinker_v2 *bt_shrinker)
 } xfs_buftarg_t;
 
 #define XB_PAGES	2
