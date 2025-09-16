@@ -16,10 +16,6 @@
 #define NFSDBG_FACILITY NFSDBG_CLIENT
 #define REMOTE_IP 0
 #define REMOTE_DNS 1
-#define ENFS_CONFIG_UNLOAD 0
-#define ENFS_CONFIG_LOAD 1
-
-static int g_enfsconfigLoad = ENFS_CONFIG_UNLOAD;
 
 void nfs_multipath_parse_ip_ipv6_add(struct sockaddr_in6 *sin6, int add_num)
 {
@@ -614,10 +610,6 @@ int nfs_multipath_parse_options(enum nfsmultipathoptions type, char *str,
 	int link_count = enfs_link_count_num();
 	int mount_count = enfs_mount_count();
 
-	if (g_enfsconfigLoad == ENFS_CONFIG_UNLOAD) {
-		enfs_config_load();
-		g_enfsconfigLoad = ENFS_CONFIG_LOAD;
-	}
 	/* Native links and multipath links */
 	if (link_count >= enfs_get_config_link_count_total() - 1 ||
 	    mount_count >= ENFS_MAX_MOUNT_COUNT) {
