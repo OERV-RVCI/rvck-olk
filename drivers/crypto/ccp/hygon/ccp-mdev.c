@@ -1529,6 +1529,11 @@ static struct page *ccp_get_page(pgoff_t page_idx)
 	int numa_node;
 
 	mutex_lock(&ccp_share.lock);
+	if (ccp_mdev_data.iommu[page_idx].pdev == NULL) {
+		mutex_unlock(&ccp_share.lock);
+		return NULL;
+	}
+
 	if (!ccp_share.pages[page_idx]) {
 		ccp_share.pages[page_idx] =
 			alloc_pages(GFP_HIGHUSER | __GFP_ZERO, 0);
