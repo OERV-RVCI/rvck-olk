@@ -57,7 +57,11 @@ static struct enfs_extend_version_func g_decodeFuncByVersion[] = {
 		   },
 };
 
-int NfsExtendProcInfoExtendEncode(char *pbuf, int buflen, struct enfs_extend3_args *pObj)
+static int
+NfsExtendProcInfoExtendEncode(
+	char *pbuf,
+	int buflen,
+	struct enfs_extend3_args *pObj)
 {
 	__be32 *start;
 	struct xdr_buf xdrBuf;
@@ -73,7 +77,7 @@ int NfsExtendProcInfoExtendEncode(char *pbuf, int buflen, struct enfs_extend3_ar
 
 	start = xdr_reserve_space(&xdrStream, 8);
 	if (unlikely(!start))
-		return true;
+		return -EINVAL;
 	*start++ = cpu_to_be32(pObj->opcode);
 	*start++ = cpu_to_be32(pObj->version);
 
@@ -127,7 +131,7 @@ int NfsExtendProcInfoExtendEncode(char *pbuf, int buflen, struct enfs_extend3_ar
 		start += quadlen;
 	}
 
-	return false;
+	return 0;
 }
 
 int NfsExtendDecodeFsShardV1(struct enfs_extend3_rsp **extend3ResOut, __be32 *p,
@@ -539,8 +543,10 @@ int EnfsExtendDecodePreCheck(uint32_t version, uint32_t opCode)
 	return 0;
 }
 
-int NfsExtendProcInfoExtendDecode(char *buf, uint32_t bufLen,
-				  struct enfs_extend3_rsp **extend3ResOut)
+static int
+NfsExtendProcInfoExtendDecode(
+	char *buf, uint32_t bufLen,
+	struct enfs_extend3_rsp **extend3ResOut)
 {
 	int ret = 0;
 	__be32 *p;
@@ -555,7 +561,7 @@ int NfsExtendProcInfoExtendDecode(char *buf, uint32_t bufLen,
 	xdr_init_decode(&xdrStream, &xdrBuf, NULL, NULL);
 	p = xdr_inline_decode(&xdrStream, 8);
 	if (unlikely(p == NULL))
-		return true;
+		return -EINVAL;
 	opCode = be32_to_cpup(p++);
 	version = be32_to_cpup(p++);
 
@@ -568,17 +574,17 @@ int NfsExtendProcInfoExtendDecode(char *buf, uint32_t bufLen,
 	func = g_decodeFuncByOpCode[opCode].decodeFunc;
 	if (!func) {
 		enfs_log_error("Enfs deocde op(%u) func is null", opCode);
-		return true;
+		return -EINVAL;
 	}
 	ret = func(extend3ResOut, version, p, &xdrStream);
 	if (ret) {
 		enfs_log_error(
 			"enfs decode failed, opCode:%u, version:%u, ret:%d",
 			opCode, version, ret);
-		return true;
+		return ret;
 	}
 
-	return false;
+	return 0;
 }
 
 #define EXTEND_CMD_MAX_BUF_LEN 819200 /* 800K */
