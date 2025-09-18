@@ -17,7 +17,6 @@
 #include "enfs_remount.h"
 #include "enfs_config.h"
 #include "exten_call.h"
-#include "enfs_tp_common.h"
 
 static struct task_struct *dns_thread;
 static struct workqueue_struct *dns_workq; // timer for test xprt workqueue

@@ -18,7 +18,6 @@
 #include "enfs_rpc_init.h"
 #include "enfs_log.h"
 #include "enfs_multipath.h"
-#include "enfs_tp_common.h"
 #include "mgmt_init.h"
 #include "dns_internal.h"
 #include "shard.h"

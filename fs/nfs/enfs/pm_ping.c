@@ -23,7 +23,6 @@
 #include "enfs.h"
 #include "enfs_log.h"
 #include "enfs_config.h"
-#include "enfs_tp_common.h"
 
 #define SLEEP_INTERVAL 2
 
@@ -127,9 +126,7 @@ static void pm_ping_call_done(struct rpc_task *task, void *data)
 	atomic_dec(&check_xprt_count);
 	if (task->tk_status >= 0) {
 		// xprt is not used,just match paramete.
-		LVOS_TP_START(PM_ALLOC_WORK_INFO_FAILED, &xprt);
 		pm_set_path_state(xprt, PM_STATE_NORMAL);
-		LVOS_TP_END;
 	} else {
 		set_xprt_close_wait(xprt);
 		pm_set_path_state(xprt, PM_STATE_FAULT);

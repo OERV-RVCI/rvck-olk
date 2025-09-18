@@ -10,7 +10,6 @@
 #include "enfs_log.h"
 #include "failover_com.h"
 #include "pm_ping.h"
-#include "enfs_tp_common.h"
 
 static unsigned long failover_get_mulitipath_timeout(struct rpc_clnt *clnt)
 {
@@ -103,8 +102,6 @@ void failover_init_task_req(struct rpc_task *task, struct rpc_rqst *req)
 		req->rq_timeout = enfs_get_config_path_detect_timeout() * HZ;
 		timeout = (unsigned long)enfs_get_config_path_detect_timeout() *
 			  HZ;
-		LVOS_TP_START(PING_TASK_ETIMEDOUT, &task->tk_status);
-		LVOS_TP_END;
 	}
 
 	current_timeout = (ktime_ms_delta(ktime_get(), task->tk_start)) * HZ /

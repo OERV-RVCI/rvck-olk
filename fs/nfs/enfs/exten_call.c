@@ -10,7 +10,6 @@
 
 #include "enfs_log.h"
 #include "exten_call.h"
-#include "enfs_tp_common.h"
 #include "enfs_config.h"
 #include "enfs.h"
 
@@ -654,13 +653,9 @@ int dorado_extend_op(struct rpc_clnt *clnt, char *buf, int *buflen)
 	xdr_arg.pBuf = buf;
 	xdr_arg.maxsize = EXTEND_CMD_MAX_BUF_LEN;
 
-	LVOS_TP_START(EXTEND_CALL_FAILED, &status);
-	LVOS_TP_START(EXTEND_NOT_SUPPORT, &status);
 	status = rpc_call_sync(clnt, &msg,
 			       RPC_TASK_SOFT | RPC_TASK_TIMEOUT |
 				       RPC_TASK_SOFTCONN);
-	LVOS_TP_END;
-	LVOS_TP_END;
 	*buflen = xdr_arg.buflen;
 	return status;
 }
