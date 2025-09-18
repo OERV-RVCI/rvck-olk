@@ -691,8 +691,10 @@ int dorado_query_fs_shard(struct rpc_clnt *clnt, struct enfs_file_uuid *file_uui
 		return -ENOMEM;
 
 	buf = kmalloc(EXTEND_CMD_MAX_BUF_LEN, GFP_KERNEL);
-	if (!buf)
+	if (!buf) {
+		kfree(args);
 		return -ENOMEM;
+	}
 
 	args->opcode = NFS3_GET_FSINFO_OP;
 	args->version = ENFS_VERSION_BUTT - 1;
@@ -758,8 +760,10 @@ int dorado_query_lsId(struct rpc_clnt *clnt, struct enfs_get_ls_version_rsp **re
 		return -ENOMEM;
 
 	buf = kmalloc(EXTEND_CMD_MAX_BUF_LEN, GFP_KERNEL);
-	if (!buf)
+	if (!buf) {
+		kfree(args);
 		return -ENOMEM;
+	}
 
 	args->opcode = NFS3_GET_LS_VERSION_OP;
 	args->version = ENFS_VERSION_BUTT - 1;
@@ -1027,7 +1031,8 @@ int dorado_query_dns(struct rpc_clnt *clnt,
 			(sizeof(struct enfs_dns_query_ip_info_single)), GFP_KERNEL);
 	if (resData == NULL) {
 		kfree(extend3Res);
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto out;
 	}
 	NfsExtendDnsQuerySetRes(extend3Res, resData);
 	*dnsQueryIpInfo = resData;
