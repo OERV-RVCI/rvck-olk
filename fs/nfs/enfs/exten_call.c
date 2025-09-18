@@ -704,6 +704,8 @@ int dorado_query_fs_shard(struct rpc_clnt *clnt, struct enfs_file_uuid *file_uui
 
 	nego_enfs_version(clnt, args);
 	ret = NfsExtendProcInfoExtendEncode(buf, bufLen, args);
+	if (ret)
+		goto out;
 
 	ret = dorado_extend_op(clnt, buf, &bufLen);
 	if (ret) {
@@ -763,6 +765,8 @@ int dorado_query_lsId(struct rpc_clnt *clnt, struct enfs_get_ls_version_rsp **re
 	args->opcode = NFS3_GET_LS_VERSION_OP;
 	args->version = ENFS_VERSION_BUTT - 1;
 	ret = NfsExtendProcInfoExtendEncode(buf, bufLen, args);
+	if (ret)
+		goto out;
 
 	ret = dorado_extend_op(clnt, buf, &bufLen);
 	if (ret) {
@@ -830,6 +834,8 @@ int dorado_query_lifview(struct rpc_clnt *clnt, struct rpc_xprt *xprt,
 
 	nego_enfs_version(clnt, args);
 	ret = NfsExtendProcInfoExtendEncode(buf, bufLen, args);
+	if (ret)
+		goto out;
 
 	ret = dorado_extend_route(clnt, xprt, buf, &bufLen);
 	if (ret) {
@@ -994,6 +1000,8 @@ int dorado_query_dns(struct rpc_clnt *clnt,
 	nego_enfs_version(clnt, args);
 
 	ret = NfsExtendProcInfoExtendEncode(buf, bufLen, args);
+	if (ret)
+		goto out;
 
 	ret = dorado_extend_op(clnt, buf, &bufLen);
 
