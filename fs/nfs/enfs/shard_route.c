@@ -650,8 +650,10 @@ static int query_and_update_shard(struct rpc_clnt *clnt, struct enfs_file_uuid *
 	struct enfs_get_ls_version_rsp *ls_view = NULL;
 
 	ret = dorado_query_fs_shard(clnt, file_uuid, &fsshard_view);
-	if (ret)
+	if (ret) {
+		enfs_log_debug("query fs shard err:%d.\n", ret);
 		return ret;
+	}
 
 	enfs_update_fsshard(GET_DEVID_FROM_UUID(file_uuid), fsshard_view,
 				&flag);
@@ -659,7 +661,7 @@ static int query_and_update_shard(struct rpc_clnt *clnt, struct enfs_file_uuid *
 
 	ret = dorado_query_lsId(clnt, &ls_view);
 	if (ret) {
-		enfs_log_error("update lsId err:%d.\n", ret);
+		enfs_log_debug("query lsId err:%d.\n", ret);
 		return ret;
 	}
 
