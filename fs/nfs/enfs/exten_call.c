@@ -718,6 +718,10 @@ int dorado_query_fs_shard(struct rpc_clnt *clnt, struct enfs_file_uuid *file_uui
 
 	resData = kmalloc(sizeof(struct enfs_shard_view) + sizeof(struct enfs_shard_view_single) *
 				(extend3Res->extend_res_u.fsInfo.num), GFP_KERNEL);
+	if (!resData) {
+		ret = -ENOMEM;
+		goto out;
+	}
 	resData->clusterId = extend3Res->extend_res_u.fsInfo.clusterId;
 	resData->storagePoolId = extend3Res->extend_res_u.fsInfo.storagePoolId;
 	resData->fsId = extend3Res->extend_res_u.fsInfo.fsId;
@@ -775,6 +779,10 @@ int dorado_query_lsId(struct rpc_clnt *clnt, struct enfs_get_ls_version_rsp **re
 				  sizeof(struct enfs_get_ls_version_single) *
 					  (extend3Res->extend_res_u.lsView.num),
 			  GFP_KERNEL);
+	if (!resData) {
+		ret = -ENOMEM;
+		goto out;
+	}
 	resData->num = extend3Res->extend_res_u.lsView.num;
 	resData->clusterId = extend3Res->extend_res_u.lsView.clusterId;
 	memcpy(resData->lsInfo, extend3Res->extend_res_u.lsView.lsInfo,
