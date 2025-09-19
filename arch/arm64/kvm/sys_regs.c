@@ -3678,7 +3678,7 @@ int kvm_arm_sys_reg_set_reg(struct kvm_vcpu *vcpu, const struct kvm_one_reg *reg
 
 static unsigned int num_demux_regs(struct kvm_vcpu *vcpu)
 {
-	return kvm_is_realm(vcpu->kvm) ? 0 : CSSELR_MAX;
+	return _kvm_is_realm(vcpu->kvm) ? 0 : CSSELR_MAX;
 }
 
 static int write_demux_regids(struct kvm_vcpu *vcpu, u64 __user *uindices)
@@ -3697,7 +3697,7 @@ static int write_demux_regids(struct kvm_vcpu *vcpu, u64 __user *uindices)
 
 static unsigned int num_invariant_regs(struct kvm_vcpu *vcpu)
 {
-	return kvm_is_realm(vcpu->kvm) ? 0 : ARRAY_SIZE(invariant_sys_regs);
+	return _kvm_is_realm(vcpu->kvm) ? 0 : ARRAY_SIZE(invariant_sys_regs);
 }
 
 static int write_invariant_regids(struct kvm_vcpu *vcpu, u64 __user *uindices)
@@ -3738,7 +3738,7 @@ static bool copy_reg_to_user(const struct sys_reg_desc *reg, u64 __user **uind)
 
 static bool kvm_realm_sys_reg_hidden_user(const struct kvm_vcpu *vcpu, u64 reg)
 {
-	if (!kvm_is_realm(vcpu->kvm))
+	if (!_kvm_is_realm(vcpu->kvm))
 		return false;
 
 	switch (reg) {

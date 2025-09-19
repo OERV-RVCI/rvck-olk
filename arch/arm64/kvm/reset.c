@@ -75,7 +75,7 @@ int __init kvm_arm_init_sve(void)
 
 unsigned int kvm_sve_get_max_vl(struct kvm *kvm)
 {
-	if (kvm_is_realm(kvm))
+	if (_kvm_is_realm(kvm))
 		return kvm_realm_sve_max_vl();
 	else
 		return kvm_sve_max_vl;

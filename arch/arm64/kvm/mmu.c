@@ -348,7 +348,7 @@ static void stage2_flush_memslot(struct kvm *kvm,
 	phys_addr_t addr = memslot->base_gfn << PAGE_SHIFT;
 	phys_addr_t end = addr + PAGE_SIZE * memslot->npages;
 
-	if (kvm_is_realm(kvm))
+	if (_kvm_is_realm(kvm))
 		kvm_realm_unmap_range(kvm, addr, end - addr, false);
 	else
 		stage2_apply_range_resched(&kvm->arch.mmu, addr, end,
@@ -1019,7 +1019,7 @@ void stage2_unmap_vm(struct kvm *kvm)
 	int idx, bkt;
 
 	/* For realms this is handled by the RMM so nothing to do here */
-	if (kvm_is_realm(kvm))
+	if (_kvm_is_realm(kvm))
 		return;
 
 	idx = srcu_read_lock(&kvm->srcu);
@@ -1120,7 +1120,7 @@ int kvm_phys_addr_ioremap(struct kvm *kvm, phys_addr_t guest_ipa,
 		return -EPERM;
 
 	/* We don't support mapping special pages into a Realm */
-	if (kvm_is_realm(kvm))
+	if (_kvm_is_realm(kvm))
 		return -EPERM;
 
 	size += offset_in_page(guest_ipa);
@@ -1943,7 +1943,7 @@ bool kvm_age_gfn(struct kvm *kvm, struct kvm_gfn_range *range)
 		return false;
 
 	/* We don't support aging for Realms */
-	if (kvm_is_realm(kvm))
+	if (_kvm_is_realm(kvm))
 		return true;
 
 	return kvm_pgtable_stage2_test_clear_young(kvm->arch.mmu.pgt,
@@ -1959,7 +1959,7 @@ bool kvm_test_age_gfn(struct kvm *kvm, struct kvm_gfn_range *range)
 		return false;
 
 	/* We don't support aging for Realms */
-	if (kvm_is_realm(kvm))
+	if (_kvm_is_realm(kvm))
 		return true;
 
 	return kvm_pgtable_stage2_test_clear_young(kvm->arch.mmu.pgt,
