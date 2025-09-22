@@ -14,7 +14,6 @@
 #include "enfs.h"
 
 #define MAX_IPV6_ADDR_LEN (64)
-#define EOPNOTSUPP 95
 #define ENFS_DNS_MAX_NAME_LEN 256
 #define NUM0 0
 #define NUM1 1
