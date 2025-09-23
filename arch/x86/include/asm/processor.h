@@ -151,7 +151,7 @@ struct cpuinfo_x86 {
 	/* Address space bits used by the cache internally */
 	u8			x86_cache_bits;
 	unsigned		initialized : 1;
-	KABI_RESERVE(1)
+	KABI_USE(1, __u32 x86_vfm)
 	KABI_RESERVE(2)
 	KABI_RESERVE(3)
 	KABI_RESERVE(4)
@@ -202,6 +202,7 @@ static inline unsigned long long l1tf_pfn_limit(void)
 
 void init_cpu_devs(void);
 void get_cpu_vendor(struct cpuinfo_x86 *c);
+extern void init_cpu_x86_vfm(struct cpuinfo_x86 *c);
 extern void early_cpu_init(void);
 extern void identify_secondary_cpu(struct cpuinfo_x86 *);
 extern void print_cpu_info(struct cpuinfo_x86 *);
