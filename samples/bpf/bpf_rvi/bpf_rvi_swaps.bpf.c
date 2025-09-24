@@ -126,8 +126,8 @@ s64 dump_swaps(struct bpf_iter__generic_single *ctx)
 	/* Reference: swap_show(). Aligned with LXCFS. */
 	BPF_SEQ_PRINTF(m, "Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority\n");
 	if (swaptotal > 0)
-		BPF_SEQ_PRINTF(m, "none%*svirtual\t\t%llu\t%llu\t0\n",
-				  36, " ", swaptotal * kb_per_page,
+		BPF_SEQ_PRINTF(m, "none\t\t\t\tvirtual\t\t%llu\t\t%llu\t\t0\n",
+				  swaptotal * kb_per_page,
 				  swapusage * kb_per_page); // in KB
 
 	bpf_rcu_read_unlock();
