@@ -16,12 +16,11 @@
 #define NBL_MIN_DESC_NUM			128
 #define NBL_MAX_DESC_NUM			32768
 
-#define NBL_PACKED_DESC_F_NEXT			1
-#define NBL_PACKED_DESC_F_WRITE			2
-
 #define DEFAULT_MAX_PF_QUEUE_PAIRS_NUM		16
 #define DEFAULT_MAX_VF_QUEUE_PAIRS_NUM		2
 
+#define NBL_PACKED_DESC_F_NEXT			1
+#define NBL_PACKED_DESC_F_WRITE			2
 #define NBL_PACKED_DESC_F_AVAIL			7
 #define NBL_PACKED_DESC_F_USED			15
 
@@ -30,26 +29,20 @@
 #define NBL_TX_BUF(tx_ring, i)			(&(((tx_ring)->tx_bufs)[i]))
 #define NBL_RX_BUF(rx_ring, i)			(&(((rx_ring)->rx_bufs)[i]))
 
-#define DESC_NEEDED				(MAX_SKB_FRAGS + 4)
-
-#define NBL_TX_POLL_WEIGHT			256
-
 #define NBL_RX_BUF_256				256
 #define NBL_RX_HDR_SIZE				NBL_RX_BUF_256
-#define NBL_RX_BUF_WRITE			16
-#define NBL_RX_PAD				(NET_IP_ALIGN + NET_SKB_PAD - NBL_BUFFER_HDR_LEN)
+#define NBL_BUFFER_HDR_LEN			(sizeof(struct nbl_rx_extend_head))
+#define NBL_RX_PAD				(NET_IP_ALIGN + NET_SKB_PAD)
+#define NBL_RX_BUFSZ				(2048)
+#define NBL_RXBUF_MIN_ORDER			(10)
+#define NBL_RX_DMA_ATTR				(DMA_ATTR_SKIP_CPU_SYNC | DMA_ATTR_WEAK_ORDERING)
 
+#define NBL_TX_TOTAL_HEADERLEN_SHIFT		24
+#define DESC_NEEDED				(MAX_SKB_FRAGS + 4)
+#define NBL_TX_POLL_WEIGHT			256
 #define NBL_TXD_DATALEN_BITS			16
 #define NBL_TXD_DATALEN_MAX			BIT(NBL_TXD_DATALEN_BITS)
-
 #define MAX_DESC_NUM_PER_PKT			(32)
-
-#define NBL_RX_BUFSZ				(2048)
-#define NBL_RX_BUFSZ_ORDER			(11)
-
-#define NBL_BUFFER_HDR_LEN			(sizeof(struct nbl_rx_extend_head))
-
-#define NBL_ETH_FRAME_MIN_SIZE			60
 
 #define NBL_TX_TSO_MSS_MIN			(256)
 #define NBL_TX_TSO_MSS_MAX			(16383)
@@ -59,10 +52,10 @@
 #define IP_VERSION_V4				(4)
 #define NBL_TX_FLAGS_TSO			BIT(0)
 
-#define NBL_TX_TOTAL_HEADERLEN_SHIFT		24
-
-#define NBL_RX_DMA_ATTR				(DMA_ATTR_SKIP_CPU_SYNC | DMA_ATTR_WEAK_ORDERING)
-#define NBL_RX_PAGE_PER_FRAGS			(PAGE_SIZE >> NBL_RX_BUFSZ_ORDER)
+#define NBL_KTLS_INIT_PAD_LEN			28
+#define NBL_KTLS_SYNC_PKT_LEN			30
+#define NBL_KTLS_PER_CELL_LEN			4096
+#define NBL_KTLS_MAX_CELL_LEN			6144
 
 /* TX inner IP header type */
 enum nbl_tx_iipt {
@@ -213,6 +206,75 @@ struct nbl_rx_extend_head {
 	uint32_t num_buffers :8;
 } __packed;
 
+struct nbl_ktls_init_payload {
+	/* DW0 */
+	u16 initial:1;
+	u16 rsv1:7;
+	u16 sync:1;
+	u16 rsv2:7;
+	u16 sid:10;
+	u16 rsv3:6;
+	/* DW1 */
+	u16 rsv4;
+	u16 rsv5;
+	/* DWX */
+	u8 rec_num[NBL_KTLS_REC_LEN];
+	u8 iv[NBL_KTLS_IV_LEN];
+	u8 pad[NBL_KTLS_INIT_PAD_LEN];
+};
+
+struct nbl_ktls_sync_payload {
+	/* DW0 */
+	u16 initial:1;
+	u16 rsv1:7;
+	u16 sync:1;
+	u16 rsv2:7;
+	u16 sid:10;
+	u16 rsv3:6;
+	/* DW1 */
+	u16 rsv4;
+	u16 rsv5;
+	/* DWX */
+	u8 rec_num[NBL_KTLS_REC_LEN];
+	__be16 redlen;
+	u8 redata[NBL_KTLS_MAX_CELL_LEN];
+};
+
+struct nbl_ktls_init_packet {
+	union nbl_tx_extend_head pkthdr;
+	struct nbl_ktls_init_payload init_payload;
+};
+
+struct nbl_ktls_sync_packet {
+	union nbl_tx_extend_head pkthdr;
+	struct nbl_ktls_sync_payload sync_payload;
+};
+
+enum nbl_ktls_sync_retval {
+	NBL_KTLS_SYNC_DONE,
+	NBL_KTLS_SYNC_SKIP_NO_DATA,
+	NBL_KTLS_SYNC_FAIL,
+};
+
+struct nbl_tx_resync_info {
+	u64 rec_num;
+	u32 resync_len;
+	u32 nr_frags;
+	skb_frag_t frags[MAX_SKB_FRAGS];
+};
+
+#define NBL_XDP_FLAG_TX			BIT(0)
+#define NBL_XDP_FLAG_REDIRECT		BIT(1)
+#define NBL_XDP_FLAG_DROP		BIT(2)
+#define NBL_XDP_FLAG_OVERSIZE		BIT(3)
+#define NBL_XDP_FLAG_MULTICAST		BIT(4)
+
+struct nbl_xdp_output {
+	u64 bytes;
+	u16 desc_done_num;
+	u16 flags;
+};
+DECLARE_STATIC_KEY_FALSE(nbl_xdp_locking_key);
 static inline u16 nbl_unused_rx_desc_count(struct nbl_res_rx_ring *ring)
 {
 	u16 ntc = ring->next_to_clean;
@@ -227,6 +289,53 @@ static inline u16 nbl_unused_tx_desc_count(struct nbl_res_tx_ring *ring)
 	u16 ntu = ring->next_to_use;
 
 	return ((ntc > ntu) ? 0 : ring->desc_num) + ntc - ntu - 1;
+}
+
+static inline bool nbl_ktls_device_offload(struct sk_buff *skb)
+{
+#ifdef CONFIG_TLS_DEVICE
+	return tls_is_skb_tx_device_offloaded(skb);
+#else
+	return false;
+#endif
+}
+
+static inline void nbl_ktls_bigint_decrement(u8 *data, int len)
+{
+	int i;
+
+	for (i = len - 1; i >= 0; i--) {
+		if (data[i] == 0) {
+			data[i] = 0xFF;
+		} else {
+			--data[i];
+			break;
+		}
+	}
+}
+
+static inline
+struct nbl_res_tx_ring *nbl_res_txrx_select_xdp_ring(struct nbl_txrx_mgt *txrx_mgt)
+{
+	int ring_idx;
+	int cpu_id = smp_processor_id();
+	struct nbl_res_tx_ring *xdp_ring;
+
+	if (!txrx_mgt->xdp_ring_num)
+		return NULL;
+
+	if (static_key_enabled(&nbl_xdp_locking_key))
+		ring_idx = cpu_id % txrx_mgt->xdp_ring_num;
+	else
+		ring_idx = cpu_id;
+
+	xdp_ring = txrx_mgt->tx_rings[ring_idx + txrx_mgt->xdp_ring_offset];
+	return xdp_ring;
+}
+
+static inline bool nbl_res_txrx_is_xdp_ring(struct nbl_res_tx_ring *ring)
+{
+	return READ_ONCE(ring->xdp_prog) ? true : false;
 }
 
 #endif

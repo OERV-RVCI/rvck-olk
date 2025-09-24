@@ -24,12 +24,12 @@ struct nbl_index_mgt {
 	struct hlist_head *key_hash;
 	u32 free_index_num;
 	u32 bucket_size;
-	struct mutex lock;  /* support multi thread */
 };
 
-struct nbl_index_entry_key_node {
+struct nbl_index_entry_node {
 	struct hlist_node node;
 	u32 index;      /* the index for key has alloc from index table */
+	u32 index_num;
 	u8 data[];
 };
 

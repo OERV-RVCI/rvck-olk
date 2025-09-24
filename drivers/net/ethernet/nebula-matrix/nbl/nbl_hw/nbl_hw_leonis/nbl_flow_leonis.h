@@ -10,62 +10,50 @@
 #include "nbl_hw.h"
 #include "nbl_resource.h"
 
-#define NBL_EM_PHY_KT_OFFSET				(0x1F000)
+#define NBL_EM_PHY_KT_OFFSET				(0x1E000)
 
-#define NBL_TOTAL_MACVLAN_NUM				2048
+#define NBL_TOTAL_MACVLAN_NUM				4096
 #define NBL_MAX_ACTION_NUM				16
 
-#define NBL_SPORT_ETH_OFFSET				8
-#define NBL_MCC_NUM_PER_SWITCH                          256
-
-#define NBL_FLOW_MCC_INDEX_SIZE				1024
-#define NBL_FLOW_MCC_INDEX_START			(7 * 1024)
+#define NBL_FLOW_MCC_PXE_SIZE				8
+#define NBL_FLOW_MCC_INDEX_SIZE				(4096 - NBL_FLOW_MCC_PXE_SIZE)
+#define NBL_FLOW_MCC_INDEX_START			(4 * 1024)
+#define NBL_FLOW_MCC_BMC_DPORT				0x30D
 
 #define NBL_MACVLAN_TBL_BUCKET_SIZE			64
 #define NBL_MACVLAN_X_AXIS_BUCKET_SIZE			64
 #define NBL_MACVLAN_Y_AXIS_BUCKET_SIZE			16
 
+#define NBL_PP0_POWER					11
+
 enum nbl_flow_mcc_index_type {
 	NBL_MCC_INDEX_ETH,
 	NBL_MCC_INDEX_VSI,
 	NBL_MCC_INDEX_BOND,
+	NBL_MCC_INDEX_BMC,
 };
-
-struct nbl_flow_mcc_index_key {
-	enum nbl_flow_mcc_index_type type;
-	union {
-		u8 eth_id;
-		u16 vsi_id;
-		u32 data;
-	};
-};
-
-#define NBL_FLOW_MCC_INDEX_KEY_INIT(key, key_type_arg, value_arg)				\
-do {												\
-	typeof(key)	__key   = key;								\
-	typeof(key_type_arg)	__type = key_type_arg;						\
-	typeof(value_arg) __value = value_arg;							\
-	__key->type		= __type;							\
-	if (__type == NBL_MCC_INDEX_ETH)							\
-		__key->eth_id	= __value;							\
-	else if (__type == NBL_MCC_INDEX_VSI || __type == NBL_MCC_INDEX_BOND)			\
-		__key->vsi_id	= __value;							\
-} while (0)
 
 #pragma pack(1)
 
 #define NBL_DUPPKT_PTYPE_NA				135
 #define NBL_DUPPKT_PTYPE_NS				136
 
-struct nbl_flow_macvlan_node_data {
+struct nbl_flow_l2_data {
 	struct nbl_flow_fem_entry entry[NBL_FLOW_MACVLAN_MAX];
-	u16 vsi;
+	union {
+		struct nbl_flow_mcc_group *mcc_group;
+		u16 vsi;
+	};
+	bool multi;
+	bool mcast_flow;
+
 };
 
 union nbl_l2_phy_up_data_u {
 	struct nbl_l2_phy_up_data {
 		u32 act0:22;
-		u64 rsv1:62;
+		u32 act1:22;
+		u64 rsv1:40;
 		u32 padding:4;
 		u32 sport:4;
 		u32 svlan_id:16;
@@ -95,11 +83,42 @@ union nbl_l2_phy_lldp_lacp_data_u {
 	u8 hash_key[sizeof(struct nbl_l2_phy_lldp_lacp_data)];
 };
 
+union nbl_l2_phy_up_multi_mcast_data_u {
+	struct nbl_l2_phy_up_multi_mcast_data {
+		u32 act0:22;
+		u32 rsv1:2;
+		u8 padding[16];
+		u32 sport:4;
+		u32 template:4;
+		u32 rsv[5];
+	} __packed info;
+#define NBL_L2_PHY_UP_MULTI_MCAST_DATA_TAB_WIDTH (sizeof(struct nbl_l2_phy_up_multi_mcast_data) \
+		/ sizeof(u32))
+	u32 data[NBL_L2_PHY_UP_MULTI_MCAST_DATA_TAB_WIDTH];
+	u8 hash_key[sizeof(struct nbl_l2_phy_up_multi_mcast_data)];
+};
+
+union nbl_l2_phy_down_multi_mcast_data_u {
+	struct nbl_l2_phy_down_multi_mcast_data {
+		u32 act0:22;
+		u32 rsv1:2;
+		u8 rsv2[16];
+		u32 padding:2;
+		u32 sport:2;
+		u32 template:4;
+		u32 rsv[5];
+	} __packed info;
+#define NBL_L2_PHY_DOWN_MULTI_MCAST_DATA_TAB_WIDTH \
+		(sizeof(struct nbl_l2_phy_down_multi_mcast_data) / sizeof(u32))
+	u32 data[NBL_L2_PHY_DOWN_MULTI_MCAST_DATA_TAB_WIDTH];
+	u8 hash_key[sizeof(struct nbl_l2_phy_down_multi_mcast_data)];
+};
+
 union nbl_l2_phy_down_data_u {
 	struct nbl_l2_phy_down_data {
 		u32 act0:22;
-		u32 rsv2:10;
-		u64 rsv1:52;
+		u32 act1:22;
+		u64 rsv2:40;
 		u32 padding:6;
 		u32 sport:2;
 		u32 svlan_id:16;
@@ -113,77 +132,86 @@ union nbl_l2_phy_down_data_u {
 	u8 hash_key[sizeof(struct nbl_l2_phy_down_data)];
 };
 
-union nbl_l2_phy_up_multi_data_u {
-	struct nbl_l2_phy_up_multi_data {
+union nbl_phy_ul4s_data_u {
+	struct nbl_phy_ul4s_ipv4 {
 		u32 act0:22;
-		u32 act1:22;
-		u32 rsv2:20;
-		u64 rsv1:36;
-		u32 padding:4;
+		u32 rsv2:10;
+		u32 rsv1:24;
 		u32 sport:4;
-		u64 dst_mac:48;
+		u32 l4_dport:16;
+		u32 l4_sport:16;
+		u32 dip_low:4;
+		u32 dip_high:28;
+		u32 sip_low:4;
+		u32 sip_high:28;
 		u32 template:4;
 		u32 rsv[5];
-	} __packed info;
-#define NBL_L2_PHY_UP_MULTI_DATA_TAB_WIDTH (sizeof(struct nbl_l2_phy_up_multi_data) \
-		/ sizeof(u32))
-	u32 data[NBL_L2_PHY_UP_MULTI_DATA_TAB_WIDTH];
-	u8 hash_key[sizeof(struct nbl_l2_phy_up_multi_data)];
-};
-
-union nbl_l2_phy_down_multi_data_u {
-	struct nbl_l2_phy_down_multi_data {
-		u32 act0:22;
-		u32 act1:22;
-		u32 rsv2:20;
-		u64 rsv1:36;
-		u32 padding:6;
-		u32 sport:2;
-		u64 dst_mac:48;
-		u32 template:4;
-		u32 rsv[5];
-	} __packed info;
-#define NBL_L2_PHY_DOWN_MULTI_DATA_TAB_WIDTH (sizeof(struct nbl_l2_phy_down_multi_data) \
-		/ sizeof(u32))
-	u32 data[NBL_L2_PHY_DOWN_MULTI_DATA_TAB_WIDTH];
-	u8 hash_key[sizeof(struct nbl_l2_phy_down_multi_data)];
-};
-
-union nbl_l3_phy_up_multi_data_u {
-	struct nbl_l3_phy_up_multi_data {
-		u32 act0:22;
-		u32 act1:22;
-		u32 rsv2:20;
-		u64 rsv1:60;
-		u32 padding:12;
-		u32 sport:4;
-		u64 dst_mac:16;
-		u32 template:4;
-		u32 rsv[5];
-	} __packed info;
-#define NBL_L3_PHY_UP_MULTI_DATA_TAB_WIDTH (sizeof(struct nbl_l3_phy_up_multi_data) \
-		/ sizeof(u32))
-	u32 data[NBL_L3_PHY_UP_MULTI_DATA_TAB_WIDTH];
-	u8 hash_key[sizeof(struct nbl_l3_phy_up_multi_data)];
-};
-
-union nbl_l3_phy_down_multi_data_u {
-	struct nbl_l3_phy_down_multi_data {
-		u32 act0:22;
-		u32 act1:22;
-		u32 rsv3:20;
+	} __packed ipv4_info;
+	struct nbl_phy_ul4s_ipv6 {
+		u64 act0:22;
+		u64 rsv3:42;
 		u64 rsv2;
-		u64 rsv1:4;
-		u32 padding:6;
+		u64 rsv1:8;
+		u64 sport:4;
+		u64 dport:16;
+		u64 l4_dport:16;
+		u64 l4_sport:16;
+		u64 sip3:4;
+		u64 sip2;
+		u64 sip1:60;
+		u64 template:4;
+	} __packed ipv6_info;
+	u32 data[NBL_KT_BYTE_LEN / 4];
+	u8 hash_key[NBL_KT_BYTE_LEN];
+};
+
+union nbl_phy_dprbac_data_u {
+	struct nbl_phy_dprbac_ipv4 {
+		u32 act0:22;
+		u32 rsv2:10;
+		u64 rsv1:56;
+		u32 padding:2;
 		u32 sport:2;
-		u64 dst_mac:16;
+		u32 dip_low:4;
+		u32 dip_high:28;
+		u32 sip_low:4;
+		u32 sip_high:28;
+		u32 template:4;
+		u32 rsv[5];
+	} __packed ipv4_info;
+	struct nbl_phy_dprbac_ipv6 {
+		u32 act0:22;
+		u32 rsv2:10;
+		u64 rsv1:24;
+		u32 padding:2;
+		u32 sport:2;
+		u64 dip3:36;
+		u64 dip2;
+		u64 dip1:28;
+		u64 sip3:36;
+		u64 sip2;
+		u64 sip1:28;
+		u32 template:4;
+	} __packed ipv6_info;
+	u32 data[NBL_KT_BYTE_LEN / 4];
+	u8 hash_key[NBL_KT_BYTE_LEN];
+};
+
+union nbl_nd_upcall_data_u {
+	struct nbl_nd_upcall_data {
+		u32 act0:22;
+		u32 act1:22;
+		u32 rsv2:4;
+		u8 padding[10];
+		u32 rsv1:12;
+		u32 ptype:16;
 		u32 template:4;
 		u32 rsv[5];
 	} __packed info;
-#define NBL_L3_PHY_DOWN_MULTI_DATA_TAB_WIDTH (sizeof(struct nbl_l3_phy_down_multi_data) \
+#define NBL_PMD_ND_UPCALL_DATA_TAB_WIDTH (sizeof(struct nbl_nd_upcall_data) \
 		/ sizeof(u32))
-	u32 data[NBL_L3_PHY_DOWN_MULTI_DATA_TAB_WIDTH];
-	u8 hash_key[sizeof(struct nbl_l3_phy_down_multi_data)];
+	u32 data[NBL_PMD_ND_UPCALL_DATA_TAB_WIDTH];
+	u8 hash_key[sizeof(struct nbl_nd_upcall_data)];
 };
 
 union nbl_common_data_u {

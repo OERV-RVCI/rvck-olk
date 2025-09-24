@@ -11,7 +11,7 @@
 
 #define NBL_MAX_PF_LEONIS			8
 /* product NO(ASIC SNIC as 3)-V NO.R NO.B NO.SP NO */
-#define NBL_LEONIS_DRIVER_VERSION	"3-3.1.120"
+#define NBL_LEONIS_DRIVER_VERSION	"5-3.1.512.2"
 
 int nbl_flow_mgt_start_leonis(struct nbl_resource_mgt *res_mgt);
 void nbl_flow_mgt_stop_leonis(struct nbl_resource_mgt *res_mgt);
@@ -19,6 +19,11 @@ int nbl_flow_setup_ops_leonis(struct nbl_resource_ops *resource_ops);
 void nbl_flow_remove_ops_leonis(struct nbl_resource_ops *resource_ops);
 int nbl_queue_setup_ops_leonis(struct nbl_resource_ops *resource_ops);
 void nbl_queue_remove_ops_leonis(struct nbl_resource_ops *resource_ops);
+int nbl_tc_flow_mgt_start_leonis(struct nbl_resource_mgt *res_mgt);
+void nbl_tc_flow_mgt_stop_leonis(struct nbl_resource_mgt *res_mgt);
+int nbl_tc_flow_setup_ops_leonis(struct nbl_resource_ops *resource_ops);
+void nbl_tc_flow_remove_ops_leonis(struct nbl_resource_ops *resource_ops);
+int nbl_tc_flow_flush_flow(struct nbl_resource_mgt *res_mgt);
 
 void nbl_queue_mgt_init_leonis(struct nbl_queue_mgt *queue_mgt);
 int nbl_res_queue_setup_qid_map_table_leonis(struct nbl_resource_mgt *res_mgt, u16 func_id,

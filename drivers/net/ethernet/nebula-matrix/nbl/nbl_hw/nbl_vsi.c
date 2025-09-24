@@ -23,8 +23,17 @@ static int nbl_res_set_promisc_mode(void *priv, u16 vsi_id, u16 mode)
 
 static int nbl_res_set_spoof_check_addr(void *priv, u16 vsi_id, u8 *mac)
 {
+	u16 func_id;
 	struct nbl_resource_mgt *res_mgt = (struct nbl_resource_mgt *)priv;
+	struct nbl_vsi_info *vsi_info = NBL_RES_MGT_TO_VSI_INFO(res_mgt);
 	struct nbl_phy_ops *phy_ops = NBL_RES_MGT_TO_PHY_OPS(res_mgt);
+
+	func_id = nbl_res_vsi_id_to_func_id(res_mgt, vsi_id);
+	/* if pf has cfg vf-mac, and the vf has active. it can change spoof mac. */
+	if (!is_zero_ether_addr(vsi_info->mac_info[func_id].mac) &&
+	    nbl_res_check_func_active_by_queue(res_mgt, func_id)) {
+		return 0;
+	}
 
 	return phy_ops->set_spoof_check_addr(NBL_RES_MGT_TO_PHY_PRIV(res_mgt), vsi_id, mac);
 }
@@ -43,18 +52,22 @@ static int nbl_res_set_vf_spoof_check(void *priv, u16 vsi_id, int vfid, u8 enabl
 static u16 nbl_res_get_vf_function_id(void *priv, u16 vsi_id, int vfid)
 {
 	struct nbl_resource_mgt *res_mgt = (struct nbl_resource_mgt *)priv;
-	struct nbl_sriov_info *sriov_info;
 	u16 vf_vsi;
 	int pfid = nbl_res_vsi_id_to_pf_id(res_mgt, vsi_id);
-
-	sriov_info = &NBL_RES_MGT_TO_SRIOV_INFO(res_mgt)[pfid];
-
-	if (vfid >= sriov_info->active_vf_num)
-		return U16_MAX;
 
 	vf_vsi = vfid == -1 ? vsi_id : nbl_res_pfvfid_to_vsi_id(res_mgt, pfid, vfid, NBL_VSI_DATA);
 
 	return nbl_res_vsi_id_to_func_id(res_mgt, vf_vsi);
+}
+
+static u16 nbl_res_get_vf_vsi_id(void *priv, u16 vsi_id, int vfid)
+{
+	struct nbl_resource_mgt *res_mgt = (struct nbl_resource_mgt *)priv;
+	u16 vf_vsi;
+	int pfid = nbl_res_vsi_id_to_pf_id(res_mgt, vsi_id);
+
+	vf_vsi = vfid == -1 ? vsi_id : nbl_res_pfvfid_to_vsi_id(res_mgt, pfid, vfid, NBL_VSI_DATA);
+	return vf_vsi;
 }
 
 static int nbl_res_vsi_init_chip_module(void *priv)
@@ -103,13 +116,88 @@ static void nbl_res_get_phy_caps(void *priv, u8 eth_id, struct nbl_phy_caps *phy
 	phy_caps->pause_param = 0x3;
 }
 
-static void nbl_res_get_phy_state(void *priv, u8 eth_id, struct nbl_phy_state *phy_state)
+static void nbl_res_register_func_mac(void *priv, u8 *mac, u16 func_id)
 {
-	/*TODO need to get it through adminq*/
-	phy_state->current_speed = SPEED_10000;
-	phy_state->fec_mode = ETHTOOL_FEC_OFF;
-	phy_state->fc.tx_pause = 1;
-	phy_state->fc.rx_pause = 1;
+	struct nbl_resource_mgt *res_mgt = (struct nbl_resource_mgt *)priv;
+	struct nbl_vsi_info *vsi_info = NBL_RES_MGT_TO_VSI_INFO(res_mgt);
+
+	if (func_id >= NBL_MAX_FUNC)
+		return;
+
+	ether_addr_copy(vsi_info->mac_info[func_id].mac, mac);
+}
+
+static int nbl_res_register_func_link_forced(void *priv, u16 func_id, u8 link_forced,
+					     bool *should_notify)
+{
+	struct nbl_resource_mgt *res_mgt = (struct nbl_resource_mgt *)priv;
+	struct nbl_resource_info *resource_info = NBL_RES_MGT_TO_RES_INFO(res_mgt);
+
+	if (func_id >= NBL_MAX_FUNC)
+		return -EINVAL;
+
+	resource_info->link_forced_info[func_id] = link_forced;
+	*should_notify = test_bit(func_id, resource_info->func_bitmap);
+
+	return 0;
+}
+
+static int nbl_res_get_link_forced(void *priv, u16 vsi_id)
+{
+	struct nbl_resource_mgt *res_mgt = (struct nbl_resource_mgt *)priv;
+	struct nbl_resource_info *resource_info = NBL_RES_MGT_TO_RES_INFO(res_mgt);
+	u16 func_id = nbl_res_vsi_id_to_func_id(res_mgt, vsi_id);
+
+	if (func_id >= NBL_MAX_FUNC)
+		return -EINVAL;
+
+	return resource_info->link_forced_info[func_id];
+}
+
+static int nbl_res_register_func_trust(void *priv, u16 func_id,
+				       bool trusted, bool *should_notify)
+{
+	struct nbl_resource_mgt *res_mgt = (struct nbl_resource_mgt *)priv;
+	struct nbl_resource_info *resource_info = NBL_RES_MGT_TO_RES_INFO(res_mgt);
+	struct nbl_vsi_info *vsi_info = NBL_RES_MGT_TO_VSI_INFO(res_mgt);
+
+	if (func_id >= NBL_MAX_FUNC)
+		return -EINVAL;
+
+	vsi_info->mac_info[func_id].trusted = trusted;
+	*should_notify = test_bit(func_id, resource_info->func_bitmap);
+
+	return 0;
+}
+
+static int nbl_res_register_func_vlan(void *priv, u16 func_id,
+				      u16 vlan_tci, u16 vlan_proto, bool *should_notify)
+{
+	struct nbl_resource_mgt *res_mgt = (struct nbl_resource_mgt *)priv;
+	struct nbl_resource_info *resource_info = NBL_RES_MGT_TO_RES_INFO(res_mgt);
+	struct nbl_vsi_info *vsi_info = NBL_RES_MGT_TO_VSI_INFO(res_mgt);
+
+	if (func_id >= NBL_MAX_FUNC)
+		return -EINVAL;
+
+	vsi_info->mac_info[func_id].vlan_proto = vlan_proto;
+	vsi_info->mac_info[func_id].vlan_tci = vlan_tci;
+	*should_notify = test_bit(func_id, resource_info->func_bitmap);
+
+	return 0;
+}
+
+static int nbl_res_register_rate(void *priv, u16 func_id, int rate)
+{
+	struct nbl_resource_mgt *res_mgt = (struct nbl_resource_mgt *)priv;
+	struct nbl_vsi_info *vsi_info = NBL_RES_MGT_TO_VSI_INFO(res_mgt);
+
+	if (func_id >= NBL_MAX_FUNC)
+		return -EINVAL;
+
+	vsi_info->mac_info[func_id].rate = rate;
+
+	return 0;
 }
 
 /* NBL_vsi_SET_OPS(ops_name, func)
@@ -124,8 +212,14 @@ do {										\
 	NBL_VSI_SET_OPS(set_spoof_check_addr, nbl_res_set_spoof_check_addr);	\
 	NBL_VSI_SET_OPS(set_vf_spoof_check, nbl_res_set_vf_spoof_check);	\
 	NBL_VSI_SET_OPS(get_phy_caps, nbl_res_get_phy_caps);			\
-	NBL_VSI_SET_OPS(get_phy_state, nbl_res_get_phy_state);			\
 	NBL_VSI_SET_OPS(get_vf_function_id, nbl_res_get_vf_function_id);	\
+	NBL_VSI_SET_OPS(get_vf_vsi_id, nbl_res_get_vf_vsi_id);			\
+	NBL_VSI_SET_OPS(register_func_mac, nbl_res_register_func_mac);		\
+	NBL_VSI_SET_OPS(register_func_link_forced, nbl_res_register_func_link_forced);	\
+	NBL_VSI_SET_OPS(register_func_vlan, nbl_res_register_func_vlan);	\
+	NBL_VSI_SET_OPS(get_link_forced, nbl_res_get_link_forced);		\
+	NBL_VSI_SET_OPS(register_func_rate, nbl_res_register_rate);		\
+	NBL_VSI_SET_OPS(register_func_trust, nbl_res_register_func_trust);	\
 } while (0)
 
 /* Structure starts here, adding an op should not modify anything below */

@@ -12,6 +12,7 @@ struct nbl_common_wq_mgt {
 	struct workqueue_struct *net_dev_wq;
 	struct workqueue_struct *keepalive_wq;
 	struct workqueue_struct *rdma_wq;
+	struct workqueue_struct *rdma_event_wq;
 };
 
 void nbl_convert_mac(u8 *mac, u8 *reverse_mac)
@@ -34,9 +35,12 @@ void nbl_common_queue_work(struct work_struct *task, bool ctrl_task, bool single
 		queue_work(wq_mgt->net_dev_wq, task);
 }
 
-void nbl_common_queue_work_rdma(struct work_struct *task)
+void nbl_common_queue_work_rdma(struct work_struct *task, bool singlethread)
 {
-	queue_work(wq_mgt->rdma_wq, task);
+	if (singlethread)
+		queue_work(wq_mgt->rdma_wq, task);
+	else
+		queue_work(wq_mgt->rdma_event_wq, task);
 }
 
 void nbl_common_queue_delayed_work(struct delayed_work *task, u32 msec,
@@ -82,6 +86,7 @@ void nbl_common_flush_task(struct work_struct *task)
 
 void nbl_common_destroy_wq(void)
 {
+	destroy_workqueue(wq_mgt->rdma_event_wq);
 	destroy_workqueue(wq_mgt->rdma_wq);
 	destroy_workqueue(wq_mgt->keepalive_wq);
 	destroy_workqueue(wq_mgt->net_dev_wq);
@@ -116,10 +121,16 @@ int nbl_common_create_wq(void)
 		goto alloc_net_dev_wq_failed;
 	}
 
-	wq_mgt->rdma_wq = alloc_workqueue("%s", WQ_UNBOUND, 0, "nbl_rdma_wq1");
+	wq_mgt->rdma_wq = create_singlethread_workqueue("nbl_rdma_wq1");
 	if (!wq_mgt->rdma_wq) {
 		pr_err("Failed to create workqueue nbl_rdma_wq1\n");
 		goto alloc_rdma_wq_failed;
+	}
+
+	wq_mgt->rdma_event_wq = alloc_workqueue("%s", WQ_UNBOUND, 0, "nbl_rdma_wq2");
+	if (!wq_mgt->rdma_event_wq) {
+		pr_err("Failed to create workqueue nbl_rdma_wq2\n");
+		goto alloc_rdma_event_wq_failed;
 	}
 
 	wq_mgt->keepalive_wq = alloc_workqueue("%s", WQ_MEM_RECLAIM | WQ_UNBOUND,
@@ -132,7 +143,9 @@ int nbl_common_create_wq(void)
 	return 0;
 
 alloc_keepalive_wq_failed:
-	destroy_workqueue(wq_mgt->keepalive_wq);
+	destroy_workqueue(wq_mgt->rdma_event_wq);
+alloc_rdma_event_wq_failed:
+	destroy_workqueue(wq_mgt->rdma_wq);
 alloc_rdma_wq_failed:
 	destroy_workqueue(wq_mgt->net_dev_wq);
 alloc_net_dev_wq_failed:
@@ -177,7 +190,7 @@ void *nbl_common_init_index_table(struct nbl_index_tbl_key *key)
 	if (!index_mgt->bitmap)
 		goto alloc_bitmap_failed;
 
-	bucket_size = key->index_size / NBL_INDEX_HASH_DIVISOR;
+	bucket_size = DIV_ROUND_UP(key->index_size, NBL_INDEX_HASH_DIVISOR);
 	index_mgt->key_hash = devm_kcalloc(key->dev, bucket_size,
 					   sizeof(struct hlist_head), GFP_KERNEL);
 	if (!index_mgt->key_hash)
@@ -189,7 +202,6 @@ void *nbl_common_init_index_table(struct nbl_index_tbl_key *key)
 	memcpy(&index_mgt->tbl_key, key, sizeof(struct nbl_index_tbl_key));
 	index_mgt->free_index_num = key->index_size;
 	index_mgt->bucket_size = bucket_size;
-	mutex_init(&index_mgt->lock);
 
 	return index_mgt;
 
@@ -201,30 +213,63 @@ alloc_bitmap_failed:
 	return NULL;
 }
 
-void nbl_common_remove_index_table(void *priv)
+static void nbl_common_free_index_node(struct nbl_index_mgt *index_mgt,
+				       struct nbl_index_entry_node *idx_node)
+{
+	int i;
+	u32 free_index;
+
+	free_index = idx_node->index - index_mgt->tbl_key.start_index;
+	for (i = 0; i < idx_node->index_num; i++)
+		clear_bit(free_index + i, index_mgt->bitmap);
+	index_mgt->free_index_num += idx_node->index_num;
+	hlist_del(&idx_node->node);
+	devm_kfree(index_mgt->tbl_key.dev, idx_node);
+}
+
+void nbl_common_remove_index_table(void *priv, struct nbl_index_tbl_del_key *key)
 {
 	struct nbl_index_mgt *index_mgt = (struct nbl_index_mgt *)priv;
 	struct device *dev;
-	struct nbl_index_entry_key_node *key_node;
+	struct nbl_index_entry_node *idx_node;
 	struct hlist_node *list_node;
 	int i;
 
 	if (!index_mgt)
 		return;
 
-	mutex_lock(&index_mgt->lock);
 	dev = index_mgt->tbl_key.dev;
-	devm_kfree(dev, index_mgt->bitmap);
 	for (i = 0; i < index_mgt->bucket_size; i++) {
-		hlist_for_each_entry_safe(key_node, list_node, index_mgt->key_hash + i, node) {
-			hlist_del(&key_node->node);
-			devm_kfree(dev, key_node);
+		hlist_for_each_entry_safe(idx_node, list_node, index_mgt->key_hash + i, node) {
+			if (key && key->action_func)
+				key->action_func(key->action_priv, idx_node->index, idx_node->data);
+			nbl_common_free_index_node(index_mgt, idx_node);
 		}
 	}
 
+	devm_kfree(dev, index_mgt->bitmap);
 	devm_kfree(dev, index_mgt->key_hash);
-	mutex_unlock(&index_mgt->lock);
 	devm_kfree(dev, index_mgt);
+}
+
+void nbl_common_scan_index_table(void *priv, struct nbl_index_tbl_scan_key *key)
+{
+	struct nbl_index_mgt *index_mgt = (struct nbl_index_mgt *)priv;
+	struct nbl_index_entry_node *idx_node;
+	struct hlist_node *list_node;
+	int i;
+
+	if (!index_mgt)
+		return;
+
+	for (i = 0; i < index_mgt->bucket_size; i++) {
+		hlist_for_each_entry_safe(idx_node, list_node, index_mgt->key_hash + i, node) {
+			if (key && key->action_func)
+				key->action_func(key->action_priv, idx_node->index, idx_node->data);
+			if (key && key->del)
+				nbl_common_free_index_node(index_mgt, idx_node);
+		}
+	}
 }
 
 static u32 nbl_common_calculate_hash_key(void *key, u32 key_size, u32 bucket_size)
@@ -245,90 +290,197 @@ static u32 nbl_common_calculate_hash_key(void *key, u32 key_size, u32 bucket_siz
 	return hash_value % bucket_size;
 }
 
-static int nbl_common_alloc_index(struct nbl_index_mgt *index_mgt, void *key, u32 key_size)
+int nbl_common_find_available_idx(unsigned long *addr, u32 size, u32 idx_num, u32 multiple)
 {
-	struct nbl_index_entry_key_node *key_node;
+	u32 first_idx;
+	u32 next_idx;
+	u32 cur_idx;
+	u32 idx_num_tmp;
+
+	first_idx = find_first_zero_bit(addr, size);
+	/* most find a index */
+	if (idx_num == 1)
+		return first_idx;
+
+	while (first_idx < size) {
+		if (first_idx % multiple == 0) {
+			idx_num_tmp = idx_num - 1;
+			cur_idx = first_idx;
+			while (cur_idx < size && idx_num_tmp > 0) {
+				next_idx = find_next_zero_bit(addr, size, cur_idx + 1);
+				if (next_idx - cur_idx != 1)
+					break;
+				idx_num_tmp--;
+				cur_idx = next_idx;
+			}
+
+			/* has reach tail, return err */
+			if (cur_idx >= size)
+				return size;
+
+			/* has find available idx, return the begin idx */
+			if (!idx_num_tmp)
+				return first_idx;
+
+			first_idx = first_idx + multiple;
+		} else {
+			first_idx = first_idx + 1;
+		}
+
+		first_idx = find_next_zero_bit(addr, size, first_idx);
+	}
+
+	return size;
+}
+
+/**
+ * alloc available index
+ * it support alloc continuous idx (num > 1) and can select base_idx's multiple
+ * input
+ *	@key: must not NULL;
+ *	@key_size: must > 0;
+ *	@extra_key: if alloc idx num > 1, e extra_key must not NULL, detail see
+		struct nbl_index_key_extra
+ *	@data: the node include extra data if not NULL
+ *	@data_size:
+ *	@output_data: optional, return the tbl's data if the output_data not NULL
+ */
+int nbl_common_alloc_index(void *priv, void *key, struct nbl_index_key_extra *extra_key,
+			   void *data, u32 data_size, void **output_data)
+{
+	struct nbl_index_mgt *index_mgt = (struct nbl_index_mgt *)priv;
+	struct nbl_index_entry_node *idx_node;
 	u32 key_node_size;
 	u32 index = U32_MAX;
 	u32 hash_value;
 	u32 base_index;
+	u32 key_size = index_mgt->tbl_key.key_size;
+	u32 idx_num = 1;
+	u32 idx_multiple = 1;
+	u32 i;
 
 	if (!index_mgt->free_index_num)
 		return index;
 
-	base_index = find_first_zero_bit(index_mgt->bitmap, index_mgt->tbl_key.index_size);
+	if (extra_key) {
+		idx_num = extra_key->index_num;
+		idx_multiple = extra_key->begin_idx_multiple;
+	}
+
+	base_index = nbl_common_find_available_idx(index_mgt->bitmap,
+						   index_mgt->tbl_key.index_size, idx_num,
+						   idx_multiple);
 	if (base_index >= index_mgt->tbl_key.index_size)
 		return index;
 
-	key_node_size = sizeof(struct nbl_index_entry_key_node) + key_size;
-	key_node = devm_kzalloc(index_mgt->tbl_key.dev, key_node_size, GFP_KERNEL);
-	if (!key_node)
+	key_node_size = sizeof(struct nbl_index_entry_node) + key_size + data_size;
+	idx_node = devm_kzalloc(index_mgt->tbl_key.dev, key_node_size, GFP_ATOMIC);
+	if (!idx_node)
 		return index;
 
-	set_bit(base_index, index_mgt->bitmap);
-	index_mgt->free_index_num--;
+	for (i = 0; i < idx_num; i++)
+		set_bit(base_index + i, index_mgt->bitmap);
+
+	index_mgt->free_index_num -= idx_num;
 	index = base_index + index_mgt->tbl_key.start_index;
 	hash_value = nbl_common_calculate_hash_key(key, key_size, index_mgt->bucket_size);
-	key_node->index = index;
-	memcpy(key_node->data, key, key_size);
-	hlist_add_head(&key_node->node, index_mgt->key_hash + hash_value);
+	idx_node->index = index;
+	idx_node->index_num = idx_num;
+	memcpy(idx_node->data, key, key_size);
+	if (data)
+		memcpy(idx_node->data + key_size, data, data_size);
+
+	if (output_data)
+		*output_data = idx_node->data + key_size;
+
+	hlist_add_head(&idx_node->node, index_mgt->key_hash + hash_value);
 
 	return index;
 }
 
 /**
- * if the key has alloced a available index, return the index;
- * else alloc a new index, store the key, and return the index.
+ * if the key has alloced available index, return the base index;
+ * default alloc available index, if not alloc, struct nbl_index_key_extra need
+ * it support alloc continuous idx (num > 1) and can select base_idx's multiple
+ * input
+ *	@extra_key: if alloc idx num > 1, the extra_key must not NULL, detail see
+		struct nbl_index_key_extra
  */
-int nbl_common_get_index(void *priv, void *key, u32 key_size)
+int nbl_common_get_index(void *priv, void *key, struct nbl_index_key_extra *extra_key)
 {
 	struct nbl_index_mgt *index_mgt = (struct nbl_index_mgt *)priv;
-	struct nbl_index_entry_key_node *key_node;
+	struct nbl_index_entry_node *idx_node;
 	u32 index = U32_MAX;
 	u32 hash_value;
-
-	if (key_size != index_mgt->tbl_key.key_size)
-		return index;
+	u32 key_size = index_mgt->tbl_key.key_size;
 
 	hash_value = nbl_common_calculate_hash_key(key, key_size, index_mgt->bucket_size);
-	mutex_lock(&index_mgt->lock);
-	hlist_for_each_entry(key_node, index_mgt->key_hash + hash_value, node)
-		if (!memcmp(key_node->data, key, key_size)) {
-			index = key_node->index;
-			mutex_unlock(&index_mgt->lock);
-			return index;
+	hlist_for_each_entry(idx_node, index_mgt->key_hash + hash_value, node)
+		if (!memcmp(idx_node->data, key, key_size)) {
+			index = idx_node->index;
+			goto out;
 		}
 
-	index = nbl_common_alloc_index(index_mgt, key, key_size);
-	mutex_unlock(&index_mgt->lock);
+	if (extra_key && extra_key->not_alloc_new_node)
+		goto out;
 
+	index = nbl_common_alloc_index(index_mgt, key, extra_key, NULL, 0, NULL);
+out:
 	return index;
 }
 
-void nbl_common_free_index(void *priv, void *key, u32 key_size)
+/**
+ * if the key has alloced available index, return the base index;
+ * default alloc available index, if not alloc, struct nbl_index_key_extra need
+ * it support alloc continuous idx (num > 1) and can select base_idx's multiple
+ * input
+ *	@key: must not NULL;
+ *	@key_size: must > 0;
+ *	@extra_key: if alloc idx num > 1, e extra_key must not NULL, detail see
+			struct nbl_index_key_extra
+ *	@data: the node include extra data if not NULL
+ *	@data_size:
+ *	@output_data: optional, return the tbl's data if the output_data not NULL
+ */
+int nbl_common_get_index_with_data(void *priv, void *key, struct nbl_index_key_extra *extra_key,
+				   void *data, u32 data_size, void **output_data)
 {
 	struct nbl_index_mgt *index_mgt = (struct nbl_index_mgt *)priv;
-	struct nbl_index_entry_key_node *key_node;
+	struct nbl_index_entry_node *idx_node;
+	u32 index = U32_MAX;
 	u32 hash_value;
-	u32 free_index;
-
-	if (key_size != index_mgt->tbl_key.key_size)
-		return;
+	u32 key_size = index_mgt->tbl_key.key_size;
 
 	hash_value = nbl_common_calculate_hash_key(key, key_size, index_mgt->bucket_size);
-	mutex_lock(&index_mgt->lock);
-	hlist_for_each_entry(key_node, index_mgt->key_hash + hash_value, node)
-		if (!memcmp(key_node->data, key, key_size)) {
-			free_index = key_node->index - index_mgt->tbl_key.start_index;
-			clear_bit(free_index, index_mgt->bitmap);
-			hlist_del(&key_node->node);
-			devm_kfree(index_mgt->tbl_key.dev, key_node);
-			index_mgt->free_index_num++;
-			mutex_unlock(&index_mgt->lock);
-			return;
+	hlist_for_each_entry(idx_node, index_mgt->key_hash + hash_value, node)
+		if (!memcmp(idx_node->data, key, key_size)) {
+			index = idx_node->index;
+			if (output_data)
+				*output_data = idx_node->data + key_size;
+			goto out;
 		}
 
-	mutex_unlock(&index_mgt->lock);
+	if (extra_key && extra_key->not_alloc_new_node)
+		goto out;
+
+	index = nbl_common_alloc_index(index_mgt, key, extra_key, data, data_size, output_data);
+out:
+	return index;
+}
+
+void nbl_common_free_index(void *priv, void *key)
+{
+	struct nbl_index_mgt *index_mgt = (struct nbl_index_mgt *)priv;
+	struct nbl_index_entry_node *idx_node;
+	u32 hash_value;
+	u32 key_size = index_mgt->tbl_key.key_size;
+
+	hash_value = nbl_common_calculate_hash_key(key, key_size, index_mgt->bucket_size);
+	hlist_for_each_entry(idx_node, index_mgt->key_hash + hash_value, node)
+		if (!memcmp(idx_node->data, key, key_size)) {
+			nbl_common_free_index_node(index_mgt, idx_node);
+			return;
+		}
 }
 
 /**
@@ -370,16 +522,14 @@ alloc_hash_failed:
 /**
  * alloc a hash node, and add to hlist_head
  */
-int nbl_common_alloc_hash_node(void *priv, void *key, void *data)
+int nbl_common_alloc_hash_node(void *priv, void *key, void *data, void **out_data)
 {
 	struct nbl_hash_tbl_mgt *tbl_mgt = (struct nbl_hash_tbl_mgt *)priv;
 	struct nbl_hash_entry_node *hash_node;
 	u32 hash_value;
-	u32 node_size;
 	u16 key_size;
 	u16 data_size;
 
-	node_size = sizeof(struct nbl_hash_entry_node);
 	hash_node = devm_kzalloc(tbl_mgt->tbl_key.dev, sizeof(struct nbl_hash_entry_node),
 				 GFP_KERNEL);
 	if (!hash_node)
@@ -405,6 +555,8 @@ int nbl_common_alloc_hash_node(void *priv, void *key, void *data)
 
 	hlist_add_head(&hash_node->node, tbl_mgt->hash + hash_value);
 	tbl_mgt->node_num++;
+	if (out_data)
+		*out_data = hash_node->data;
 
 	if (tbl_mgt->tbl_key.lock_need)
 		mutex_unlock(&tbl_mgt->lock);
@@ -562,7 +714,7 @@ void nbl_common_remove_hash_table(void *priv, struct nbl_hash_tbl_del_key *key)
 	for (i = 0; i < tbl_mgt->tbl_key.bucket_size; i++) {
 		head = tbl_mgt->hash + i;
 		hlist_for_each_entry_safe(hash_node, safe_node, head, node) {
-			if (key->action_func)
+			if (key && key->action_func)
 				key->action_func(key->action_priv, hash_node->key, hash_node->data);
 			nbl_common_remove_hash_node(tbl_mgt, hash_node);
 		}
@@ -951,4 +1103,22 @@ void nbl_common_remove_hash_xy_table(void *priv, struct nbl_hash_xy_tbl_del_key 
 
 	dev = tbl_mgt->tbl_key.dev;
 	devm_kfree(dev, tbl_mgt);
+}
+
+void nbl_flow_direct_parse_tlv_data(u8 *tlv, u32 length, handle_tlv callback, void *data)
+{
+	u32 offset = 0;
+	u16 type, len;
+	int ret;
+
+	while (offset + NBL_CHAN_FDIR_TLV_HEADER_LEN <= length) {
+		type = *(u16 *)tlv;
+		len = *(u16 *)(tlv + 2);
+		ret = callback(type, len, tlv + 4, data);
+		if (ret)
+			break;
+
+		offset += (NBL_CHAN_FDIR_TLV_HEADER_LEN + len);
+		tlv += (NBL_CHAN_FDIR_TLV_HEADER_LEN + len);
+	}
 }

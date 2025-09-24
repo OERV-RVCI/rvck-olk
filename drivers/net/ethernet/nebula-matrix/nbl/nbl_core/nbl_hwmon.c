@@ -34,52 +34,49 @@ static int nbl_hwmon_read(struct device *dev, enum hwmon_sensor_types type,
 	struct nbl_service_ops *serv_ops = NBL_DEV_MGT_TO_SERV_OPS(dev_mgt);
 	struct nbl_common_info *common = NBL_DEV_MGT_TO_COMMON(dev_mgt);
 	u8 eth_id = NBL_COMMON_TO_ETH_ID(common);
+	enum nbl_hwmon_type hwmon_type;
 	u32 temp;
 
 	switch (channel) {
 	case NBL_HWMON_CHIP_SENSOR:
 		switch (attr) {
 		case hwmon_temp_input:
-			temp = serv_ops->get_chip_temperature(NBL_DEV_MGT_TO_SERV_PRIV(dev_mgt));
-			*val = (temp & NBL_HWMON_TEMP_MAP) * NBL_HWMON_TEMP_UNIT;
-			return 0;
+			hwmon_type = NBL_HWMON_TEMP_INPUT;
+			break;
 		case hwmon_temp_max:
-			temp = serv_ops->get_chip_temperature_max
-				(NBL_DEV_MGT_TO_SERV_PRIV(dev_mgt));
-			*val = temp * NBL_HWMON_TEMP_UNIT;
-			return 0;
+			hwmon_type = NBL_HWMON_TEMP_MAX;
+			break;
 		case hwmon_temp_crit:
-			temp = serv_ops->get_chip_temperature_crit
-				(NBL_DEV_MGT_TO_SERV_PRIV(dev_mgt));
-			*val = temp * NBL_HWMON_TEMP_UNIT;
-			return 0;
+			hwmon_type = NBL_HWMON_TEMP_CRIT;
+			break;
 		case hwmon_temp_highest:
-			temp = serv_ops->get_chip_temperature(NBL_DEV_MGT_TO_SERV_PRIV(dev_mgt));
-			*val = (temp >> NBL_HWMON_TEMP_OFF) * NBL_HWMON_TEMP_UNIT;
-			return 0;
+			hwmon_type = NBL_HWMON_TEMP_HIGHEST;
+			break;
 		default:
 			return -EOPNOTSUPP;
 		}
+		temp = serv_ops->get_chip_temperature(NBL_DEV_MGT_TO_SERV_PRIV(dev_mgt),
+						      hwmon_type, channel);
+		*val = temp;
+		return 0;
 	case NBL_HWMON_LIGHT_MODULE:
 		switch (attr) {
 		case hwmon_temp_input:
-			temp = serv_ops->get_module_temperature(NBL_DEV_MGT_TO_SERV_PRIV(dev_mgt),
-								eth_id, NBL_MODULE_TEMP);
-			*val = temp * NBL_HWMON_TEMP_UNIT;
-			return 0;
+			hwmon_type = NBL_HWMON_TEMP_INPUT;
+			break;
 		case hwmon_temp_max:
-			temp = serv_ops->get_module_temperature(NBL_DEV_MGT_TO_SERV_PRIV(dev_mgt),
-								eth_id, NBL_MODULE_TEMP_MAX);
-			*val = temp * NBL_HWMON_TEMP_UNIT;
-			return 0;
+			hwmon_type = NBL_HWMON_TEMP_MAX;
+			break;
 		case hwmon_temp_crit:
-			temp = serv_ops->get_module_temperature(NBL_DEV_MGT_TO_SERV_PRIV(dev_mgt),
-								eth_id, NBL_MODULE_TEMP_CRIT);
-			*val = temp * NBL_HWMON_TEMP_UNIT;
-			return 0;
+			hwmon_type = NBL_HWMON_TEMP_CRIT;
+			break;
 		default:
 			return -EOPNOTSUPP;
 		}
+		temp = serv_ops->get_module_temperature(NBL_DEV_MGT_TO_SERV_PRIV(dev_mgt),
+							eth_id, hwmon_type);
+		*val = temp;
+		return 0;
 	default:
 		return -EOPNOTSUPP;
 	}

@@ -10,6 +10,9 @@
 static struct nbl_software_tool_table nbl_st_table;
 static struct dentry *nbl_debugfs_root;
 
+/* global cmdq and tc flow related structures */
+static struct nbl_tc_insts_info g_tc_insts[NBL_TC_FLOW_INST_COUNT] = { { 0 } };
+
 static struct nbl_product_base_ops nbl_product_base_ops[NBL_PRODUCT_MAX] = {
 	{
 		.phy_init	= nbl_phy_init_leonis,
@@ -20,6 +23,11 @@ static struct nbl_product_base_ops nbl_product_base_ops[NBL_PRODUCT_MAX] = {
 		.chan_remove	= nbl_chan_remove_common,
 	},
 };
+
+static char *nblst_cdevnode(const struct device *dev, umode_t *mode)
+{
+	return kasprintf(GFP_KERNEL, "nblst/%s", dev_name(dev));
+}
 
 int nbl_core_start(struct nbl_adapter *adapter, struct nbl_init_param *param)
 {
@@ -63,10 +71,12 @@ struct nbl_adapter *nbl_core_init(struct pci_dev *pdev, struct nbl_init_param *p
 	NBL_COMMON_TO_DMA_DEV(common) = &pdev->dev;
 	NBL_COMMON_TO_DEBUG_LVL(common) |= NBL_DEBUG_ALL;
 	NBL_COMMON_TO_VF_CAP(common) = param->caps.is_vf;
+	NBL_COMMON_TO_OCP_CAP(common) = param->caps.is_ocp;
 	NBL_COMMON_TO_PCI_USING_DAC(common) = param->pci_using_dac;
 	NBL_COMMON_TO_PCI_FUNC_ID(common) = PCI_FUNC(pdev->devfn);
 	common->devid    = PCI_SLOT(pdev->devfn);
 	common->bus      = pdev->bus->number;
+	common->tc_inst_id = NBL_TC_FLOW_INST_COUNT;
 	common->product_type = param->product_type;
 
 	memcpy(&adapter->init_param, param, sizeof(adapter->init_param));
@@ -120,6 +130,7 @@ phy_init_fail:
 void nbl_core_remove(struct nbl_adapter *adapter)
 {
 	struct device *dev;
+
 	struct nbl_product_base_ops *product_base_ops;
 
 	if (!adapter)
@@ -138,6 +149,63 @@ void nbl_core_remove(struct nbl_adapter *adapter)
 	devm_kfree(dev, adapter);
 }
 
+void nbl_tc_set_cmdq_info(int (*send_cmdq)(void *, const void *, void *),
+			  void *priv, u8 index)
+{
+	g_tc_insts[index].send_cmdq = send_cmdq;
+	g_tc_insts[index].chan_mgt = priv;
+}
+
+void nbl_tc_unset_cmdq_info(u8 index)
+{
+	g_tc_insts[index].send_cmdq = NULL;
+	g_tc_insts[index].chan_mgt = NULL;
+	g_tc_insts[index].locked = 0;
+}
+
+void nbl_tc_set_flow_info(void *priv, u8 index)
+{
+	g_tc_insts[index].tc_flow_mgt = priv;
+}
+
+void nbl_tc_unset_flow_info(u8 index)
+{
+	g_tc_insts[index].tc_flow_mgt = NULL;
+}
+
+void *nbl_tc_get_flow_info(u8 index)
+{
+	return g_tc_insts[index].tc_flow_mgt;
+}
+
+u8 nbl_tc_alloc_inst_id(void)
+{
+	u8 inst_id = 0;
+
+	spin_lock(&nbl_tc_flow_inst_lock);
+	for (inst_id = 0; inst_id < NBL_TC_FLOW_INST_COUNT; inst_id++)
+		if (!g_tc_insts[inst_id].locked) {
+			g_tc_insts[inst_id].locked = 1;
+			spin_unlock(&nbl_tc_flow_inst_lock);
+			return inst_id;
+		}
+
+	/* return invalid index */
+	spin_unlock(&nbl_tc_flow_inst_lock);
+	return NBL_TC_FLOW_INST_COUNT;
+}
+
+int nbl_tc_call_inst_cmdq(u8 inst_id, const void *hdr, void *cmd)
+{
+	void *priv = NULL;
+
+	if (!g_tc_insts[inst_id].chan_mgt || !g_tc_insts[inst_id].send_cmdq)
+		return NBL_CMDQ_NOT_READY;
+
+	priv = g_tc_insts[inst_id].chan_mgt;
+	return g_tc_insts[inst_id].send_cmdq(priv, hdr, cmd);
+}
+
 int nbl_st_init(struct nbl_software_tool_table *st_table)
 {
 	dev_t devid;
@@ -152,6 +220,7 @@ int nbl_st_init(struct nbl_software_tool_table *st_table)
 
 	st_table->cls = class_create("nblst_cls");
 
+	st_table->cls->devnode = nblst_cdevnode;
 	if (IS_ERR(st_table->cls)) {
 		unregister_chrdev(st_table->major, "nblst");
 		unregister_chrdev_region(st_table->devno, NBL_ST_MAX_DEVICE_NUM);
@@ -198,7 +267,9 @@ static void nbl_get_func_param(struct pci_dev *pdev, kernel_ulong_t driver_data,
 	param->caps.support_lag = NBL_CAP_SUPPORT_LAG(driver_data);
 	param->caps.has_user = NBL_CAP_IS_USER(driver_data);
 	param->caps.has_grc = NBL_CAP_IS_GRC(driver_data);
+	param->caps.is_blk = NBL_CAP_IS_BLK(driver_data);
 	param->caps.is_nic = NBL_CAP_IS_NIC(driver_data);
+	param->caps.is_ocp = NBL_CAP_IS_OCP(driver_data);
 	param->caps.has_factory_ctrl = NBL_CAP_IS_FACTORY_CTRL(driver_data);
 
 	if (NBL_CAP_IS_LEONIS(driver_data))
@@ -297,25 +368,60 @@ static void nbl_remove(struct pci_dev *pdev)
 static void nbl_shutdown(struct pci_dev *pdev)
 {
 	struct nbl_adapter *adapter = pci_get_drvdata(pdev);
+	struct nbl_common_info *common = NBL_ADAPTER_TO_COMMON(adapter);
+	bool wol_ena = common->wol_ena;
 
 	if (!NBL_COMMON_TO_VF_CAP(NBL_ADAPTER_TO_COMMON(adapter)))
 		nbl_remove(pdev);
+
+	if (system_state == SYSTEM_POWER_OFF) {
+		pci_wake_from_d3(pdev, wol_ena);
+		pci_set_power_state(pdev, PCI_D3hot);
+	}
 
 	dev_info(&pdev->dev, "nbl shutdown OK\n");
 }
 
 static __maybe_unused int nbl_sriov_configure(struct pci_dev *pdev, int num_vfs)
 {
+	struct nbl_adapter *adapter = pci_get_drvdata(pdev);
 	int err;
 
 	if (!num_vfs) {
 		pci_disable_sriov(pdev);
+		if (!adapter)
+			return 0;
+
+		nbl_dev_remove_vf_config(adapter);
+
+		err = nbl_dev_destroy_rep(adapter);
+		if (err) {
+			dev_err(&pdev->dev, "nbl destroy repr dev failed %d!\n", err);
+			return err;
+		}
 		return 0;
 	}
 
+	/* register pf_name to AF first, cuz vf_name depends on pf_anme */
+	nbl_dev_register_dev_name(adapter);
 	err = pci_enable_sriov(pdev, num_vfs);
 	if (err) {
 		dev_err(&pdev->dev, "nbl enable sriov failed %d!\n", err);
+		return err;
+	}
+
+	err = nbl_dev_create_rep(adapter, num_vfs);
+	if (err) {
+		dev_err(&pdev->dev, "nbl create repr dev failed %d!\n", err);
+		pci_disable_sriov(pdev);
+		return err;
+	}
+
+	err = nbl_dev_setup_vf_config(adapter, num_vfs);
+	if (err) {
+		dev_err(&pdev->dev, "nbl setup vf config failed %d!\n", err);
+		pci_disable_sriov(pdev);
+		nbl_dev_destroy_rep(adapter);
 		return err;
 	}
 
@@ -366,19 +472,19 @@ static const struct pci_device_id nbl_id_table[] = {
 	{ PCI_DEVICE(NBL_VENDOR_ID, NBL_DEVICE_ID_M18110_OCP), .driver_data =
 	  NBL_CAP_SET_BIT(NBL_CAP_HAS_NET_BIT) | NBL_CAP_SET_BIT(NBL_CAP_IS_NIC_BIT) |
 	  NBL_CAP_SET_BIT(NBL_CAP_IS_LEONIS_BIT) | NBL_CAP_SET_BIT(NBL_CAP_HAS_USER_BIT) |
-	  NBL_CAP_SET_BIT(NBL_CAP_SUPPORT_LAG_BIT) },
+	  NBL_CAP_SET_BIT(NBL_CAP_SUPPORT_LAG_BIT) | NBL_CAP_SET_BIT(NBL_CAP_IS_OCP_BIT) },
 	{ PCI_DEVICE(NBL_VENDOR_ID, NBL_DEVICE_ID_M18110_LX_OCP), .driver_data =
 	  NBL_CAP_SET_BIT(NBL_CAP_HAS_NET_BIT) | NBL_CAP_SET_BIT(NBL_CAP_IS_NIC_BIT) |
 	  NBL_CAP_SET_BIT(NBL_CAP_IS_LEONIS_BIT) | NBL_CAP_SET_BIT(NBL_CAP_HAS_USER_BIT) |
-	  NBL_CAP_SET_BIT(NBL_CAP_SUPPORT_LAG_BIT) },
+	  NBL_CAP_SET_BIT(NBL_CAP_SUPPORT_LAG_BIT) | NBL_CAP_SET_BIT(NBL_CAP_IS_OCP_BIT)},
 	{ PCI_DEVICE(NBL_VENDOR_ID, NBL_DEVICE_ID_M18110_BASE_T_OCP), .driver_data =
 	  NBL_CAP_SET_BIT(NBL_CAP_HAS_NET_BIT) | NBL_CAP_SET_BIT(NBL_CAP_IS_NIC_BIT) |
 	  NBL_CAP_SET_BIT(NBL_CAP_IS_LEONIS_BIT) | NBL_CAP_SET_BIT(NBL_CAP_HAS_USER_BIT) |
-	  NBL_CAP_SET_BIT(NBL_CAP_SUPPORT_LAG_BIT)},
+	  NBL_CAP_SET_BIT(NBL_CAP_SUPPORT_LAG_BIT) | NBL_CAP_SET_BIT(NBL_CAP_IS_OCP_BIT)},
 	{ PCI_DEVICE(NBL_VENDOR_ID, NBL_DEVICE_ID_M18110_LX_BASE_T_OCP), .driver_data =
 	  NBL_CAP_SET_BIT(NBL_CAP_HAS_NET_BIT) | NBL_CAP_SET_BIT(NBL_CAP_IS_NIC_BIT) |
 	  NBL_CAP_SET_BIT(NBL_CAP_IS_LEONIS_BIT) | NBL_CAP_SET_BIT(NBL_CAP_HAS_USER_BIT) |
-	  NBL_CAP_SET_BIT(NBL_CAP_SUPPORT_LAG_BIT) },
+	  NBL_CAP_SET_BIT(NBL_CAP_SUPPORT_LAG_BIT) | NBL_CAP_SET_BIT(NBL_CAP_IS_OCP_BIT)},
 	{ PCI_DEVICE(NBL_VENDOR_ID, NBL_DEVICE_ID_M18120), .driver_data =
 	  NBL_CAP_SET_BIT(NBL_CAP_HAS_NET_BIT) | NBL_CAP_SET_BIT(NBL_CAP_IS_NIC_BIT) |
 	  NBL_CAP_SET_BIT(NBL_CAP_IS_LEONIS_BIT) | NBL_CAP_SET_BIT(NBL_CAP_HAS_USER_BIT) |
@@ -398,19 +504,22 @@ static const struct pci_device_id nbl_id_table[] = {
 	{ PCI_DEVICE(NBL_VENDOR_ID, NBL_DEVICE_ID_M18120_OCP), .driver_data =
 	  NBL_CAP_SET_BIT(NBL_CAP_HAS_NET_BIT) | NBL_CAP_SET_BIT(NBL_CAP_IS_NIC_BIT) |
 	  NBL_CAP_SET_BIT(NBL_CAP_IS_LEONIS_BIT) | NBL_CAP_SET_BIT(NBL_CAP_HAS_USER_BIT) |
-	  NBL_CAP_SET_BIT(NBL_CAP_SUPPORT_LAG_BIT) },
+	  NBL_CAP_SET_BIT(NBL_CAP_SUPPORT_LAG_BIT) | NBL_CAP_SET_BIT(NBL_CAP_IS_OCP_BIT)},
 	{ PCI_DEVICE(NBL_VENDOR_ID, NBL_DEVICE_ID_M18120_LX_OCP), .driver_data =
 	  NBL_CAP_SET_BIT(NBL_CAP_HAS_NET_BIT) | NBL_CAP_SET_BIT(NBL_CAP_IS_NIC_BIT) |
 	  NBL_CAP_SET_BIT(NBL_CAP_IS_LEONIS_BIT) | NBL_CAP_SET_BIT(NBL_CAP_HAS_USER_BIT) |
-	  NBL_CAP_SET_BIT(NBL_CAP_SUPPORT_LAG_BIT) },
+	  NBL_CAP_SET_BIT(NBL_CAP_SUPPORT_LAG_BIT) | NBL_CAP_SET_BIT(NBL_CAP_IS_OCP_BIT)},
 	{ PCI_DEVICE(NBL_VENDOR_ID, NBL_DEVICE_ID_M18120_BASE_T_OCP), .driver_data =
 	  NBL_CAP_SET_BIT(NBL_CAP_HAS_NET_BIT) | NBL_CAP_SET_BIT(NBL_CAP_IS_NIC_BIT) |
 	  NBL_CAP_SET_BIT(NBL_CAP_IS_LEONIS_BIT) | NBL_CAP_SET_BIT(NBL_CAP_HAS_USER_BIT) |
-	   NBL_CAP_SET_BIT(NBL_CAP_SUPPORT_LAG_BIT) },
+	   NBL_CAP_SET_BIT(NBL_CAP_SUPPORT_LAG_BIT) | NBL_CAP_SET_BIT(NBL_CAP_IS_OCP_BIT)},
 	{ PCI_DEVICE(NBL_VENDOR_ID, NBL_DEVICE_ID_M18120_LX_BASE_T_OCP), .driver_data =
 	  NBL_CAP_SET_BIT(NBL_CAP_HAS_NET_BIT) | NBL_CAP_SET_BIT(NBL_CAP_IS_NIC_BIT) |
 	  NBL_CAP_SET_BIT(NBL_CAP_IS_LEONIS_BIT) | NBL_CAP_SET_BIT(NBL_CAP_HAS_USER_BIT) |
-	  NBL_CAP_SET_BIT(NBL_CAP_SUPPORT_LAG_BIT) },
+	  NBL_CAP_SET_BIT(NBL_CAP_SUPPORT_LAG_BIT) | NBL_CAP_SET_BIT(NBL_CAP_IS_OCP_BIT)},
+	{ PCI_DEVICE(NBL_VENDOR_ID, NBL_DEVICE_ID_M18100_VF), .driver_data =
+	  NBL_CAP_SET_BIT(NBL_CAP_HAS_NET_BIT) | NBL_CAP_SET_BIT(NBL_CAP_IS_VF_BIT) |
+	  NBL_CAP_SET_BIT(NBL_CAP_IS_NIC_BIT) | NBL_CAP_SET_BIT(NBL_CAP_IS_LEONIS_BIT) },
 	/* required as sentinel */
 	{ 0, }
 };
@@ -433,13 +542,13 @@ static int __maybe_unused nbl_resume(struct device *dev)
 }
 
 static SIMPLE_DEV_PM_OPS(nbl_pm_ops, nbl_suspend, nbl_resume);
-
 static struct pci_driver nbl_driver = {
 	.name = NBL_DRIVER_NAME,
 	.id_table = nbl_id_table,
 	.probe = nbl_probe,
 	.remove = nbl_remove,
 	.shutdown = nbl_shutdown,
+	.sriov_configure = nbl_sriov_configure,
 	.driver.pm = &nbl_pm_ops,
 };
 
@@ -453,6 +562,10 @@ static int __init nbl_module_init(void)
 		pr_err("Failed to create wq, err = %d\n", status);
 		goto wq_create_failed;
 	}
+
+	mutex_init(&nbl_lag_mutex);
+	spin_lock_init(&nbl_tc_flow_inst_lock);
+	INIT_LIST_HEAD(&lag_resource_head);
 
 	nbl_st_init(nbl_get_st_table());
 	nbl_debugfs_init();

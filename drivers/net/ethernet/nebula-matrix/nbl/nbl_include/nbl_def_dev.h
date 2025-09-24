@@ -24,10 +24,18 @@ int nbl_dev_init(void *p, struct nbl_init_param *param);
 void nbl_dev_remove(void *p);
 int nbl_dev_start(void *p, struct nbl_init_param *param);
 void nbl_dev_stop(void *p);
+int nbl_dev_init_emp_class(void);
+void nbl_dev_destroy_emp_class(void);
 
 void nbl_dev_user_module_init(void);
 void nbl_dev_user_module_destroy(void);
+int nbl_dev_create_rep(void *p, int num_vfs);
+int nbl_dev_destroy_rep(void *p);
 
+int nbl_dev_setup_vf_config(void *p, int num_vfs);
+void nbl_dev_remove_vf_config(void *p);
+void nbl_dev_register_dev_name(void *p);
+void nbl_dev_get_dev_name(void *p, char *dev_name);
 int nbl_dev_resume(void *p);
 int nbl_dev_suspend(void *p);
 #endif

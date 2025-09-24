@@ -18,19 +18,19 @@
 #define NBL_KT_BYTE_LEN					40
 #define NBL_KT_BYTE_HALF_LEN				20
 
-#define NBL_EM0_PT_PHY_UP_TUNNEL_UNICAST_L2		0
-#define NBL_EM0_PT_PHY_UP_LLDP_LACP			1
-#define NBL_EM0_PT_PHY_UP_UNICAST_L2			2
-#define NBL_EM0_PT_PHY_DOWN_UNICAST_L2			3
-#define NBL_EM0_PT_PHY_UP_MULTICAST_L2			4
-#define NBL_EM0_PT_PHY_DOWN_MULTICAST_L2		5
-#define NBL_EM0_PT_PHY_UP_MULTICAST_L3			6
-#define NBL_EM0_PT_PHY_DOWN_MULTICAST_L3		7
-#define NBL_EM0_PT_PHY_DPRBAC_IPV4			8
-#define NBL_EM0_PT_PHY_DPRBAC_IPV6			9
-#define NBL_EM0_PT_PHY_UL4S_IPV4			10
-#define NBL_EM0_PT_PHY_UL4S_IPV6			11
-#define NBL_EM0_PT_PMD_ND_UPCALL			12
+#define NBL_EM0_PT_PHY_UP_TUNNEL_L2			0
+#define NBL_EM0_PT_PHY_UP_L2				1
+#define NBL_EM0_PT_PHY_DOWN_L2				2
+#define NBL_EM0_PT_PHY_UP_LLDP_LACP			3
+#define NBL_EM0_PT_PMD_ND_UPCALL			4
+#define NBL_EM0_PT_PHY_L2_UP_MULTI_MCAST		5
+#define NBL_EM0_PT_PHY_L3_UP_MULTI_MCAST		6
+#define NBL_EM0_PT_PHY_L2_DOWN_MULTI_MCAST		7
+#define NBL_EM0_PT_PHY_L3_DOWN_MULTI_MCAST		8
+#define NBL_EM0_PT_PHY_DPRBAC_IPV4			9
+#define NBL_EM0_PT_PHY_DPRBAC_IPV6			10
+#define NBL_EM0_PT_PHY_UL4S_IPV4			11
+#define NBL_EM0_PT_PHY_UL4S_IPV6			12
 
 #define NBL_PP0_PROFILE_ID_MIN				(0)
 #define NBL_PP0_PROFILE_ID_MAX				(15)
@@ -41,8 +41,15 @@
 #define NBL_PP_PROFILE_NUM				(16)
 
 #define NBL_QID_MAP_TABLE_ENTRIES			(4096)
+#define NBL_EPRO_PF_RSS_RET_TBL_DEPTH			(4096)
 #define NBL_EPRO_RSS_RET_TBL_DEPTH			(8192 * 2)
 #define NBL_EPRO_RSS_ENTRY_SIZE_UNIT			(16)
+
+#define NBL_EPRO_PF_RSS_RET_TBL_COUNT			(512)
+#define NBL_EPRO_PF_RSS_ENTRY_SIZE			(5)
+
+#define NBL_EPRO_RSS_ENTRY_MAX_COUNT			(512)
+#define NBL_EPRO_RSS_ENTRY_MAX_SIZE			(4)
 
 #define NBL_EPRO_RSS_SK_SIZE 40
 #define NBL_EPRO_RSS_PER_KEY_SIZE 8
@@ -57,6 +64,26 @@ enum {
 enum {
 	NBL_KT_HALF_MODE,
 	NBL_KT_FULL_MODE,
+};
+
+enum nbl_pp_type {
+	NBL_PP_TYPE_0,
+	NBL_PP_TYPE_1,
+	NBL_PP_TYPE_2,
+	NBL_PP_TYPE_MAX,
+};
+
+enum nbl_pp_at_type {
+	NBL_AT_TYPE_0,
+	NBL_AT_TYPE_1,
+	NBL_AT_TYPE_2,
+	NBL_AT_TYPE_MAX,
+};
+
+enum nbl_pp_fc_type {
+	NBL_FC_COMMON_TYPE,
+	NBL_FC_SPEC_TYPE,
+	NBL_FC_TYPE_MAX,
 };
 
 #pragma pack(1)
@@ -275,7 +302,6 @@ union nbl_action_data {
 
 	u16 data;
 };
-
 #pragma pack()
 
 enum nbl_chan_flow_rule_type {
@@ -318,6 +344,8 @@ enum nbl_chan_flow_rule_type {
 	NBL_FLOW_UCAR_CAR_CTRL_ADDR,
 	NBL_FLOW_UCAR_GREEN_CELL_ADDR,
 	NBL_FLOW_UCAR_GREEN_PKT_ADDR,
+	NBL_FLOW_UPED_VSI_TYPE_REG,
+	NBL_FLOW_DPED_VSI_TYPE_REG,
 };
 
 enum nbl_chan_flow_mode {
@@ -344,5 +372,19 @@ enum nbl_chan_flow_mode {
 #define SFF8636_TRANSMIT_COPPER_FAR_END			(0xd)
 #define SFF8636_TRANSMIT_COPPER_NEAR_END		(0xe)
 #define SFF8636_TRANSMIT_COPPER_LINEAR_ACTIVE		(0xf)
+
+#define NBL_SPORT_ETH_OFFSET				8
+
+enum {
+	NBL_FD_PROFILE_IPV4 = 2,
+	NBL_FD_PROFILE_L2_IPV6 = 4,
+	NBL_FD_PROFILE_DEFAULT = 6,
+	NBL_FD_PROFILE_MAX,
+};
+
+struct nbl_event_link_status_update_data {
+	u8 num;
+	u8 eth_id[NBL_MAX_ETHERNET];
+};
 
 #endif
