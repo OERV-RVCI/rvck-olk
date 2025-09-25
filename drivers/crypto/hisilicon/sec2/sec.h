@@ -109,7 +109,6 @@ struct sec_req {
 	int req_id;
 	u32 flag;
 
-	/* Status of the SEC request */
 	bool use_pbuf;
 
 	struct list_head list;

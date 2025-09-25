@@ -228,7 +228,6 @@ static int qp_send_message(struct sec_req *req)
 	ret = hisi_qp_send(qp_ctx->qp, &req->sec_sqe);
 	if (ret) {
 		spin_unlock_bh(&qp_ctx->req_lock);
-		atomic64_inc(&req->ctx->sec->debug.dfx.send_busy_cnt);
 		return ret;
 	}
 	if (qp_ctx->ctx->type_supported == SEC_BD_TYPE2)
@@ -240,38 +239,54 @@ static int qp_send_message(struct sec_req *req)
 	return -EINPROGRESS;
 }
 
+static void sec_alg_send_backlog_soft(struct sec_ctx *ctx, struct sec_qp_ctx *qp_ctx)
+{
+	struct sec_req *req, *tmp;
+	int ret;
+
+	list_for_each_entry_safe(req, tmp, &qp_ctx->backlog.list, list) {
+		list_del(&req->list);
+		ctx->req_op->buf_unmap(ctx, req);
+		if (req->req_id >= 0)
+			sec_free_req_id(req);
+
+		if (ctx->alg_type == SEC_AEAD)
+			ret = sec_aead_soft_crypto(ctx, req->aead_req.aead_req,
+						   req->c_req.encrypt);
+		else
+			ret = sec_skcipher_soft_crypto(ctx, req->c_req.sk_req,
+						       req->c_req.encrypt);
+
+		/* Wake up the busy thread first, then return the errno. */
+		crypto_request_complete(req->base, -EINPROGRESS);
+		crypto_request_complete(req->base, ret);
+	}
+}
+
 static void sec_alg_send_backlog(struct sec_ctx *ctx, struct sec_qp_ctx *qp_ctx)
 {
 	struct sec_req *req, *tmp;
-	int ret = 0;
+	int ret;
 
 	spin_lock_bh(&qp_ctx->backlog.lock);
 	list_for_each_entry_safe(req, tmp, &qp_ctx->backlog.list, list) {
 		ret = qp_send_message(req);
-		if (ret != -EINPROGRESS)
-			break;
-
-		list_del(&req->list);
-		crypto_request_complete(req->base, -EINPROGRESS);
-	}
-	if (unlikely(ret != -EINPROGRESS && ret != -EBUSY)) {
-		list_for_each_entry_safe(req, tmp, &qp_ctx->backlog.list, list) {
+		switch (ret) {
+		case -EINPROGRESS:
 			list_del(&req->list);
-			ctx->req_op->buf_unmap(ctx, req);
-			if (req->req_id >= 0)
-				sec_free_req_id(req);
-
-			if (ctx->alg_type == SEC_AEAD)
-				ret = sec_aead_soft_crypto(ctx, req->aead_req.aead_req,
-							   req->c_req.encrypt);
-			else
-				ret = sec_skcipher_soft_crypto(ctx, req->c_req.sk_req,
-							       req->c_req.encrypt);
-			/* Wake up the busy thread first, then return the errno. */
 			crypto_request_complete(req->base, -EINPROGRESS);
-			crypto_request_complete(req->base, ret);
+			break;
+		case -EBUSY:
+			/* Device is busy and stop send any request. */
+			goto unlock;
+		default:
+			/* Release memory resources and send all requests through software. */
+			sec_alg_send_backlog_soft(ctx, qp_ctx);
+			goto unlock;
 		}
 	}
+
+unlock:
 	spin_unlock_bh(&qp_ctx->backlog.lock);
 }
 
@@ -1122,6 +1137,7 @@ static int sec_cipher_map_inner(struct sec_ctx *ctx, struct sec_req *req,
 	struct sec_qp_ctx *qp_ctx = req->qp_ctx;
 	struct sec_alg_res *res = &qp_ctx->res[req->req_id];
 	struct device *dev = ctx->dev;
+	enum dma_data_direction src_direction;
 	int ret;
 
 	if (req->use_pbuf) {
@@ -1146,10 +1162,11 @@ static int sec_cipher_map_inner(struct sec_ctx *ctx, struct sec_req *req,
 		a_req->out_mac_dma = res->out_mac_dma;
 	}
 
+	src_direction = dst == src ? DMA_BIDIRECTIONAL : DMA_TO_DEVICE;
 	req->in = hisi_acc_sg_buf_map_to_hw_sgl(dev, src,
 						qp_ctx->c_in_pool,
 						req->req_id,
-						&req->in_dma);
+						&req->in_dma, src_direction);
 	if (IS_ERR(req->in)) {
 		dev_err(dev, "fail to dma map input sgl buffers!\n");
 		return PTR_ERR(req->in);
@@ -1159,7 +1176,7 @@ static int sec_cipher_map_inner(struct sec_ctx *ctx, struct sec_req *req,
 		ret = sec_aead_mac_init(a_req);
 		if (unlikely(ret)) {
 			dev_err(dev, "fail to init mac data for ICV!\n");
-			hisi_acc_sg_buf_unmap(dev, src, req->in);
+			hisi_acc_sg_buf_unmap(dev, src, req->in, src_direction);
 			return ret;
 		}
 	}
@@ -1171,11 +1188,12 @@ static int sec_cipher_map_inner(struct sec_ctx *ctx, struct sec_req *req,
 		c_req->c_out = hisi_acc_sg_buf_map_to_hw_sgl(dev, dst,
 							     qp_ctx->c_out_pool,
 							     req->req_id,
-							     &c_req->c_out_dma);
+							     &c_req->c_out_dma,
+							     DMA_FROM_DEVICE);
 
 		if (IS_ERR(c_req->c_out)) {
 			dev_err(dev, "fail to dma map output sgl buffers!\n");
-			hisi_acc_sg_buf_unmap(dev, src, req->in);
+			hisi_acc_sg_buf_unmap(dev, src, req->in, src_direction);
 			return PTR_ERR(c_req->c_out);
 		}
 	}
@@ -1260,9 +1278,12 @@ static void sec_cipher_unmap(struct sec_ctx *ctx, struct sec_req *req,
 		if (req->use_pbuf) {
 			sec_cipher_pbuf_unmap(ctx, req, dst);
 		} else {
-			if (dst != src)
-				hisi_acc_sg_buf_unmap(dev, src, req->in);
-			hisi_acc_sg_buf_unmap(dev, dst, c_req->c_out);
+			if (dst != src) {
+				hisi_acc_sg_buf_unmap(dev, dst, c_req->c_out, DMA_FROM_DEVICE);
+				hisi_acc_sg_buf_unmap(dev, src, req->in, DMA_TO_DEVICE);
+			} else {
+				hisi_acc_sg_buf_unmap(dev, src, req->in, DMA_BIDIRECTIONAL);
+			}
 		}
 		return;
 	}

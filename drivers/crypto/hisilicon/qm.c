@@ -960,7 +960,7 @@ int hisi_qm_set_algs(struct hisi_qm *qm, u64 alg_msk, const struct qm_dev_alg *d
 		return -EINVAL;
 	}
 
-	algs = devm_kzalloc(dev, QM_DEV_ALG_MAX_LEN * sizeof(char), GFP_KERNEL);
+	algs = devm_kzalloc(dev, QM_DEV_ALG_MAX_LEN, GFP_KERNEL);
 	if (!algs)
 		return -ENOMEM;
 
@@ -4658,9 +4658,6 @@ static void qm_restart_prepare(struct hisi_qm *qm)
 {
 	u32 value;
 
-	if (qm->err_ini->open_sva_prefetch)
-		qm->err_ini->open_sva_prefetch(qm);
-
 	if (qm->ver >= QM_HW_V3)
 		return;
 
@@ -5591,7 +5588,7 @@ static int qm_pre_store_caps(struct hisi_qm *qm)
 	size_t i, size;
 
 	size = ARRAY_SIZE(qm_cap_query_info);
-	qm_cap = devm_kzalloc(&pdev->dev, sizeof(*qm_cap) * size, GFP_KERNEL);
+	qm_cap = devm_kcalloc(&pdev->dev, sizeof(*qm_cap), size, GFP_KERNEL);
 	if (!qm_cap)
 		return -ENOMEM;
 
