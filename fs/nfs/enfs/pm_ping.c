@@ -23,12 +23,10 @@
 #include "enfs.h"
 #include "enfs_log.h"
 #include "enfs_config.h"
-#include "enfs_tp_common.h"
 
 #define SLEEP_INTERVAL 2
 
 static struct task_struct *pm_ping_timer_thread;
-static spinlock_t ping_execute_workq_lock;	//protect pint_execute_workq
 static struct workqueue_struct *ping_execute_workq;	// timer for test xprt workqueue
 static atomic_t check_xprt_count;	// count the ping xprt work on flight
 
@@ -128,9 +126,7 @@ static void pm_ping_call_done(struct rpc_task *task, void *data)
 	atomic_dec(&check_xprt_count);
 	if (task->tk_status >= 0) {
 		// xprt is not used,just match paramete.
-		LVOS_TP_START(PM_ALLOC_WORK_INFO_FAILED, &xprt);
 		pm_set_path_state(xprt, PM_STATE_NORMAL);
-		LVOS_TP_END;
 	} else {
 		set_xprt_close_wait(xprt);
 		pm_set_path_state(xprt, PM_STATE_FAULT);
@@ -184,18 +180,6 @@ static void pm_ping_execute_work(struct work_struct *work)
 	rpc_release_client(work_info->clnt);
 	xprt_put(work_info->xprt);
 	kfree(work_info);
-}
-
-static bool pm_ping_workqueue_queue_work(struct work_struct *work)
-{
-	bool ret = false;
-
-	spin_lock(&ping_execute_workq_lock);
-
-	if (ping_execute_workq != NULL)
-		ret = queue_work(ping_execute_workq, work);
-	spin_unlock(&ping_execute_workq_lock);
-	return ret;
 }
 
 // init test work and add this work to workqueue
@@ -261,7 +245,7 @@ static int pm_ping_add_work(struct rpc_clnt *clnt, struct rpc_xprt *xprt,
 			return 0;
 		}
 
-		ret = pm_ping_workqueue_queue_work(&work_info->ping_work);
+		ret = queue_work(ping_execute_workq, &work_info->ping_work);
 		if (!ret) {
 			item->clnt = work_info->clnt;
 			list_add_tail(&item->node, head);
@@ -355,36 +339,22 @@ static int pm_ping_start(void)
 // initialize workqueue
 static int pm_ping_workqueue_init(void)
 {
-	struct workqueue_struct *queue = NULL;
-
-	queue = create_workqueue("pm_ping_workqueue");
-	if (queue == NULL) {
+	ping_execute_workq = create_workqueue("pm_ping_workqueue");
+	if (!ping_execute_workq) {
 		enfs_log_error("create workqueue failed.\n");
 		return -ENOMEM;
 	}
 
-	spin_lock(&ping_execute_workq_lock);
-	ping_execute_workq = queue;
-	spin_unlock(&ping_execute_workq_lock);
 	enfs_log_info("create workqueue succeeded.\n");
 	return 0;
 }
 
 static void pm_ping_workqueue_fini(void)
 {
-	struct workqueue_struct *queue = NULL;
-
-	spin_lock(&ping_execute_workq_lock);
-	queue = ping_execute_workq;
-	ping_execute_workq = NULL;
-	spin_unlock(&ping_execute_workq_lock);
-
 	enfs_log_info("delete work queue\n");
 
-	if (queue != NULL) {
-		flush_workqueue(queue);
-		destroy_workqueue(queue);
-	}
+	if (ping_execute_workq)
+		destroy_workqueue(ping_execute_workq);
 }
 
 // module exit func
@@ -405,7 +375,6 @@ int pm_ping_init(void)
 {
 	int ret;
 
-	spin_lock_init(&ping_execute_workq_lock);
 	atomic_set(&check_xprt_count, 0);
 	ret = pm_ping_workqueue_init();
 	if (ret != 0) {

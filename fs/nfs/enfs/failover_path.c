@@ -16,7 +16,6 @@
 #include "failover_com.h"
 #include "pm_state.h"
 #include "pm_ping.h"
-#include "enfs_tp_common.h"
 
 enum enfs_failover_polic {
 	FAILOVER_NOACTION = 1,

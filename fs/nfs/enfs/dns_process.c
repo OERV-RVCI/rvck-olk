@@ -17,7 +17,6 @@
 #include "enfs_remount.h"
 #include "enfs_config.h"
 #include "exten_call.h"
-#include "enfs_tp_common.h"
 
 static struct task_struct *dns_thread;
 static struct workqueue_struct *dns_workq; // timer for test xprt workqueue
@@ -945,8 +944,6 @@ void enfs_dns_exit(void)
 	if (dns_thread)
 		kthread_stop(dns_thread);
 
-	if (dns_workq) {
-		flush_workqueue(dns_workq);
+	if (dns_workq)
 		destroy_workqueue(dns_workq);
-	}
 }

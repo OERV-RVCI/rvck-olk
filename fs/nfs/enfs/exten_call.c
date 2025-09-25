@@ -10,12 +10,10 @@
 
 #include "enfs_log.h"
 #include "exten_call.h"
-#include "enfs_tp_common.h"
 #include "enfs_config.h"
 #include "enfs.h"
 
 #define MAX_IPV6_ADDR_LEN (64)
-#define EOPNOTSUPP 95
 #define ENFS_DNS_MAX_NAME_LEN 256
 #define NUM0 0
 #define NUM1 1
@@ -57,7 +55,11 @@ static struct enfs_extend_version_func g_decodeFuncByVersion[] = {
 		   },
 };
 
-int NfsExtendProcInfoExtendEncode(char *pbuf, int buflen, struct enfs_extend3_args *pObj)
+static int
+NfsExtendProcInfoExtendEncode(
+	char *pbuf,
+	int buflen,
+	struct enfs_extend3_args *pObj)
 {
 	__be32 *start;
 	struct xdr_buf xdrBuf;
@@ -73,7 +75,7 @@ int NfsExtendProcInfoExtendEncode(char *pbuf, int buflen, struct enfs_extend3_ar
 
 	start = xdr_reserve_space(&xdrStream, 8);
 	if (unlikely(!start))
-		return true;
+		return -EINVAL;
 	*start++ = cpu_to_be32(pObj->opcode);
 	*start++ = cpu_to_be32(pObj->version);
 
@@ -127,7 +129,7 @@ int NfsExtendProcInfoExtendEncode(char *pbuf, int buflen, struct enfs_extend3_ar
 		start += quadlen;
 	}
 
-	return false;
+	return 0;
 }
 
 int NfsExtendDecodeFsShardV1(struct enfs_extend3_rsp **extend3ResOut, __be32 *p,
@@ -539,8 +541,10 @@ int EnfsExtendDecodePreCheck(uint32_t version, uint32_t opCode)
 	return 0;
 }
 
-int NfsExtendProcInfoExtendDecode(char *buf, uint32_t bufLen,
-				  struct enfs_extend3_rsp **extend3ResOut)
+static int
+NfsExtendProcInfoExtendDecode(
+	char *buf, uint32_t bufLen,
+	struct enfs_extend3_rsp **extend3ResOut)
 {
 	int ret = 0;
 	__be32 *p;
@@ -555,7 +559,7 @@ int NfsExtendProcInfoExtendDecode(char *buf, uint32_t bufLen,
 	xdr_init_decode(&xdrStream, &xdrBuf, NULL, NULL);
 	p = xdr_inline_decode(&xdrStream, 8);
 	if (unlikely(p == NULL))
-		return true;
+		return -EINVAL;
 	opCode = be32_to_cpup(p++);
 	version = be32_to_cpup(p++);
 
@@ -568,17 +572,17 @@ int NfsExtendProcInfoExtendDecode(char *buf, uint32_t bufLen,
 	func = g_decodeFuncByOpCode[opCode].decodeFunc;
 	if (!func) {
 		enfs_log_error("Enfs deocde op(%u) func is null", opCode);
-		return true;
+		return -EINVAL;
 	}
 	ret = func(extend3ResOut, version, p, &xdrStream);
 	if (ret) {
 		enfs_log_error(
 			"enfs decode failed, opCode:%u, version:%u, ret:%d",
 			opCode, version, ret);
-		return true;
+		return ret;
 	}
 
-	return false;
+	return 0;
 }
 
 #define EXTEND_CMD_MAX_BUF_LEN 819200 /* 800K */
@@ -648,13 +652,9 @@ int dorado_extend_op(struct rpc_clnt *clnt, char *buf, int *buflen)
 	xdr_arg.pBuf = buf;
 	xdr_arg.maxsize = EXTEND_CMD_MAX_BUF_LEN;
 
-	LVOS_TP_START(EXTEND_CALL_FAILED, &status);
-	LVOS_TP_START(EXTEND_NOT_SUPPORT, &status);
 	status = rpc_call_sync(clnt, &msg,
 			       RPC_TASK_SOFT | RPC_TASK_TIMEOUT |
 				       RPC_TASK_SOFTCONN);
-	LVOS_TP_END;
-	LVOS_TP_END;
 	*buflen = xdr_arg.buflen;
 	return status;
 }
@@ -682,17 +682,21 @@ int dorado_query_fs_shard(struct rpc_clnt *clnt, struct enfs_file_uuid *file_uui
 	int ret;
 	char *buf = NULL;
 	struct enfs_extend3_rsp *extend3Res = NULL;
+	struct enfs_shard_view *resData = NULL;
+	struct enfs_extend3_args *args = NULL;
 	int bufLen = sizeof(struct enfs_extend3_args);
-	struct enfs_shard_view *resData;
 
-	struct enfs_extend3_args *args = kmalloc(bufLen, GFP_KERNEL);
-
-	if (args == NULL)
-		return -ENOMEM;
+	args = kmalloc(bufLen, GFP_KERNEL);
+	if (args == NULL) {
+		ret = -ENOMEM;
+		goto out;
+	}
 
 	buf = kmalloc(EXTEND_CMD_MAX_BUF_LEN, GFP_KERNEL);
-	if (!buf)
-		return -ENOMEM;
+	if (!buf) {
+		ret = -ENOMEM;
+		goto out;
+	}
 
 	args->opcode = NFS3_GET_FSINFO_OP;
 	args->version = ENFS_VERSION_BUTT - 1;
@@ -700,34 +704,26 @@ int dorado_query_fs_shard(struct rpc_clnt *clnt, struct enfs_file_uuid *file_uui
 
 	nego_enfs_version(clnt, args);
 	ret = NfsExtendProcInfoExtendEncode(buf, bufLen, args);
+	if (ret)
+		goto out;
 
 	ret = dorado_extend_op(clnt, buf, &bufLen);
-
-	if (ret == -EOPNOTSUPP || ret == -ENFS_NOT_SUPPORT) {
-		// UpdateServerSupportStatus(ctx->devId, SERVER_NOT_SUPPORT);
-		kfree(args);
-		kfree(buf);
-		return ret;
-	}
-
-	// another err handle
 	if (ret) {
-		kfree(args);
-		kfree(buf);
-		return ret;
+		enfs_log_debug("get extent failed %d.\n", ret);
+		goto out;
 	}
 
 	// decode
 	ret = NfsExtendProcInfoExtendDecode(buf, bufLen, &extend3Res);
-	if (ret) {
-		kfree(args);
-		kfree(extend3Res);
-		kfree(buf);
-		return ret;
-	}
+	if (ret)
+		goto out;
 
 	resData = kmalloc(sizeof(struct enfs_shard_view) + sizeof(struct enfs_shard_view_single) *
 				(extend3Res->extend_res_u.fsInfo.num), GFP_KERNEL);
+	if (!resData) {
+		ret = -ENOMEM;
+		goto out;
+	}
 	resData->clusterId = extend3Res->extend_res_u.fsInfo.clusterId;
 	resData->storagePoolId = extend3Res->extend_res_u.fsInfo.storagePoolId;
 	resData->fsId = extend3Res->extend_res_u.fsInfo.fsId;
@@ -738,6 +734,7 @@ int dorado_query_fs_shard(struct rpc_clnt *clnt, struct enfs_file_uuid *file_uui
 		       extend3Res->extend_res_u.fsInfo.num);
 	*resDataOut = resData;
 
+out:
 	kfree(args);
 	kfree(extend3Res);
 	kfree(buf);
@@ -749,51 +746,47 @@ int dorado_query_lsId(struct rpc_clnt *clnt, struct enfs_get_ls_version_rsp **re
 	int ret;
 	char *buf = NULL;
 	struct enfs_extend3_rsp *extend3Res = NULL;
+	struct enfs_get_ls_version_rsp *resData = NULL;
+	struct enfs_extend3_args *args = NULL;
 	int bufLen = sizeof(uint32_t) * 2;
-	struct enfs_get_ls_version_rsp *resData;
 
-	struct enfs_extend3_args *args = kmalloc(bufLen, GFP_KERNEL);
-
-	if (args == NULL)
-		return -ENOMEM;
+	args = kmalloc(bufLen, GFP_KERNEL);
+	if (args == NULL) {
+		ret = -ENOMEM;
+		goto out;
+	}
 
 	buf = kmalloc(EXTEND_CMD_MAX_BUF_LEN, GFP_KERNEL);
-	if (!buf)
-		return -ENOMEM;
+	if (!buf) {
+		ret = -ENOMEM;
+		goto out;
+	}
 
 	args->opcode = NFS3_GET_LS_VERSION_OP;
 	args->version = ENFS_VERSION_BUTT - 1;
 	ret = NfsExtendProcInfoExtendEncode(buf, bufLen, args);
+	if (ret)
+		goto out;
 
 	ret = dorado_extend_op(clnt, buf, &bufLen);
-
-	if (ret == -EOPNOTSUPP || ret == -ENFS_NOT_SUPPORT) {
-		kfree(args);
-		kfree(buf);
-		return ret;
-	}
-
-	// another err handle
 	if (ret) {
-		enfs_log_error("get extent failed %d.\n", ret);
-		kfree(args);
-		kfree(buf);
-		return ret;
+		enfs_log_debug("get extent failed %d.\n", ret);
+		goto out;
 	}
 
 	// decode
 	ret = NfsExtendProcInfoExtendDecode(buf, bufLen, &extend3Res);
-	if (ret) {
-		kfree(args);
-		kfree(extend3Res);
-		kfree(buf);
-		return ret;
-	}
+	if (ret)
+		goto out;
 
 	resData = kmalloc(sizeof(struct enfs_get_ls_version_rsp) +
 				  sizeof(struct enfs_get_ls_version_single) *
 					  (extend3Res->extend_res_u.lsView.num),
 			  GFP_KERNEL);
+	if (!resData) {
+		ret = -ENOMEM;
+		goto out;
+	}
 	resData->num = extend3Res->extend_res_u.lsView.num;
 	resData->clusterId = extend3Res->extend_res_u.lsView.clusterId;
 	memcpy(resData->lsInfo, extend3Res->extend_res_u.lsView.lsInfo,
@@ -801,6 +794,7 @@ int dorado_query_lsId(struct rpc_clnt *clnt, struct enfs_get_ls_version_rsp **re
 		       extend3Res->extend_res_u.lsView.num);
 	*resDataOut = resData;
 
+out:
 	kfree(args);
 	kfree(extend3Res);
 	kfree(buf);
@@ -820,13 +814,15 @@ int dorado_query_lifview(struct rpc_clnt *clnt, struct rpc_xprt *xprt,
 	int bufLen = sizeof(uint32_t) * 4 + ipNumber * MAX_IPV6_ADDR_LEN;
 
 	buf = kmalloc(EXTEND_CMD_MAX_BUF_LEN, GFP_KERNEL);
-	if (!buf)
-		return -ENOMEM;
+	if (!buf) {
+		ret = -ENOMEM;
+		goto out;
+	}
 
 	args = kmalloc(bufLen, GFP_KERNEL);
 	if (args == NULL) {
-		kfree(buf);
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto out;
 	}
 
 	args->version = ENFS_VERSION_BUTT - 1;
@@ -838,24 +834,20 @@ int dorado_query_lifview(struct rpc_clnt *clnt, struct rpc_xprt *xprt,
 
 	nego_enfs_version(clnt, args);
 	ret = NfsExtendProcInfoExtendEncode(buf, bufLen, args);
+	if (ret)
+		goto out;
 
 	ret = dorado_extend_route(clnt, xprt, buf, &bufLen);
 	if (ret) {
 		enfs_log_debug("ENFS: NfsExtendOp get lif view failed %d.\n",
 			ret);
-		kfree(args);
-		kfree(buf);
-		return ret;
+		goto out;
 	}
 
 	// decode
 	ret = NfsExtendProcInfoExtendDecode(buf, bufLen, &extend3Res);
-	if (ret) {
-		kfree(args);
-		kfree(extend3Res);
-		kfree(buf);
-		return ret;
-	}
+	if (ret)
+		goto out;
 
 	curIP = ipAddr;
 	for (i = 0; i < extend3Res->extend_res_u.lifInfo.lifNumber; i++) {
@@ -881,10 +873,11 @@ int dorado_query_lifview(struct rpc_clnt *clnt, struct rpc_xprt *xprt,
 			extend3Res->extend_res_u.lifInfo.lifport[i].cpuId);
 	}
 
+out:
 	kfree(args);
 	kfree(extend3Res);
 	kfree(buf);
-	return 0;
+	return ret;
 }
 
 int enfs_query_lifview(struct rpc_clnt *clnt, struct rpc_xprt *xprt,
@@ -987,33 +980,33 @@ int dorado_query_dns(struct rpc_clnt *clnt,
 	char *buf = NULL;
 	struct enfs_extend3_args *args = NULL;
 	struct enfs_extend3_rsp *extend3Res = NULL;
-	struct enfs_dns_query_ip_info_single *resData;
+	struct enfs_dns_query_ip_info_single *resData = NULL;
 	// union don't use sizeof,4 means args's op and vers and dnsargs's type and count
 	int bufLen =
 		sizeof(uint32_t) * 4 + dnsNamecount * ENFS_DNS_MAX_NAME_LEN;
 	buf = kmalloc(EXTEND_CMD_MAX_BUF_LEN, GFP_KERNEL);
-	if (!buf)
-		return -ENOMEM;
+	if (!buf) {
+		ret = -ENOMEM;
+		goto out;
+	}
 
 	args = kmalloc(bufLen, GFP_KERNEL);
 	if (args == NULL) {
-		kfree(buf);
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto out;
 	}
 
 	NfsExtendDnsQuerySetArgs(args, ip_type, dnsNamecount, dnsName);
 	nego_enfs_version(clnt, args);
 
 	ret = NfsExtendProcInfoExtendEncode(buf, bufLen, args);
+	if (ret)
+		goto out;
 
 	ret = dorado_extend_op(clnt, buf, &bufLen);
 
-	if (ret == -EOPNOTSUPP || ret == -ENFS_NOT_SUPPORT)
-		goto out;
-
-	// another err handle
 	if (ret) {
-		enfs_log_error("NfsExtendOp query dns failed %d.\n", ret);
+		enfs_log_debug("NfsExtendOp query dns failed %d.\n", ret);
 		goto out;
 	}
 
@@ -1026,14 +1019,14 @@ int dorado_query_dns(struct rpc_clnt *clnt,
 	resData = kmalloc(extend3Res->extend_res_u.dnsQueryIpInfo.ipNumber *
 			(sizeof(struct enfs_dns_query_ip_info_single)), GFP_KERNEL);
 	if (resData == NULL) {
-		kfree(extend3Res);
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto out;
 	}
 	NfsExtendDnsQuerySetRes(extend3Res, resData);
 	*dnsQueryIpInfo = resData;
 
-	kfree(extend3Res);
 out:
+	kfree(extend3Res);
 	kfree(args);
 	kfree(buf);
 	return ret;

@@ -18,10 +18,10 @@
 #include "enfs_rpc_init.h"
 #include "enfs_log.h"
 #include "enfs_multipath.h"
-#include "enfs_tp_common.h"
 #include "mgmt_init.h"
 #include "dns_internal.h"
 #include "shard.h"
+#include "enfs_config.h"
 
 static struct enfs_adapter_ops enfs_adapter = {
 	.name = "enfs",
@@ -91,6 +91,8 @@ static struct enfs_init_entry init_entry[] = {
 static int __init init_enfs(void)
 {
 	int ret;
+
+	enfs_config_load();
 
 	ret = enfs_adapter_register(&enfs_adapter);
 	if (ret) {

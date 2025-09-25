@@ -37,7 +37,6 @@
 #include "enfs_proc.h"
 #include "enfs_remount.h"
 #include "enfs_roundrobin.h"
-#include "enfs_tp_common.h"
 #include "failover_path.h"
 #include "failover_time.h"
 #include "pm_ping.h"
@@ -303,16 +302,12 @@ static int enfs_add_xprt_setup(struct rpc_clnt *clnt,
 	attach_info->xprt = xprt;
 	xprt_get(xprt);
 
-	LVOS_TP_START(PING_TEST_FAILED, &ret);
 	ret = pm_ping_rpc_test_xprt_with_callback(
 		clnt, xprt, pm_xprt_ping_callback, attach_info->data);
-	LVOS_TP_END;
 	if (ret != 1)
 		enfs_log_error("Failed to add ping task.\n");
 
-	LVOS_TP_START(ADD_XPRT_FAILED, &ret);
 	ret = 1;
-	LVOS_TP_END;
 
 	return ret; // so that rpc_clnt_add_xprt does not call rpc_xprt_switch_add_xprt
 }
@@ -334,10 +329,8 @@ int enfs_configure_xprt_to_clnt(struct xprt_create *xprtargs,
 		(struct sockaddr *)attach_info->localAddress,
 		(struct sockaddr *)attach_info->remoteAddress);
 
-	LVOS_TP_START(CREATE_XPRT_FAILED, &err);
 	err = rpc_clnt_add_xprt(clnt, xprtargs, enfs_add_xprt_setup,
 				attach_info);
-	LVOS_TP_END;
 	if (err != 1) {
 		enfs_log_error("clnt add xprt err:%d\n", err);
 		return err;
@@ -943,9 +936,7 @@ void enfs_create_multi_xprt(struct rpc_create_args *args, struct rpc_clnt *clnt)
 		goto cleanup_mount;
 	}
 
-	LVOS_TP_START(ALLOC_CREATE_ARGS_FAILED, &cargs);
 	cargs = kmalloc(sizeof(struct rpc_create_args), GFP_KERNEL);
-	LVOS_TP_END;
 	if (cargs == NULL)
 		goto cleanup_link;
 
@@ -961,9 +952,7 @@ void enfs_create_multi_xprt(struct rpc_create_args *args, struct rpc_clnt *clnt)
 	thargs->clnt = clnt;
 	thargs->data = args->multipath_option;
 
-	LVOS_TP_START(CREATE_MULTIPATH_THREAD_FAILD, &err);
 	err = enfs_multipath_create_thread(thargs);
-	LVOS_TP_END;
 	if (err != 0)
 		goto cleanup_thargs;
 

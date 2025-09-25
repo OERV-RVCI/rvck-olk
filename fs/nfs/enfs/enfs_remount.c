@@ -24,7 +24,6 @@
 #include "enfs_path.h"
 #include "enfs_proc.h"
 #include "enfs_multipath_client.h"
-#include "enfs_tp_common.h"
 #include "enfs_config.h"
 
 static bool enfs_rpc_xprt_switch_need_delete_addr(
@@ -91,11 +90,8 @@ static bool enfs_delete_xprt_from_switch(struct rpc_xprt *xprt,
 		    (struct sockaddr *)&ctx->srcaddr, ctx->protocol)) {
 		print_enfs_multipath_addr((struct sockaddr *)&ctx->srcaddr,
 					  (struct sockaddr *)&xprt->addr);
-		LVOS_TP_START(REMOUNT_REMOVE_XPRT_FAILED,
-			      &ctx); // just match paramete,ctx is not used.
 		rpc_xprt_switch_remove_xprt(xps, xprt, false);
 		enfs_link_count_add(-1);
-		LVOS_TP_END;
 		return true;
 	}
 

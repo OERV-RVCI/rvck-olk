@@ -20,7 +20,6 @@
 #include "enfs_config.h"
 #include "enfs_log.h"
 #include "enfs_roundrobin.h"
-#include "enfs_tp_common.h"
 #include "exten_call.h"
 #include "pm_state.h"
 #include "shard.h"
@@ -40,9 +39,15 @@ struct shard_view_ctrl {
 	struct list_head clnt_info_list;
 };
 
+struct enfs_shard_info {
+	struct work_struct work;
+	struct nfs_server *server;
+};
+
 static struct shard_view_ctrl *shard_ctrl;
 static struct task_struct *shard_thread;
 static struct workqueue_struct *shard_workq;
+static struct workqueue_struct *shard_check_wq;
 
 struct clnt_debug_cmd {
 	const char *name;
@@ -644,8 +649,10 @@ static int query_and_update_shard(struct rpc_clnt *clnt, struct enfs_file_uuid *
 	struct enfs_get_ls_version_rsp *ls_view = NULL;
 
 	ret = dorado_query_fs_shard(clnt, file_uuid, &fsshard_view);
-	if (ret)
+	if (ret) {
+		enfs_log_debug("query fs shard err:%d.\n", ret);
 		return ret;
+	}
 
 	enfs_update_fsshard(GET_DEVID_FROM_UUID(file_uuid), fsshard_view,
 				&flag);
@@ -653,7 +660,7 @@ static int query_and_update_shard(struct rpc_clnt *clnt, struct enfs_file_uuid *
 
 	ret = dorado_query_lsId(clnt, &ls_view);
 	if (ret) {
-		enfs_log_error("update lsId err:%d.\n", ret);
+		enfs_log_debug("query lsId err:%d.\n", ret);
 		return ret;
 	}
 
@@ -691,6 +698,17 @@ void enfs_print_uuid(struct enfs_file_uuid *file_uuid)
 
 	sprint_uuid(buf, 80, file_uuid);
 	enfs_log_debug("UUID:%s\n", buf);
+}
+
+static void enfs_debug_fh(const struct nfs_fh *fh)
+{
+	int i;
+	char str[NFS_MAXFHSIZE * 2];
+
+	for (i = 0; i < fh->size; i++)
+		sprintf(str + 2 * i, "%02X", fh->data[i]);
+	str[2 * i] = '\0';
+	enfs_log_debug("fh: %s\n", str);
 }
 
 static int get_uuid_from_task(struct rpc_clnt *clnt, struct rpc_task *task,
@@ -1641,14 +1659,12 @@ static int shard_update_loop(void *data)
 	ktime_t start = ktime_get();
 
 	while (!kthread_should_stop()) {
-		LVOS_TP_START(QUICK_UPDATE_SHARD, &interval_ms);
 		interval_ms =
 			enfs_need_quick_update_shard() ?
 				(SHARD_VIEW_UPDATE_INTERVAL_UNDER_LOCK *
 				 SECOND_TO_MILLISECOND) :
 				(enfs_get_config_shardview_update_interval() *
 				 SECOND_TO_MILLISECOND);
-		LVOS_TP_END;
 		if (enfs_timeout_ms(&start, interval_ms)
 			&& enfs_get_config_multipath_state() ==
 			ENFS_MULTIPATH_ENABLE) {
@@ -1700,12 +1716,101 @@ static struct shard_view_ctrl *enfs_shard_ctrl_init(void)
 	return ctrl;
 }
 
+static void enfs_shard_workfn(struct work_struct *work)
+{
+	struct enfs_shard_info *info =
+		container_of(work, struct enfs_shard_info, work);
+	struct nfs_server *server = info->server;
+	struct super_block *super = server->super;
+	struct inode *inode;
+	struct nfs_fh *fh;
+	struct dentry *dentry;
+	struct enfs_file_uuid root_uuid;
+
+	dentry = super->s_root;
+	if (!dentry)
+		goto out;
+
+	inode = d_inode(dentry);
+	if (!inode)
+		goto out;
+
+	fh = NFS_FH(inode);
+	if (is_enfs_debug())
+		enfs_debug_fh(fh);
+	memset(&root_uuid, 0, sizeof(struct enfs_file_uuid));
+	fh_file_uuid(fh, &root_uuid);
+
+	insert_and_update_shard(server->client, &root_uuid);
+out:
+	nfs_sb_deactive(super);
+	kfree(info);
+}
+
+static int enfs_check_shard(void)
+{
+	int ret = 0;
+	struct nfs_net *nn;
+	struct net *net;
+	struct nfs_server *server;
+	struct super_block *super;
+	struct enfs_shard_info *info;
+
+	shard_check_wq = create_workqueue("shard_check_wq");
+	if (!shard_check_wq) {
+		ret = -ENOMEM;
+		goto out;
+	}
+
+	rcu_read_lock();
+	for_each_net_rcu(net) {
+		nn = net_generic(net, nfs_net_id);
+		if (nn == NULL)
+			continue;
+
+		spin_lock(&nn->nfs_client_lock);
+		list_for_each_entry(server, &nn->nfs_volume_list, master_link) {
+			super = server->super;
+			if (!super)
+				continue;
+			if (atomic_read(&super->s_active) == 0)
+				continue;
+			if (!nfs_sb_active(super))
+				continue;
+			info = kmalloc(sizeof(*info), GFP_ATOMIC);
+			if (!info) {
+				nfs_sb_deactive(super);
+				ret = -ENOMEM;
+				goto out;
+			}
+			INIT_WORK(&info->work, enfs_shard_workfn);
+			info->server = server;
+			queue_work(shard_check_wq, &info->work);
+		}
+		spin_unlock(&nn->nfs_client_lock);
+		break;
+	}
+	rcu_read_unlock();
+
+out:
+	// free shard_check_wq in enfs_shard_exit() if an error occurs
+	return ret;
+}
+
 int enfs_shard_init(void)
 {
+	int rc;
+
 	shard_ctrl = enfs_shard_ctrl_init();
 	if (!shard_ctrl) {
 		enfs_log_error("create shard view ctrl failed.\n");
 		return -ENOMEM;
+	}
+
+	rc = enfs_check_shard();
+	if (rc) {
+		enfs_log_error("check shard failed!");
+		return rc;
 	}
 
 	shard_workq = create_workqueue("enfs_shard_workqueue");
@@ -1728,11 +1833,12 @@ void enfs_shard_exit(void)
 	if (shard_thread)
 		kthread_stop(shard_thread);
 
-	if (shard_workq) {
-		flush_workqueue(shard_workq);
+	if (shard_workq)
 		destroy_workqueue(shard_workq);
-	}
 
 	if (shard_ctrl)
 		enfs_shard_ctrl_clear();
+
+	if (shard_check_wq)
+		destroy_workqueue(shard_check_wq);
 }

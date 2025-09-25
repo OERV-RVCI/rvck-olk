@@ -18,7 +18,6 @@
 #include "enfs_proc.h"
 #include "enfs_multipath.h"
 #include "pm_state.h"
-#include "enfs_tp_common.h"
 #include "exten_call.h"
 #include "shard.h"
 
@@ -437,23 +436,17 @@ static int enfs_proc_create_file(struct rpc_clnt *clnt)
 	if (err)
 		return err;
 
-	LVOS_TP_START(PROC_CREATE_FILE_FAILED, &clnt_entry);
 	clnt_entry = proc_mkdir(buf, enfs_proc_parent);
-	LVOS_TP_END;
 	if (clnt_entry == NULL)
 		return -EINVAL;
 
-	LVOS_TP_START(PROC_CREATE_FILE_STAT_FAILED, &stat_entry);
 	stat_entry =
 		proc_create_data("stat", 0, clnt_entry, &rpc_proc_fops, clnt);
-	LVOS_TP_END;
 	if (stat_entry == NULL)
 		return -EINVAL;
 
-	LVOS_TP_START(PROC_CREATE_FILE_PATH_FAILED, &stat_entry);
 	stat_entry = proc_create_data("path", 0, clnt_entry,
 				      &rpc_show_path_fops, clnt);
-	LVOS_TP_END;
 	if (stat_entry == NULL)
 		return -EINVAL;
 
@@ -565,9 +558,7 @@ static int enfs_proc_create_parent(void)
 #ifdef NFS_CLIENT_DEBUG
 	struct proc_dir_entry *stat_entry;
 #endif
-	LVOS_TP_START(PROC_CREATE_ENFS_FAILED, &enfs_proc_parent);
 	enfs_proc_parent = proc_mkdir(ENFS_PROC_DIR, NULL);
-	LVOS_TP_END;
 	if (enfs_proc_parent == NULL) {
 		enfs_log_error("create proc dir err\n");
 		return -ENOMEM;

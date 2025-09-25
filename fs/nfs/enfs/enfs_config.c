@@ -16,7 +16,6 @@
 #include "enfs.h"
 #include "enfs_errcode.h"
 #include "enfs_log.h"
-#include "enfs_tp_common.h"
 #include "enfs_config.h"
 
 #define MAX_FILE_SIZE 8192
@@ -294,9 +293,7 @@ static int32_t enfs_read_config_file_in_openeuler(char *buffer, char *file_path)
 	struct file *filp = NULL;
 	loff_t f_pos = 0;
 
-	LVOS_TP_START(OPEN_CONFIG_FILE_FAILED, &filp);
 	filp = filp_open(file_path, O_RDONLY, 0);
-	LVOS_TP_END;
 	if (IS_ERR(filp)) {
 		enfs_log_error("Failed to open file %s\n", CONFIG_FILE_PATH);
 		ret = -ENOENT;
