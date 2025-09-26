@@ -388,9 +388,9 @@ extern struct nfs_client *nfs_init_client(struct nfs_client *clp,
 /* dir.c */
 extern void nfs_readdir_record_entry_cache_hit(struct inode *dir);
 extern void nfs_readdir_record_entry_cache_miss(struct inode *dir);
-extern unsigned long nfs_access_cache_count(struct shrinker *shrink,
+extern unsigned long nfs_access_cache_count(struct shrinker_v2 *shrink,
 					    struct shrink_control *sc);
-extern unsigned long nfs_access_cache_scan(struct shrinker *shrink,
+extern unsigned long nfs_access_cache_scan(struct shrinker_v2 *shrink,
 					   struct shrink_control *sc);
 struct dentry *nfs_lookup(struct inode *, struct dentry *, unsigned int);
 void nfs_d_prune_case_insensitive_aliases(struct inode *inode);

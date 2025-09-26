@@ -203,13 +203,13 @@ void erofs_shrinker_unregister(struct super_block *sb)
 	mutex_unlock(&sbi->umount_mutex);
 }
 
-static unsigned long erofs_shrink_count(struct shrinker *shrink,
+static unsigned long erofs_shrink_count(struct shrinker_v2 *shrink,
 					struct shrink_control *sc)
 {
 	return atomic_long_read(&erofs_global_shrink_cnt);
 }
 
-static unsigned long erofs_shrink_scan(struct shrinker *shrink,
+static unsigned long erofs_shrink_scan(struct shrinker_v2 *shrink,
 				       struct shrink_control *sc)
 {
 	struct erofs_sb_info *sbi;
@@ -264,19 +264,24 @@ static unsigned long erofs_shrink_scan(struct shrinker *shrink,
 	return freed;
 }
 
-static struct shrinker erofs_shrinker_info = {
-	.scan_objects = erofs_shrink_scan,
-	.count_objects = erofs_shrink_count,
-	.seeks = DEFAULT_SEEKS,
-};
+static struct shrinker_v2 *erofs_shrinker_info;
 
 int __init erofs_init_shrinker(void)
 {
-	return register_shrinker(&erofs_shrinker_info, "erofs-shrinker");
+	erofs_shrinker_info = shrinker_alloc(0, "erofs-shrinker");
+	if (!erofs_shrinker_info)
+		return -ENOMEM;
+
+	erofs_shrinker_info->count_objects = erofs_shrink_count;
+	erofs_shrinker_info->scan_objects = erofs_shrink_scan;
+
+	shrinker_register(erofs_shrinker_info);
+
+	return 0;
 }
 
 void erofs_exit_shrinker(void)
 {
-	unregister_shrinker(&erofs_shrinker_info);
+	shrinker_free(erofs_shrinker_info);
 }
 #endif	/* !CONFIG_EROFS_FS_ZIP */

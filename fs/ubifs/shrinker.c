@@ -264,7 +264,7 @@ static int kick_a_thread(void)
 	return 0;
 }
 
-unsigned long ubifs_shrink_count(struct shrinker *shrink,
+unsigned long ubifs_shrink_count(struct shrinker_v2 *shrink,
 				 struct shrink_control *sc)
 {
 	long clean_zn_cnt = atomic_long_read(&ubifs_clean_zn_cnt);
@@ -276,7 +276,7 @@ unsigned long ubifs_shrink_count(struct shrinker *shrink,
 	return clean_zn_cnt >= 0 ? clean_zn_cnt : 1;
 }
 
-unsigned long ubifs_shrink_scan(struct shrinker *shrink,
+unsigned long ubifs_shrink_scan(struct shrinker_v2 *shrink,
 				struct shrink_control *sc)
 {
 	unsigned long nr = sc->nr_to_scan;

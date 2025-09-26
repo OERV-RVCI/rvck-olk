@@ -118,9 +118,11 @@ struct panfrost_device {
 
 	struct mutex shrinker_lock;
 	struct list_head shrinker_list;
-	struct shrinker shrinker;
+	KABI_DEPRECATE(struct shrinker, shrinker)
 
 	struct panfrost_devfreq pfdevfreq;
+
+	KABI_EXTEND(struct shrinker_v2 *shrinker)
 };
 
 struct panfrost_mmu {

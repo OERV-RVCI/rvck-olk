@@ -3494,7 +3494,7 @@ unlock_return:
 EXPORT_SYMBOL_GPL(kvfree_call_rcu);
 
 static unsigned long
-kfree_rcu_shrink_count(struct shrinker *shrink, struct shrink_control *sc)
+kfree_rcu_shrink_count(struct shrinker_v2 *shrink, struct shrink_control *sc)
 {
 	int cpu;
 	unsigned long count = 0;
@@ -3512,7 +3512,7 @@ kfree_rcu_shrink_count(struct shrinker *shrink, struct shrink_control *sc)
 }
 
 static unsigned long
-kfree_rcu_shrink_scan(struct shrinker *shrink, struct shrink_control *sc)
+kfree_rcu_shrink_scan(struct shrinker_v2 *shrink, struct shrink_control *sc)
 {
 	int cpu, freed = 0;
 
@@ -3533,13 +3533,6 @@ kfree_rcu_shrink_scan(struct shrinker *shrink, struct shrink_control *sc)
 
 	return freed == 0 ? SHRINK_STOP : freed;
 }
-
-static struct shrinker kfree_rcu_shrinker = {
-	.count_objects = kfree_rcu_shrink_count,
-	.scan_objects = kfree_rcu_shrink_scan,
-	.batch = 0,
-	.seeks = DEFAULT_SEEKS,
-};
 
 void __init kfree_rcu_scheduler_running(void)
 {
@@ -5031,6 +5024,7 @@ static void __init kfree_rcu_batch_init(void)
 {
 	int cpu;
 	int i, j;
+	struct shrinker_v2 *kfree_rcu_shrinker;
 
 	/* Clamp it to [0:100] seconds interval. */
 	if (rcu_delay_page_cache_fill_msec < 0 ||
@@ -5062,8 +5056,17 @@ static void __init kfree_rcu_batch_init(void)
 		INIT_DELAYED_WORK(&krcp->page_cache_work, fill_page_cache_func);
 		krcp->initialized = true;
 	}
-	if (register_shrinker(&kfree_rcu_shrinker, "rcu-kfree"))
-		pr_err("Failed to register kfree_rcu() shrinker!\n");
+
+	kfree_rcu_shrinker = shrinker_alloc(0, "rcu-kfree");
+	if (!kfree_rcu_shrinker) {
+		pr_err("Failed to allocate kfree_rcu() shrinker!\n");
+		return;
+	}
+
+	kfree_rcu_shrinker->count_objects = kfree_rcu_shrink_count;
+	kfree_rcu_shrinker->scan_objects = kfree_rcu_shrink_scan;
+
+	shrinker_register(kfree_rcu_shrinker);
 }
 
 void __init rcu_init(void)

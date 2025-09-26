@@ -5268,7 +5268,7 @@ static void vmap_init_nodes(void)
 }
 
 static unsigned long
-vmap_node_shrink_count(struct shrinker *shrink, struct shrink_control *sc)
+vmap_node_shrink_count(struct shrinker_v2 *shrink, struct shrink_control *sc)
 {
 	unsigned long count;
 	struct vmap_node *vn;
@@ -5285,7 +5285,7 @@ vmap_node_shrink_count(struct shrinker *shrink, struct shrink_control *sc)
 }
 
 static unsigned long
-vmap_node_shrink_scan(struct shrinker *shrink, struct shrink_control *sc)
+vmap_node_shrink_scan(struct shrinker_v2 *shrink, struct shrink_control *sc)
 {
 	int i;
 
@@ -5295,13 +5295,9 @@ vmap_node_shrink_scan(struct shrinker *shrink, struct shrink_control *sc)
 	return SHRINK_STOP;
 }
 
-static struct shrinker vmap_node_shrinker = {
-	.count_objects = vmap_node_shrink_count,
-	.scan_objects = vmap_node_shrink_scan,
-};
-
 void __init vmalloc_init(void)
 {
+	struct shrinker_v2 *vmap_node_shrinker;
 	struct vmap_area *va;
 	struct vmap_node *vn;
 	struct vm_struct *tmp;
@@ -5350,6 +5346,13 @@ void __init vmalloc_init(void)
 	vmap_init_free_space();
 	vmap_initialized = true;
 
-	if (register_shrinker(&vmap_node_shrinker, "vmap-node"))
+	vmap_node_shrinker = shrinker_alloc(0, "vmap-node");
+	if (!vmap_node_shrinker) {
 		pr_err("Failed to allocate vmap-node shrinker!\n");
+		return;
+	}
+
+	vmap_node_shrinker->count_objects = vmap_node_shrink_count;
+	vmap_node_shrinker->scan_objects = vmap_node_shrink_scan;
+	shrinker_register(vmap_node_shrinker);
 }

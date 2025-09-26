@@ -899,7 +899,7 @@ struct journal_s
 	 * Journal head shrinker, reclaim buffer's journal head which
 	 * has been written back.
 	 */
-	struct shrinker		j_shrinker;
+	KABI_DEPRECATE(struct shrinker, j_shrinker)
 
 	/**
 	 * @j_checkpoint_jh_count:
@@ -1312,7 +1312,7 @@ struct journal_s
 	 */
 	int (*j_bmap)(struct journal_s *journal, sector_t *block);
 
-	KABI_RESERVE(1)
+	KABI_USE(1, struct shrinker_v2 *j_shrinker)
 	KABI_RESERVE(2)
 	KABI_RESERVE(3)
 	KABI_RESERVE(4)

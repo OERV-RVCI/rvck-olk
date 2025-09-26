@@ -557,7 +557,7 @@ static void memcg_destroy_list_lru(struct list_lru *lru)
 #endif /* CONFIG_MEMCG_KMEM */
 
 int __list_lru_init(struct list_lru *lru, bool memcg_aware,
-		    struct lock_class_key *key, struct shrinker *shrinker)
+		    struct lock_class_key *key, struct shrinker_v2 *shrinker)
 {
 	int i;
 

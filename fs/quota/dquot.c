@@ -781,7 +781,7 @@ int dquot_quota_sync(struct super_block *sb, int type)
 EXPORT_SYMBOL(dquot_quota_sync);
 
 static unsigned long
-dqcache_shrink_scan(struct shrinker *shrink, struct shrink_control *sc)
+dqcache_shrink_scan(struct shrinker_v2 *shrink, struct shrink_control *sc)
 {
 	struct dquot *dquot;
 	unsigned long freed = 0;
@@ -801,17 +801,11 @@ dqcache_shrink_scan(struct shrinker *shrink, struct shrink_control *sc)
 }
 
 static unsigned long
-dqcache_shrink_count(struct shrinker *shrink, struct shrink_control *sc)
+dqcache_shrink_count(struct shrinker_v2 *shrink, struct shrink_control *sc)
 {
 	return vfs_pressure_ratio(
 	percpu_counter_read_positive(&dqstats.counter[DQST_FREE_DQUOTS]));
 }
-
-static struct shrinker dqcache_shrinker = {
-	.count_objects = dqcache_shrink_count,
-	.scan_objects = dqcache_shrink_scan,
-	.seeks = DEFAULT_SEEKS,
-};
 
 /*
  * Safely release dquot and put reference to dquot.
@@ -3010,6 +3004,7 @@ static int __init dquot_init(void)
 {
 	int i, ret;
 	unsigned long nr_hash, order;
+	struct shrinker_v2 *dqcache_shrinker;
 
 	printk(KERN_NOTICE "VFS: Disk quotas %s\n", __DQUOT_VERSION__);
 
@@ -3044,8 +3039,14 @@ static int __init dquot_init(void)
 	pr_info("VFS: Dquot-cache hash table entries: %ld (order %ld,"
 		" %ld bytes)\n", nr_hash, order, (PAGE_SIZE << order));
 
-	if (register_shrinker(&dqcache_shrinker, "dquota-cache"))
-		panic("Cannot register dquot shrinker");
+	dqcache_shrinker = shrinker_alloc(0, "dquota-cache");
+	if (!dqcache_shrinker)
+		panic("Cannot allocate dquot shrinker");
+
+	dqcache_shrinker->count_objects = dqcache_shrink_count;
+	dqcache_shrinker->scan_objects = dqcache_shrink_scan;
+
+	shrinker_register(dqcache_shrinker);
 
 	return 0;
 }

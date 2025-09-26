@@ -37,7 +37,7 @@ static unsigned long __count_extent_cache(struct f2fs_sb_info *sbi,
 				atomic_read(&eti->total_ext_node);
 }
 
-unsigned long f2fs_shrink_count(struct shrinker *shrink,
+unsigned long f2fs_shrink_count(struct shrinker_v2 *shrink,
 				struct shrink_control *sc)
 {
 	struct f2fs_sb_info *sbi;
@@ -76,7 +76,7 @@ unsigned long f2fs_shrink_count(struct shrinker *shrink,
 	return count;
 }
 
-unsigned long f2fs_shrink_scan(struct shrinker *shrink,
+unsigned long f2fs_shrink_scan(struct shrinker_v2 *shrink,
 				struct shrink_control *sc)
 {
 	unsigned long nr = sc->nr_to_scan;

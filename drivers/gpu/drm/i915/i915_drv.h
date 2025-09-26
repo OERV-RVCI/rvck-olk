@@ -163,7 +163,7 @@ struct i915_gem_mm {
 
 	struct notifier_block oom_notifier;
 	struct notifier_block vmap_notifier;
-	struct shrinker shrinker;
+	KABI_DEPRECATE(struct shrinker, shrinker)
 
 #ifdef CONFIG_MMU_NOTIFIER
 	/**
@@ -176,6 +176,8 @@ struct i915_gem_mm {
 	/* shrinker accounting, also useful for userland debugging */
 	u64 shrink_memory;
 	u32 shrink_count;
+
+	KABI_EXTEND(struct shrinker_v2 *shrinker)
 };
 
 struct i915_virtual_gpu {
