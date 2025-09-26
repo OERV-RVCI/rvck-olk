@@ -622,7 +622,7 @@ static const struct attribute_group hisi_l3c_pmu_v2_format_group = {
 
 static struct attribute *hisi_l3c_pmu_v3_format_attr[] = {
 	HISI_PMU_FORMAT_ATTR(event, "config:0-7"),
-	HISI_PMU_FORMAT_ATTR(ext, "config:16"),
+	HISI_PMU_FORMAT_ATTR(ext, "config:16-17"),
 	HISI_PMU_FORMAT_ATTR(tt_req, "config1:8-10"),
 	HISI_PMU_FORMAT_ATTR(tt_core, "config2:0-15"),
 	NULL
