@@ -1530,7 +1530,6 @@ static void snd_usbmidi_free(struct snd_usb_midi *umidi)
 		kfree(ep->out);
 	}
 	mutex_destroy(&umidi->mutex);
-	timer_shutdown_sync(&umidi->error_timer);
 	kfree(umidi);
 }
 
