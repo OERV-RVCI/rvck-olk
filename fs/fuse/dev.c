@@ -1860,7 +1860,7 @@ copy_finish:
  * if the FUSE daemon takes careful measures to avoid processing duplicated
  * non-idempotent requests.
  */
-static void fuse_resend(struct fuse_conn *fc)
+void fuse_resend(struct fuse_conn *fc)
 {
 	struct fuse_dev *fud;
 	struct fuse_req *req, *next;
@@ -2396,67 +2396,6 @@ void fuse_flush_pq(struct fuse_conn *fc)
 	spin_unlock(&fc->lock);
 
 	end_requests(&to_end);
-}
-
-/**
- * Resend all processing queue requests.
- *
- * When a FUSE daemon panics and fails over, we want to reuse the existing FUSE
- * connection and avoid affecting applications as little as possible. During
- * FUSE daemon failover, the FUSE processing queue requests are waiting for
- * replies from user space daemon that never come back and applications would
- * stuck forever.
- *
- * Besides flushing the processing queue requests like being done in fuse_flush_pq(),
- * we can also resend these requests to user space daemon so that they can be
- * processed properly again. Such strategy can only be done for idempotent requests
- * or if the user space daemon takes good care to record and avoid processing
- * duplicated non-idempotent requests.
- */
-void fuse_resend_pqueue(struct fuse_conn *fc)
-{
-	struct fuse_dev *fud;
-	struct fuse_req *req, *next;
-	struct fuse_iqueue *fiq = &fc->iq;
-	LIST_HEAD(to_queue);
-	unsigned int i;
-
-	spin_lock(&fc->lock);
-	if (!fc->connected) {
-		spin_unlock(&fc->lock);
-		return;
-	}
-
-	list_for_each_entry(fud, &fc->devices, entry) {
-		struct fuse_pqueue *fpq = &fud->pq;
-
-		spin_lock(&fpq->lock);
-		/*
-		 * Move requests for resend, including two parts: unlocked
-		 * requests in io list, and all requests in pending queue.
-		 */
-		list_for_each_entry_safe(req, next, &fpq->io, list) {
-			spin_lock(&req->waitq.lock);
-			if (!test_bit(FR_LOCKED, &req->flags)) {
-				__fuse_get_request(req);
-				list_move(&req->list, &to_queue);
-			}
-			spin_unlock(&req->waitq.lock);
-		}
-		for (i = 0; i < FUSE_PQ_HASH_SIZE; i++)
-			list_splice_tail_init(&fpq->processing[i], &to_queue);
-		spin_unlock(&fpq->lock);
-	}
-	spin_unlock(&fc->lock);
-
-	list_for_each_entry_safe(req, next, &to_queue, list) {
-		__set_bit(FR_PENDING, &req->flags);
-	}
-
-	spin_lock(&fiq->lock);
-	/* iq and pq requests are both oldest to newest */
-	list_splice(&to_queue, &fiq->pending);
-	spin_unlock(&fiq->lock);
 }
 
 static int fuse_dev_fasync(int fd, struct file *file, int on)

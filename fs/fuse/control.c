@@ -62,7 +62,7 @@ static ssize_t fuse_conn_resend_write(struct file *file, const char __user *buf,
 	struct fuse_conn *fc = fuse_ctl_file_conn_get(file);
 
 	if (fc) {
-		fuse_resend_pqueue(fc);
+		fuse_resend(fc);
 		fuse_conn_put(fc);
 	}
 	return count;

@@ -1204,7 +1204,7 @@ void fuse_wait_aborted(struct fuse_conn *fc);
 void fuse_flush_pq(struct fuse_conn *fc);
 
 /* Resend all requests in processing queue so they can represent to userspace */
-void fuse_resend_pqueue(struct fuse_conn *fc);
+void fuse_resend(struct fuse_conn *fc);
 
 /**
  * Invalidate inode attributes
