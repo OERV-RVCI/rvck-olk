@@ -33,6 +33,9 @@
 #define ENFS_MAX_MOUNT_COUNT 256
 #define EXTEND_MAX_DNS_NAME_LEN 256
 
+#define ENFS_UNSTABLE_STATE_TIMEOUT	(30 * 60) /* seconds */
+#define ENFS_RECONNECT_TIME_CNT	3
+
 struct nfs_ip_list {
 	int count;
 	struct sockaddr_storage address[MAX_SUPPORTED_REMOTE_IP_COUNT];
@@ -46,6 +49,14 @@ struct enfs_dns_info_single {
 struct enfs_route_dns_info {
 	int dnsNameCount; /* Count of DNS name in the list */
 	struct enfs_dns_info_single routeRemoteDnsList[MAX_DNS_SUPPORTED];
+};
+
+struct enfs_reconnect_time {
+	s64 time[ENFS_RECONNECT_TIME_CNT + 1];
+	s8 head;
+	s8 tail;
+	s8 reserve[2];
+	unsigned int xprt_cookie;
 };
 
 struct rpc_iostats;
@@ -62,7 +73,8 @@ struct enfs_xprt_context {
 	uint32_t cpuId;
 	u32 protocol; // TCP or UDP or RDMA
 	int64_t lastTime;
-	u32 reverse[40];
+	struct enfs_reconnect_time reconnect_time;
+	u32 reserve[30];
 };
 
 static inline bool enfs_is_main_xprt(struct rpc_xprt *xprt)

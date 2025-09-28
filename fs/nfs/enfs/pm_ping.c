@@ -116,6 +116,82 @@ static void set_xprt_close_wait(struct rpc_xprt *xprt)
 
 }
 
+static inline s8 enfs_get_next_time_idx(s8 idx)
+{
+	return (idx + 1) % (ENFS_RECONNECT_TIME_CNT + 1);
+}
+
+static inline bool enfs_is_time_buf_empty(struct enfs_reconnect_time *time)
+{
+	return time->head == time->tail;
+}
+
+static inline bool enfs_is_time_buf_full(struct enfs_reconnect_time *time)
+{
+	return enfs_get_next_time_idx(time->head) == time->tail;
+}
+
+static void
+enfs_update_reconnect_time(
+	struct enfs_reconnect_time *time,
+	s64 now_ms,
+	unsigned int cookie)
+{
+	bool is_reconnect = false;
+
+	if (time->xprt_cookie && time->xprt_cookie != cookie)
+		is_reconnect = true;
+	time->xprt_cookie = cookie;
+	if (is_reconnect) {
+		/* store reconnect time */
+		time->time[time->head] = now_ms;
+		time->head = enfs_get_next_time_idx(time->head);
+		/* array is full */
+		if (time->head == time->tail)
+			time->tail = enfs_get_next_time_idx(time->tail);
+	}
+
+	while (time->tail != time->head) {
+		if (now_ms - time->time[time->tail] <
+		    ENFS_UNSTABLE_STATE_TIMEOUT * 1000)
+			break;
+		/* timed out */
+		time->tail = enfs_get_next_time_idx(time->tail);
+	}
+}
+
+static void enfs_check_reconnect(struct rpc_xprt *xprt)
+{
+	struct enfs_xprt_context *ctx = NULL;
+	struct enfs_reconnect_time *time;
+	bool is_empty, is_full, is_normal;
+	enum enfs_path_state curr_state = pm_get_path_state(xprt);
+
+	xprt_get(xprt);
+
+	ctx = (struct enfs_xprt_context *)xprt_get_reserve_context(xprt);
+	if (ctx == NULL) {
+		enfs_log_error("The xprt multipath ctx is not valid.\n");
+		goto out;
+	}
+
+	time = &ctx->reconnect_time;
+	enfs_update_reconnect_time(time, ktime_to_ms(ktime_get()), xprt->connect_cookie);
+	is_empty = enfs_is_time_buf_empty(time);
+	is_full = enfs_is_time_buf_full(time);
+
+	is_normal = curr_state == PM_STATE_INIT ||
+		    (is_empty && curr_state == PM_STATE_UNSTABLE) ||
+		    (!is_full && curr_state == PM_STATE_NORMAL);
+	if (is_normal)
+		pm_set_path_state(xprt, PM_STATE_NORMAL);
+	else
+		pm_set_path_state(xprt, PM_STATE_UNSTABLE);
+
+out:
+	xprt_put(xprt);
+}
+
 // Default callback for async RPC calls
 static void pm_ping_call_done(struct rpc_task *task, void *data)
 {
@@ -125,8 +201,7 @@ static void pm_ping_call_done(struct rpc_task *task, void *data)
 
 	atomic_dec(&check_xprt_count);
 	if (task->tk_status >= 0) {
-		// xprt is not used,just match paramete.
-		pm_set_path_state(xprt, PM_STATE_NORMAL);
+		enfs_check_reconnect(xprt);
 	} else {
 		set_xprt_close_wait(xprt);
 		pm_set_path_state(xprt, PM_STATE_FAULT);
@@ -264,7 +339,6 @@ static int pm_ping_add_work(struct rpc_clnt *clnt, struct rpc_xprt *xprt,
 static int pm_ping_execute_xprt_test(struct rpc_clnt *clnt,
 					 struct rpc_xprt *xprt, void *data)
 {
-
 	pm_ping_add_work(clnt, xprt, data);
 	// return 0 for rpc_clnt_iterate_for_each_xprt(clnt,
 	// pm_ping_execute_xprt_test, NULL); because negative value will stop
