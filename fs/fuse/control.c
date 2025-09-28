@@ -56,6 +56,18 @@ static ssize_t fuse_conn_flush_write(struct file *file, const char __user *buf,
 	return count;
 }
 
+static ssize_t fuse_conn_resend_write(struct file *file, const char __user *buf,
+				      size_t count, loff_t *ppos)
+{
+	struct fuse_conn *fc = fuse_ctl_file_conn_get(file);
+
+	if (fc) {
+		fuse_resend_pqueue(fc);
+		fuse_conn_put(fc);
+	}
+	return count;
+}
+
 static ssize_t fuse_conn_waiting_read(struct file *file, char __user *buf,
 				      size_t len, loff_t *ppos)
 {
@@ -204,6 +216,12 @@ static const struct file_operations fuse_ctl_flush_ops = {
 	.llseek = no_llseek,
 };
 
+static const struct file_operations fuse_ctl_resend_ops = {
+	.open = nonseekable_open,
+	.write = fuse_conn_resend_write,
+	.llseek = no_llseek,
+};
+
 static const struct file_operations fuse_ctl_waiting_ops = {
 	.open = nonseekable_open,
 	.read = fuse_conn_waiting_read,
@@ -290,6 +308,8 @@ int fuse_ctl_add_conn(struct fuse_conn *fc)
 				 NULL, &fuse_ctl_abort_ops) ||
 	    !fuse_ctl_add_dentry(parent, fc, "flush", S_IFREG | 0200, 1,
 				 NULL, &fuse_ctl_flush_ops) ||
+	    !fuse_ctl_add_dentry(parent, fc, "resend", S_IFREG | 0200, 1,
+				 NULL, &fuse_ctl_resend_ops) ||
 	    !fuse_ctl_add_dentry(parent, fc, "max_background", S_IFREG | 0600,
 				 1, NULL, &fuse_conn_max_background_ops) ||
 	    !fuse_ctl_add_dentry(parent, fc, "congestion_threshold",
