@@ -875,7 +875,7 @@ static struct rpc_xprt *enfs_choose_shard_xport(struct rpc_xprt_switch *xps,
 		context =
 			(struct enfs_xprt_context *)xprt_get_reserve_context(pos);
 		if (context == NULL
-			|| atomic_read(&context->path_state) != PM_STATE_NORMAL) {
+			|| !enfs_is_path_connected(atomic_read(&context->path_state))) {
 			prev = pos;
 			continue;
 		}
@@ -1356,8 +1356,9 @@ static int EnfsChooseNewNlmXprt(struct rpc_clnt *clnt, struct rpc_xprt *xprt,
 	const char *local = local_name;
 	struct sockaddr_storage srcaddr;
 	struct rpc_xprt *nlm_xprt = (struct rpc_xprt *)data;
+	enum enfs_path_state state = pm_get_path_state(xprt);
 
-	if (pm_get_path_state(xprt) != PM_STATE_NORMAL)
+	if (!enfs_is_path_connected(state))
 		return 0;
 
 	sockaddr_ip_to_str((struct sockaddr *)&xprt->addr, remoteip,
@@ -1505,7 +1506,8 @@ static int enfs_recovery_nlm_lock(struct rpc_clnt *clnt)
 static int each_xprt_update_shard(struct rpc_clnt *clnt, struct rpc_xprt *xprt,
 				  void *data)
 {
-	if (pm_get_path_state(xprt) == PM_STATE_NORMAL)
+	enum enfs_path_state state = pm_get_path_state(xprt);
+	if (enfs_is_path_connected(state))
 		enfs_query_xprt_shard(clnt, xprt);
 	return 0;
 }

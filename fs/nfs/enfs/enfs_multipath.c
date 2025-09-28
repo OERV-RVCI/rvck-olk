@@ -473,7 +473,7 @@ static void enfs_add_xprts_to_clnt(struct rpc_clnt *clnt,
 		state = pm_get_path_state(xprt);
 
 		if (link_count < maxCountPerMount &&
-		    (state == PM_STATE_NORMAL ||
+		    (enfs_is_path_connected(state) ||
 		     enfs_get_create_path_no_route()) &&
 		    limit_local_addr(ip_list, xprt) && enfs_link_count_add(1)) {
 			enfs_xprt_switch_add_xprt(clnt, xprt);

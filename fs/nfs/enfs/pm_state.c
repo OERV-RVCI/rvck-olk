@@ -150,6 +150,9 @@ void pm_get_path_state_desc(struct rpc_xprt *xprt, char *buf, int len)
 	case PM_STATE_NORMAL:
 		(void)snprintf(buf, len, "Normal");
 		break;
+	case PM_STATE_UNSTABLE:
+		(void)snprintf(buf, len, "Unstable");
+		break;
 	case PM_STATE_FAULT:
 		(void)snprintf(buf, len, "Fault");
 		break;
