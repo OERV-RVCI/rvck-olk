@@ -46,7 +46,7 @@
 #define FUSE_NAME_MAX 1024
 
 /** Number of dentries for each connection in the control filesystem */
-#define FUSE_CTL_NUM_DENTRIES 5
+#define FUSE_CTL_NUM_DENTRIES 6
 
 /** Maximum of max_pages received in init_out */
 extern unsigned int fuse_max_pages_limit;
@@ -1199,6 +1199,9 @@ void fuse_request_end(struct fuse_req *req);
 /* Abort all requests */
 void fuse_abort_conn(struct fuse_conn *fc);
 void fuse_wait_aborted(struct fuse_conn *fc);
+
+/* Flush all requests in processing queue */
+void fuse_flush_pq(struct fuse_conn *fc);
 
 /**
  * Invalidate inode attributes
