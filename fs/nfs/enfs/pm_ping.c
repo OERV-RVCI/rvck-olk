@@ -192,6 +192,84 @@ out:
 	xprt_put(xprt);
 }
 
+#if IS_ENABLED(CONFIG_ENFS_KUNIT_TEST)
+bool enfs_test_reconnect_time(void)
+{
+	bool ret = true;
+	bool match;
+	s64 begin_ms = ktime_to_ms(ktime_get());
+	s64 ms;
+	unsigned int cookie = 1;
+	struct enfs_reconnect_time time = {
+		.head = 0,
+		.tail = 0,
+		.xprt_cookie = 0,
+	};
+
+	enfs_log_info("begin time: %lld ms\n", begin_ms);
+
+	ms = begin_ms;
+	enfs_log_info("%lld ms, cookie:%d\n", ms, cookie);
+	enfs_update_reconnect_time(&time, ms, cookie);
+	match = enfs_is_time_buf_empty(&time);
+	if (!match)
+		return false;
+
+	ms = begin_ms + 1000;
+	cookie += 1;
+	enfs_log_info("%lld ms, cookie:%d\n", ms, cookie);
+	enfs_update_reconnect_time(&time, ms, cookie);
+	match = time.head == 1 && time.tail == 0;
+	if (!match)
+		return false;
+
+	ms = begin_ms + 2000;
+	cookie += 1;
+	enfs_log_info("%lld ms, cookie:%d\n", ms, cookie);
+	enfs_update_reconnect_time(&time, ms, cookie);
+	match = time.head == 2 && time.tail == 0;
+	if (!match)
+		return false;
+
+	ms = begin_ms + 3000;
+	cookie += 1;
+	enfs_log_info("%lld ms, cookie:%d\n", ms, cookie);
+	enfs_update_reconnect_time(&time, ms, cookie);
+	match = time.head == 3 && time.tail == 0;
+	if (!match)
+		return false;
+
+	ms = begin_ms + 4000;
+	cookie += 1;
+	enfs_log_info("%lld ms, cookie:%d\n", ms, cookie);
+	enfs_update_reconnect_time(&time, ms, cookie);
+	match = time.head == 0 && time.tail == 1;
+	if (!match)
+		return false;
+	match = enfs_is_time_buf_full(&time);
+	if (!match)
+		return false;
+
+	ms = begin_ms + 5000;
+	/* cookie remains unchanged */
+	enfs_log_info("%lld ms, cookie:%d\n", ms, cookie);
+	enfs_update_reconnect_time(&time, ms, cookie);
+	match = time.head == 0 && time.tail == 1;
+	if (!match)
+		return false;
+
+	ms = begin_ms + 5000 + ENFS_UNSTABLE_STATE_TIMEOUT * 1000 + 1;
+	cookie += 1;
+	enfs_log_info("%lld ms, cookie:%d\n", ms, cookie);
+	enfs_update_reconnect_time(&time, ms, cookie);
+	match = time.head == 1 && time.tail == 0;
+	if (!match)
+		return false;
+
+	return ret;
+}
+#endif
+
 // Default callback for async RPC calls
 static void pm_ping_call_done(struct rpc_task *task, void *data)
 {

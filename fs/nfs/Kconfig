@@ -225,3 +225,16 @@ config ENFS
 	 This feature will improve performance and reliability.
 
 	 If sure, say Y.
+
+config ENFS_KUNIT_TEST
+	bool "This builds the ENFS KUnit tests" if !KUNIT_ALL_TESTS
+	depends on KUNIT
+	default KUNIT_ALL_TESTS
+	help
+	  Only useful for kernel devs running KUnit test harness and are not
+	  for inclusion into a production build.
+
+	  For more information on KUnit and unit tests in general please refer
+	  to the KUnit documentation in Documentation/dev-tools/kunit/.
+
+	  If unsure, say N.
