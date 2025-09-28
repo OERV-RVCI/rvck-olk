@@ -92,15 +92,13 @@ void pm_set_path_state(struct rpc_xprt *xprt, enum enfs_path_state state)
 	ctx = (struct enfs_xprt_context *)xprt_get_reserve_context(xprt);
 	if (ctx == NULL) {
 		enfs_log_error("The xprt multipath ctx is not valid.\n");
-		xprt_put(xprt);
-		return;
+		goto out;
 	}
 
 	cur_state = atomic_read(&ctx->path_state);
-	if (cur_state == state) {
-		xprt_put(xprt);
-		return;
-	}
+	if (cur_state == state)
+		goto out;
+
 	atomic_set(&ctx->path_state, state);
 	ret =
 		sockaddr_ip_to_str((struct sockaddr *)&xprt->addr, remoteip,
@@ -123,8 +121,8 @@ void pm_set_path_state(struct rpc_xprt *xprt, enum enfs_path_state state)
 		("The xprt localip{%s} remoteip{%s} path state change from {%d} to {%d}.\n",
 		 localip, remoteip, cur_state, state);
 
+out:
 	xprt_put(xprt);
-
 }
 
 void pm_get_path_state_desc(struct rpc_xprt *xprt, char *buf, int len)
