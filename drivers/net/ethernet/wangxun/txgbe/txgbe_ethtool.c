@@ -2948,14 +2948,15 @@ static void txgbe_get_wol(struct net_device *netdev,
 	struct txgbe_adapter *adapter = netdev_priv(netdev);
 	struct txgbe_hw *hw = &adapter->hw;
 
-	wol->supported = WAKE_UCAST | WAKE_MCAST |
-			 WAKE_BCAST | WAKE_MAGIC;
+	wol->supported = 0;
 	wol->wolopts = 0;
 
-	if (!device_can_wakeup(pci_dev_to_dev(adapter->pdev)))
+	if ((hw->subsystem_device_id & TXGBE_WOL_MASK) != TXGBE_WOL_SUP)
 		return;
 
-	if ((hw->subsystem_device_id & TXGBE_WOL_MASK) != TXGBE_WOL_SUP)
+	wol->supported = WAKE_MAGIC;
+
+	if (!device_can_wakeup(pci_dev_to_dev(adapter->pdev)))
 		return;
 
 	if (adapter->wol & TXGBE_PSR_WKUP_CTL_EX)
@@ -2981,12 +2982,6 @@ static int txgbe_set_wol(struct net_device *netdev, struct ethtool_wolinfo *wol)
 
 	adapter->wol = 0;
 
-	if (wol->wolopts & WAKE_UCAST)
-		adapter->wol |= TXGBE_PSR_WKUP_CTL_EX;
-	if (wol->wolopts & WAKE_MCAST)
-		adapter->wol |= TXGBE_PSR_WKUP_CTL_MC;
-	if (wol->wolopts & WAKE_BCAST)
-		adapter->wol |= TXGBE_PSR_WKUP_CTL_BC;
 	if (wol->wolopts & WAKE_MAGIC)
 		adapter->wol |= TXGBE_PSR_WKUP_CTL_MAG;
 
