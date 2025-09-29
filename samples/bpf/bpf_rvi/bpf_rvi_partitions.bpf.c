@@ -34,7 +34,7 @@ s64 dump_partitions(struct bpf_iter__partitions *ctx)
 	 * Reference: bdev_name() in lib/vsprintf.c
 	 */
 	if (part->bd_partno)
-		BPF_SEQ_PRINTF(m, "%sp%d\n", part->bd_disk->disk_name, part->bd_partno);
+		BPF_SEQ_PRINTF(m, "%s%d\n", part->bd_disk->disk_name, part->bd_partno);
 	else
 		BPF_SEQ_PRINTF(m, "%s\n", part->bd_disk->disk_name);
 
