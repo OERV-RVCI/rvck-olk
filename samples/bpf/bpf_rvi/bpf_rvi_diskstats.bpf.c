@@ -107,7 +107,7 @@ static void native_diskstats_show(struct seq_file *m, struct block_device *hd,
 	BPF_SEQ_PRINTF(m, "%4d %7d ", MAJOR(hd->bd_dev), MINOR(hd->bd_dev));
 	/* Reference: bdev_name() in lib/vsprintf.c */
 	if (hd->bd_partno)
-		BPF_SEQ_PRINTF(m, "%sp%d ", hd->bd_disk->disk_name, hd->bd_partno);
+		BPF_SEQ_PRINTF(m, "%s%d ", hd->bd_disk->disk_name, hd->bd_partno);
 	else
 		BPF_SEQ_PRINTF(m, "%s ", hd->bd_disk->disk_name);
 
@@ -192,7 +192,7 @@ s64 dump_diskstats(struct bpf_iter__diskstats *ctx)
 	BPF_SEQ_PRINTF(m, "%4d %7d ", major, minor);
 	/* Reference: bdev_name() in lib/vsprintf.c */
 	if (bd->bd_partno)
-		BPF_SEQ_PRINTF(m, "%sp%d ", bd->bd_disk->disk_name, bd->bd_partno);
+		BPF_SEQ_PRINTF(m, "%s%d ", bd->bd_disk->disk_name, bd->bd_partno);
 	else
 		BPF_SEQ_PRINTF(m, "%s ", bd->bd_disk->disk_name);
 
