@@ -733,20 +733,32 @@ static int get_uuid_from_task(struct rpc_clnt *clnt, struct rpc_task *task,
 	return 0;
 }
 
-static struct rpc_xprt *choose_less_queue_len(struct rpc_xprt *xport1,
-						  struct rpc_xprt *xport2)
+static struct rpc_xprt *
+enfs_choose_better_xprt(
+	struct rpc_xprt *xport1,
+	struct rpc_xprt *xport2)
 {
 	struct enfs_xprt_context *context1;
 	struct enfs_xprt_context *context2;
+	bool is_xprt1_normal, is_xprt2_normal;
 
 	if (xport1 == NULL)
 		return xport2;
 	if (xport2 == NULL)
 		return xport1;
+
 	context1 = (struct enfs_xprt_context *)xprt_get_reserve_context(xport1);
 	context2 = (struct enfs_xprt_context *)xprt_get_reserve_context(xport2);
+
+	is_xprt1_normal = atomic_read(&context1->path_state) == PM_STATE_NORMAL;
+	is_xprt2_normal = atomic_read(&context2->path_state) == PM_STATE_NORMAL;
+	if (is_xprt1_normal && !is_xprt2_normal)
+		return xport1;
+	if (!is_xprt1_normal && is_xprt2_normal)
+		return xport2;
+
 	if (atomic_long_read(&(context1->queuelen)) >
-		atomic_long_read(&(context2->queuelen))) {
+	    atomic_long_read(&(context2->queuelen))) {
 		return xport2;
 	}
 	return xport1;
@@ -856,7 +868,7 @@ static struct rpc_xprt *enfs_choose_shard_xport(struct rpc_xprt_switch *xps,
 	bool found = false;
 	struct rpc_xprt *prev = NULL;
 	struct enfs_xprt_context *context = NULL;
-	struct rpc_xprt *choose_port = NULL;
+	struct rpc_xprt *choose_xprt = NULL;
 	int i;
 	int nativeLinkStatus = enfs_get_native_link_io_status();
 	struct route_rule rule[] = {
@@ -888,8 +900,7 @@ static struct rpc_xprt *enfs_choose_shard_xport(struct rpc_xprt_switch *xps,
 
 		for (i = 0; i < len; i++) {
 			if (rule[i].match(wwn, lsid, cpuId, context)) {
-				rule[i].xprt =
-					choose_less_queue_len(rule[i].xprt, pos);
+				rule[i].xprt = enfs_choose_better_xprt(rule[i].xprt, pos);
 				break;
 			}
 		}
@@ -901,9 +912,8 @@ static struct rpc_xprt *enfs_choose_shard_xport(struct rpc_xprt_switch *xps,
 
 		for (i = 0; i < len; i++) {
 			if (rule[i].match(wwn, lsid, cpuId, context)) {
-				rule[i].optimal_xprt =
-					choose_less_queue_len(rule[i].optimal_xprt,
-							  pos);
+				rule[i].optimal_xprt = enfs_choose_better_xprt(rule[i].optimal_xprt,
+									       pos);
 				break;
 			}
 		}
@@ -915,14 +925,14 @@ static struct rpc_xprt *enfs_choose_shard_xport(struct rpc_xprt_switch *xps,
 			continue;
 
 		if (rule[i].optimal_xprt != NULL)
-			choose_port = rule[i].optimal_xprt;
+			choose_xprt = rule[i].optimal_xprt;
 		else
-			choose_port = rule[i].xprt;
+			choose_xprt = rule[i].xprt;
 
 		break;
 	}
 
-	return choose_port;
+	return choose_xprt;
 }
 
 static struct rpc_xprt *enfs_get_shard_xport(struct rpc_clnt *clnt,
