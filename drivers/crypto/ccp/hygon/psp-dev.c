@@ -380,6 +380,8 @@ int hygon_psp_additional_setup(struct sp_device *sp)
 	if (!hygon_psp_hooks.sev_dev_hooks_installed)
 		return -ENODEV;
 
+	init_waitqueue_head(&psp_int_queue);
+
 	if (!psp_misc) {
 		struct miscdevice *misc;
 
