@@ -72,9 +72,8 @@ int dump_cpuinfo_arm64(struct bpf_iter__cpuinfo_arm64 *ctx)
 
 	BPF_SEQ_PRINTF(m, "Features\t:");
 	if (aarch32 && CONFIG_AARCH32_EL0) {
-		unsigned long compat_hwcap_str_size, compat_hwcap2_str_size;
+		unsigned long compat_hwcap_str_size = 0x1c, compat_hwcap2_str_size = 0x7;
 
-		compat_hwcap_str_size = (unsigned long)bpf_arch_flags(ARM64_COMPAT_HWCAP_SIZE, 0);
 		bpf_core_read(&out_a32_elf_hwcap, sizeof(unsigned int), &a32_elf_hwcap);
 		for (j = 0; j < compat_hwcap_str_size; j++) {
 			if (out_a32_elf_hwcap & (1 << j)) {
@@ -84,13 +83,12 @@ int dump_cpuinfo_arm64(struct bpf_iter__cpuinfo_arm64 *ctx)
 			}
 		}
 
-		compat_hwcap2_str_size = (unsigned long)bpf_arch_flags(ARM64_COMPAT_HWCAP2_SIZE, 0);
 		bpf_core_read(&out_a32_elf_hwcap2, sizeof(unsigned int), &a32_elf_hwcap2);
 		for (j = 0; j < compat_hwcap2_str_size; j++)
 			if (out_a32_elf_hwcap2 & (1 << j))
 				BPF_SEQ_PRINTF(m, " %s", bpf_arch_flags(ARM64_COMPAT_HWCAP2, j));
 	} else {
-		unsigned long hwcap_str_size = (unsigned long)bpf_arch_flags(ARM64_HWCAP_SIZE, 0);
+		unsigned long hwcap_str_size = 0x82;
 
 		for (j = 0; j < hwcap_str_size; j++)
 			if (bpf_arm64_cpu_have_feature(j))
