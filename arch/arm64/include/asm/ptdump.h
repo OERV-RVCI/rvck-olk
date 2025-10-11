@@ -5,6 +5,8 @@
 #ifndef __ASM_PTDUMP_H
 #define __ASM_PTDUMP_H
 
+DECLARE_STATIC_KEY_FALSE(arm64_ptdump_lock_key);
+
 #ifdef CONFIG_PTDUMP_CORE
 
 #include <linux/mm_types.h>
