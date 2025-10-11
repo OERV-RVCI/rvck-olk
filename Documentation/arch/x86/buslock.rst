@@ -27,6 +27,7 @@ Detection
 
 Intel processors may support either or both of the following hardware
 mechanisms to detect split locks and bus locks.
+Some Zhaoxin processors also support split lock detect.
 
 #AC exception for split lock detection
 --------------------------------------
