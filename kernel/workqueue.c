@@ -756,6 +756,11 @@ static struct pool_workqueue *get_work_pwq(struct work_struct *work)
 		return NULL;
 }
 
+static unsigned long shift_and_mask(unsigned long v, u32 shift, u32 bits)
+{
+	return (v >> shift) & ((1U << bits) - 1);
+}
+
 /**
  * get_work_pool - return the worker_pool a given work was associated with
  * @work: the work item of interest
@@ -781,16 +786,11 @@ static struct worker_pool *get_work_pool(struct work_struct *work)
 	if (data & WORK_STRUCT_PWQ)
 		return work_struct_pwq(data)->pool;
 
-	pool_id = data >> WORK_OFFQ_POOL_SHIFT;
+	pool_id = shift_and_mask(data, WORK_OFFQ_POOL_SHIFT, WORK_OFFQ_POOL_BITS);
 	if (pool_id == WORK_OFFQ_POOL_NONE)
 		return NULL;
 
 	return idr_find(&worker_pool_idr, pool_id);
-}
-
-static unsigned long shift_and_mask(unsigned long v, u32 shift, u32 bits)
-{
-	return (v >> shift) & ((1U << bits) - 1);
 }
 
 static void work_offqd_unpack(struct work_offq_data *offqd, unsigned long data)
