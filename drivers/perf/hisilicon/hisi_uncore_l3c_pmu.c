@@ -11,6 +11,7 @@
 #include <linux/acpi.h>
 #include <linux/bug.h>
 #include <linux/cpuhotplug.h>
+#include <linux/cpu_smt.h>
 #include <linux/interrupt.h>
 #include <linux/irq.h>
 #include <linux/list.h>
@@ -60,7 +61,9 @@
 
 #define L3C_PG_INFO_MASK(x)	GENMASK_ULL((x) - 1, 0)
 #define L3C_MAX_CPU		64
-#define SMT_PER_CORE		2
+
+#define SMT_PER_CORE		(cpu_smt_possible() ? 2 : 1)
+#define PORT_PER_CORE		2
 
 HISI_PMU_EVENT_ATTR_EXTRACTOR(ext, config, 17, 16);
 HISI_PMU_EVENT_ATTR_EXTRACTOR(tt_req, config1, 10, 8);
@@ -80,6 +83,7 @@ struct hisi_l3c_pmu {
 };
 
 enum hisi_l3c_cpu_substitute {
+	ROLL_OVER = 0,
 	LAST_UP = 1,
 };
 
@@ -281,12 +285,16 @@ static u32 hisi_l3c_pmu_cluster_cpu_substitute(struct hisi_l3c_pmu *hisi_l3c_pmu
 {
 	int *core_config = hisi_l3c_pmu->core_config;
 	unsigned long tt_core_config = core;
+	int bit, offset, pcpu, sub_cpu;
 	unsigned long tt_core = 0;
-	int bit, sub_cpu;
+
+	int smt_per_core = SMT_PER_CORE;
 
 	for_each_set_bit(bit, &tt_core_config, BITS_PER_TYPE(u32)) {
-		sub_cpu = core_config[bit / SMT_PER_CORE] * SMT_PER_CORE;
-		tt_core |= BIT(sub_cpu + (bit & 1));
+		offset = bit % smt_per_core;
+		pcpu = bit / smt_per_core;
+		sub_cpu = core_config[pcpu] * PORT_PER_CORE + offset;
+		tt_core |= BIT(sub_cpu);
 	}
 
 	return tt_core;
@@ -792,6 +800,17 @@ static const struct hisi_uncore_ops hisi_uncore_l3c_ops = {
 	.check_filter		= hisi_l3c_pmu_check_filter,
 };
 
+static void hisi_l3c_do_roll_over(u64 cpu_mask, u32 cpu_num,
+				struct hisi_l3c_pmu *hisi_l3c_pmu)
+{
+	int cpu = 0, bit;
+
+	for_each_set_bit(bit, (unsigned long *)&cpu_mask, cpu_num) {
+		hisi_l3c_pmu->core_config[cpu] = bit;
+		cpu++;
+	}
+}
+
 static void hisi_l3c_do_last_up(u64 cpu_mask, u32 cpu_num,
 				struct hisi_l3c_pmu *hisi_l3c_pmu)
 {
@@ -805,6 +824,12 @@ static void hisi_l3c_do_last_up(u64 cpu_mask, u32 cpu_num,
 	sub = cpu_num - sub;
 
 	for_each_clear_bit(bit, (unsigned long *)&cpu_mask, cpu_num) {
+		while (sub > 0 && !(cpu_mask & BIT(cpu_num - sub)))
+			sub--;
+
+		if (sub <= 0)
+			break;
+
 		hisi_l3c_pmu->core_config[bit] = cpu_num - sub;
 		sub--;
 	}
@@ -829,8 +854,15 @@ static void hisi_l3c_get_cluster_cpu_info(struct device *dev,
 
 	cpu_mask &= L3C_PG_INFO_MASK(cpu_num);
 
-	/* For now the substitute algorithm is always last_up. */
-	hisi_l3c_do_last_up(cpu_mask, cpu_num, hisi_l3c_pmu);
+	switch (sub) {
+	case ROLL_OVER:
+		hisi_l3c_do_roll_over(cpu_mask, cpu_num, hisi_l3c_pmu);
+		break;
+	case LAST_UP:
+	default:
+		hisi_l3c_do_last_up(cpu_mask, cpu_num, hisi_l3c_pmu);
+		break;
+	}
 }
 
 static int hisi_l3c_pmu_dev_probe(struct platform_device *pdev,
