@@ -142,6 +142,8 @@ static int __init cna_init_nodes(void)
 	return 0;
 }
 
+late_initcall(cna_init_nodes);
+
 static __always_inline void cna_init_node(struct mcs_spinlock *node)
 {
 	bool priority = !in_task() || irqs_disabled() || rt_task(current);
