@@ -1512,6 +1512,18 @@ int _kvm_rec_enter(struct kvm_vcpu *vcpu)
 {
 	struct realm_rec *rec = vcpu->arch.rec;
 
+#ifdef CONFIG_HISI_CCA
+	if (vcpu->arch.hcr_el2 & HCR_TWI)
+		rec->run->enter.flags |= REC_ENTER_FLAG_TRAP_WFI;
+	else
+		rec->run->enter.flags &= ~REC_ENTER_FLAG_TRAP_WFI;
+
+	if (vcpu->arch.hcr_el2 & HCR_TWE)
+		rec->run->enter.flags |= REC_ENTER_FLAG_TRAP_WFE;
+	else
+		rec->run->enter.flags &= ~REC_ENTER_FLAG_TRAP_WFE;
+#endif
+
 	return rmi_rec_enter(virt_to_phys(rec->rec_page),
 			     virt_to_phys(rec->run));
 }

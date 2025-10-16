@@ -129,7 +129,9 @@ int kvm_arm_timer_set_attr(struct kvm_vcpu *vcpu, struct kvm_device_attr *attr);
 int kvm_arm_timer_get_attr(struct kvm_vcpu *vcpu, struct kvm_device_attr *attr);
 int kvm_arm_timer_has_attr(struct kvm_vcpu *vcpu, struct kvm_device_attr *attr);
 
-void kvm_realm_timers_update(struct kvm_vcpu *vcpu);
+#if defined(CONFIG_HISI_VIRTCCA_HOST) || defined(CONFIG_HISI_CCA)
+void kvm_cvm_timers_update(struct kvm_vcpu *vcpu);
+#endif
 
 u64 kvm_phys_timer_read(void);
 
@@ -174,8 +176,4 @@ static inline bool has_cntpoff(void)
 	return (has_vhe() && cpus_have_final_cap(ARM64_HAS_ECV_CNTPOFF));
 }
 
-#ifdef CONFIG_HISI_VIRTCCA_HOST
-/* Needed for S-EL2 */
-void kvm_cvm_timers_update(struct kvm_vcpu *vcpu);
-#endif
 #endif

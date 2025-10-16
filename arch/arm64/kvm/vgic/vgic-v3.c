@@ -771,6 +771,13 @@ void vgic_v3_vmcr_sync(struct kvm_vcpu *vcpu)
 	}
 #endif
 
+#ifdef CONFIG_HISI_CCA
+	if (_vcpu_is_rec(vcpu)) {
+		cpu_if->vgic_vmcr = vcpu->arch.rec->run->exit.gicv3_vmcr;
+		return;
+	}
+#endif
+
 	if (likely(cpu_if->vgic_sre))
 		cpu_if->vgic_vmcr = kvm_call_hyp_ret(__vgic_v3_read_vmcr);
 }
@@ -779,9 +786,6 @@ void vgic_v3_put(struct kvm_vcpu *vcpu)
 {
 	struct vgic_v3_cpu_if *cpu_if = &vcpu->arch.vgic_cpu.vgic_v3;
 
-
-	if (_vcpu_is_rec(vcpu))
-		cpu_if->vgic_vmcr = vcpu->arch.rec->run->exit.gicv3_vmcr;
 	WARN_ON(vgic_v4_put(vcpu));
 
 	vgic_v3_vmcr_sync(vcpu);
