@@ -31,7 +31,7 @@ static bool enfs_xprt_is_active(struct rpc_xprt *xprt)
 		return false;
 
 	state = pm_get_path_state(xprt);
-	if (state == PM_STATE_NORMAL)
+	if (enfs_is_path_connected(state))
 		return true;
 
 	return false;

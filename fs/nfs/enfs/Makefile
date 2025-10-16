@@ -23,3 +23,4 @@ enfs-y += exten_call.o
 enfs-y += shard_route.o
 enfs-y += dns_process.o
 enfs-y += enfs_lookup_cache.o
+enfs-$(CONFIG_ENFS_KUNIT_TEST) += enfs_test.o
