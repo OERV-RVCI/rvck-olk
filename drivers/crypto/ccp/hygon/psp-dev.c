@@ -796,7 +796,7 @@ void psp_ringbuffer_queue_free(struct csv_ringbuffer_queue *ring_buffer)
 }
 
 static int __psp_do_generic_ringbuf_cmds_locked(struct csv_ringbuffer_queue *ring_buffer,
-						int *pspret)
+						int *pspret, bool overcommit)
 {
 	int cmd = PSP_CMD_RING_BUFFER;
 	struct csv_ringbuffer_queue *que = NULL;
@@ -817,7 +817,7 @@ static int __psp_do_generic_ringbuf_cmds_locked(struct csv_ringbuffer_queue *rin
 	psp_grb_cmdbuf->low.cmdptr_address = __psp_pa(que->cmd_ptr.data_align);
 	psp_grb_cmdbuf->low.statval_address = __psp_pa(que->stat_val.data_align);
 	psp_grb_cmdbuf->low.head = cmd_queue_head(&que->cmd_ptr);
-	if (psp_rb_oc_supported)
+	if (psp_rb_oc_supported && overcommit)
 		psp_grb_cmdbuf->low.tail = cmd_queue_overcommit_tail(&que->cmd_ptr);
 	else
 		psp_grb_cmdbuf->low.tail = cmd_queue_tail(&que->cmd_ptr);
@@ -864,7 +864,8 @@ static int __psp_ringbuffer_enter_locked(struct csv_ringbuffer_queue *ring_buffe
 	return ret;
 }
 
-static int __psp_do_ringbuffer_cmds_locked(struct csv_ringbuffer_queue *ring_buffer, int *psp_ret)
+static int __psp_do_ringbuffer_cmds_locked(struct csv_ringbuffer_queue *ring_buffer, int *psp_ret,
+						bool overcommit)
 {
 	struct psp_device *psp = psp_master;
 	unsigned int rb_tail, rb_head;
@@ -885,7 +886,7 @@ static int __psp_do_ringbuffer_cmds_locked(struct csv_ringbuffer_queue *ring_buf
 	rb_tail &= (~PSP_RBTAIL_QHI_TAIL_MASK);
 	rb_tail |= (cmd_queue_tail(&hi_rb->cmd_ptr) << PSP_RBTAIL_QHI_TAIL_SHIFT);
 	rb_tail &= (~PSP_RBTAIL_QLO_TAIL_MASK);
-	if (psp_rb_oc_supported)
+	if (psp_rb_oc_supported && overcommit)
 		rb_tail |= cmd_queue_overcommit_tail(&low_rb->cmd_ptr);
 	else
 		rb_tail |= cmd_queue_tail(&low_rb->cmd_ptr);
@@ -929,18 +930,19 @@ static int __psp_do_ringbuffer_cmds_locked(struct csv_ringbuffer_queue *ring_buf
 	return ret;
 }
 
-int psp_do_ringbuffer_cmds_locked(struct csv_ringbuffer_queue *ring_buffer, int *psp_ret)
+int psp_do_ringbuffer_cmds_locked(struct csv_ringbuffer_queue *ring_buffer, int *psp_ret,
+					bool overcommit)
 {
 	int rc = 0;
 
 	if (psp_generic_rb_supported) {
-		rc = __psp_do_generic_ringbuf_cmds_locked(ring_buffer, psp_ret);
+		rc = __psp_do_generic_ringbuf_cmds_locked(ring_buffer, psp_ret, overcommit);
 	} else {
 		rc = __psp_ringbuffer_enter_locked(ring_buffer, psp_ret);
 		if (rc)
 			goto end;
 
-		rc = __psp_do_ringbuffer_cmds_locked(ring_buffer, psp_ret);
+		rc = __psp_do_ringbuffer_cmds_locked(ring_buffer, psp_ret, overcommit);
 	}
 end:
 	return rc;
