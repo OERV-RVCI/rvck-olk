@@ -120,6 +120,10 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(sched_update_nr_running_tp);
 
 DEFINE_PER_CPU_SHARED_ALIGNED(struct rq, runqueues);
 
+#ifdef CONFIG_QOS_SCHED
+static void sched_change_qos_group(struct task_struct *tsk, struct task_group *tg);
+#endif
+
 #ifdef CONFIG_SCHED_DEBUG
 /*
  * Debugging: various feature bits
@@ -4863,6 +4867,7 @@ int sched_fork(unsigned long clone_flags, struct task_struct *p)
 void sched_cgroup_fork(struct task_struct *p, struct kernel_clone_args *kargs)
 {
 	unsigned long flags;
+	struct task_group *tg_qos __maybe_unused = NULL;
 
 	/*
 	 * Because we're not yet on the pid-hash, p->pi_lock isn't strictly
@@ -4876,6 +4881,9 @@ void sched_cgroup_fork(struct task_struct *p, struct kernel_clone_args *kargs)
 				  struct task_group, css);
 		tg = autogroup_task_group(p, tg);
 		p->sched_task_group = tg;
+#ifdef CONFIG_QOS_SCHED
+		tg_qos = tg;
+#endif
 	}
 #endif
 	rseq_migrate(p);
@@ -4884,6 +4892,10 @@ void sched_cgroup_fork(struct task_struct *p, struct kernel_clone_args *kargs)
 	 * so use __set_task_cpu().
 	 */
 	__set_task_cpu(p, smp_processor_id());
+#ifdef CONFIG_QOS_SCHED
+	sched_change_qos_group(p, tg_qos);
+#endif
+
 	if (p->sched_class->task_fork)
 		p->sched_class->task_fork(p);
 	raw_spin_unlock_irqrestore(&p->pi_lock, flags);
