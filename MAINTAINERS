@@ -24121,6 +24121,7 @@ M:	Leoliu-oc <leoliu-oc@zhaoxin.com>
 M:	JasonHe <jasonhe@zhaoxin.com>
 L:	kernel@openeuler.org
 S:	Maintained
+F:	drivers/pinctrl/zhaoxin/pinctrl-kh50000.c
 F:	drivers/pinctrl/zhaoxin/pinctrl-kx7000.c
 F:	drivers/pinctrl/zhaoxin/pinctrl-zhaoxin.c
 
