@@ -60,6 +60,15 @@ is_kryo_midr(const struct arm64_cpu_capabilities *entry, int scope)
 	return model == entry->midr_range.model;
 }
 
+#ifdef CONFIG_HISILICON_ERRATUM_162100125
+static bool
+hisilicon_162100125_match(const struct arm64_cpu_capabilities *entry,
+			int scope)
+{
+	return is_affected_midr_range_list(entry, scope) && supports_cnp(scope);
+}
+#endif
+
 #ifdef CONFIG_HISILICON_ERRATUM_1980005
 static bool
 hisilicon_1980005_match(const struct arm64_cpu_capabilities *entry,
@@ -661,7 +670,9 @@ const struct arm64_cpu_capabilities arm64_errata[] = {
 	{
 		.desc = "Hisilicon erratum 162100125",
 		.capability = ARM64_WORKAROUND_HISILICON_ERRATUM_162100125,
-		ERRATA_MIDR_RANGE_LIST(hisilicon_erratum_162100125_cpus),
+		.matches = hisilicon_162100125_match,
+		.type = ARM64_CPUCAP_LOCAL_CPU_ERRATUM,
+		.midr_range_list = hisilicon_erratum_162100125_cpus,
 	},
 #endif
 #ifdef CONFIG_HISILICON_ERRATUM_1980005
