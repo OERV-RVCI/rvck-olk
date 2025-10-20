@@ -1860,7 +1860,7 @@ copy_finish:
  * if the FUSE daemon takes careful measures to avoid processing duplicated
  * non-idempotent requests.
  */
-static void fuse_resend(struct fuse_conn *fc)
+void fuse_resend(struct fuse_conn *fc)
 {
 	struct fuse_dev *fud;
 	struct fuse_req *req, *next;
@@ -2360,6 +2360,43 @@ int fuse_dev_release(struct inode *inode, struct file *file)
 	return 0;
 }
 EXPORT_SYMBOL_GPL(fuse_dev_release);
+
+/*
+ * Flush all pending processing requests.
+ *
+ * The failover procedure reuses the fuse_conn after a userspace crash and
+ * recovery. However, the requests in the processing queue will never receive a
+ * reply, causing the application to become stuck indefinitely.
+ *
+ * To resolve this issue, we need to flush these requests using the sysfs API.
+ * We only flush the requests in the processing queue, as these requests have
+ * already been sent to userspace. First, we dequeue the request from the
+ * processing queue, and then we call request_end to finalize it.
+ */
+void fuse_flush_pq(struct fuse_conn *fc)
+{
+	struct fuse_dev *fud;
+	LIST_HEAD(to_end);
+	unsigned int i;
+
+	spin_lock(&fc->lock);
+	if (!fc->connected) {
+		spin_unlock(&fc->lock);
+		return;
+	}
+	list_for_each_entry(fud, &fc->devices, entry) {
+		struct fuse_pqueue *fpq = &fud->pq;
+
+		spin_lock(&fpq->lock);
+		WARN_ON(!list_empty(&fpq->io));
+		for (i = 0; i < FUSE_PQ_HASH_SIZE; i++)
+			list_splice_init(&fpq->processing[i], &to_end);
+		spin_unlock(&fpq->lock);
+	}
+	spin_unlock(&fc->lock);
+
+	end_requests(&to_end);
+}
 
 static int fuse_dev_fasync(int fd, struct file *file, int on)
 {
