@@ -1195,12 +1195,39 @@ static int armv8pmu_get_hw_metric_event_idx(struct pmu_hw_events *cpuc,
 }
 #endif
 
-static int armv8pmu_get_event_idx(struct pmu_hw_events *cpuc,
-				  struct perf_event *event)
+static bool armv8pmu_can_use_pmccntr(struct pmu_hw_events *cpuc,
+				    struct perf_event *event)
 {
 	struct arm_pmu *cpu_pmu = to_arm_pmu(event->pmu);
 	struct hw_perf_event *hwc = &event->hw;
 	unsigned long evtype = hwc->config_base & ARMV8_PMU_EVTYPE_EVENT;
+
+	if (evtype != ARMV8_PMUV3_PERFCTR_CPU_CYCLES)
+		return false;
+
+	/*
+	 * A CPU_CYCLES event with threshold counting cannot use PMCCNTR_EL0
+	 * since it lacks threshold support.
+	 */
+	if (armv8pmu_event_get_threshold(&event->attr))
+		return false;
+
+	/*
+	 * The PMCCNTR_EL0 increments from the processor clock rather than
+	 * the PE clock (ARM DDI0487 L.b D13.1.3) which means it'll continue
+	 * counting on a WFI PE if one of its SMT silbing is not idle on a
+	 * multi-threaded implementation. So don't use it on SMT cores.
+	 */
+	if (cpu_pmu->has_smt)
+		return false;
+
+	return true;
+}
+
+static int armv8pmu_get_event_idx(struct pmu_hw_events *cpuc,
+				  struct perf_event *event)
+{
+	struct arm_pmu *cpu_pmu = to_arm_pmu(event->pmu);
 
 #ifdef CONFIG_HISILICON_HW_METRIC
 	if (armv8pmu_event_is_hw_metric(event))
@@ -1211,8 +1238,7 @@ static int armv8pmu_get_event_idx(struct pmu_hw_events *cpuc,
 #endif
 
 	/* Always prefer to place a cycle counter into the cycle counter. */
-	if ((evtype == ARMV8_PMUV3_PERFCTR_CPU_CYCLES) &&
-	    !armv8pmu_event_get_threshold(&event->attr)) {
+	if (armv8pmu_can_use_pmccntr(cpuc, event)) {
 		if (!test_and_set_bit(ARMV8_IDX_CYCLE_COUNTER, cpuc->used_mask))
 			return ARMV8_IDX_CYCLE_COUNTER;
 		else if (armv8pmu_event_is_64bit(event) &&
