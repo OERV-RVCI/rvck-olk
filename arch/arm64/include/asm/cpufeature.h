@@ -652,6 +652,20 @@ static inline bool cpu_supports_mixed_endian_el0(void)
 	return id_aa64mmfr0_mixed_endian_el0(read_cpuid(ID_AA64MMFR0_EL1));
 }
 
+static inline bool supports_cnp(int scope)
+{
+	u64 mmfr2;
+	u8 cnp;
+
+	if (scope == SCOPE_LOCAL_CPU)
+		mmfr2 = read_sysreg_s(SYS_ID_AA64MMFR2_EL1);
+	else
+		mmfr2 = read_sanitised_ftr_reg(SYS_ID_AA64MMFR2_EL1);
+
+	cnp = cpuid_feature_extract_unsigned_field(mmfr2,
+							ID_AA64MMFR2_EL1_CnP_SHIFT);
+	return cnp == 1;
+}
 
 static inline bool supports_csv2p3(int scope)
 {
