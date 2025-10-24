@@ -5399,6 +5399,8 @@ static struct acpi_platform_list arm_smmu_v3_plat_info[] = {
 	 "Erratum #162100602", 0},
 	{"HISI  ", "HIP10   ", 0, ACPI_SIG_IORT, greater_than_or_equal,
 	 "Erratum #162100602", 0},
+	{"HISI  ", "HIP10C  ", 0, ACPI_SIG_IORT, greater_than_or_equal,
+	 "Erratum #162100602", 0},
 	{"HISI  ", "HIP11   ", 0, ACPI_SIG_IORT, greater_than_or_equal,
 	 "Erratum #162100602", 0},
 	{ }
