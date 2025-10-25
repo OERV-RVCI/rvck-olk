@@ -2934,6 +2934,9 @@ __store_smt_control(struct device *dev, struct device_attribute *attr,
 	else if (num_threads < orig_threads || force_off)
 		ret = cpuhp_smt_disable(ctrlval);
 
+	if (ret)
+		cpu_smt_num_threads = orig_threads;
+
 	unlock_device_hotplug();
 	return ret ? ret : count;
 }
