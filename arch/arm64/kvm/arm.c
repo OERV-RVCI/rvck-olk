@@ -876,11 +876,6 @@ unsigned long kvm_arch_vcpu_get_ip(struct kvm_vcpu *vcpu)
 }
 #endif
 
-static int kvm_vcpu_initialized(struct kvm_vcpu *vcpu)
-{
-	return vcpu_get_flag(vcpu, VCPU_INITIALIZED);
-}
-
 /*
  * Handle both the initialisation that is being done when the vcpu is
  * run for the first time, as well as the updates that must be
