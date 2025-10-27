@@ -25,9 +25,16 @@
 #define NBL_CHAN_TX_RING_TO_BUF(tx_ring, i)  (&(((tx_ring)->buf)[i]))
 #define NBL_CHAN_RX_RING_TO_BUF(rx_ring, i)  (&(((rx_ring)->buf)[i]))
 
+#define NBL_CHAN_GET_INFO(chan_mgt, id)								\
+({												\
+	typeof(chan_mgt) _chan_mgt = (chan_mgt);						\
+	((id) == NBL_CHAN_ADMINQ_FUNCTION_ID && NBL_CHAN_MGT_TO_ADMINQ(_chan_mgt) ?		\
+		 NBL_CHAN_MGT_TO_ADMINQ(_chan_mgt) : NBL_CHAN_MGT_TO_MAILBOX(_chan_mgt));	\
+})
+
 #define NBL_CHAN_TX_WAIT_US			100
 #define NBL_CHAN_TX_REKICK_WAIT_TIMES		2000
-#define NBL_CHAN_TX_WAIT_TIMES			10000
+#define NBL_CHAN_TX_WAIT_TIMES			30000
 
 #define NBL_CHAN_TX_WAIT_ACK_US_MIN		100
 #define NBL_CHAN_TX_WAIT_ACK_US_MAX		120
@@ -37,7 +44,7 @@
 #define NBL_CHAN_BUF_LEN			4096
 
 #define NBL_CHAN_TX_DESC_EMBEDDED_DATA_LEN	16
-#define NBL_CHAN_RESEND_MAX_TIMES		(5)
+#define NBL_CHAN_RESEND_MAX_TIMES		(3)
 
 #define NBL_CHAN_TX_DESC_AVAIL			BIT(0)
 #define NBL_CHAN_TX_DESC_USED			BIT(1)
@@ -45,7 +52,7 @@
 #define NBL_CHAN_RX_DESC_AVAIL			BIT(3)
 #define NBL_CHAN_RX_DESC_USED			BIT(4)
 
-#define NBL_CHAN_ACK_WAIT_TIME			(5 * HZ)
+#define NBL_CHAN_ACK_WAIT_TIME			(3 * HZ)
 
 /* adminq */
 #define NBL_ADMINQ_QUEUE_LEN			256
@@ -59,8 +66,17 @@ enum {
 };
 
 enum {
-	NBL_MBX_STATUS_WAITING = 0,
+	NBL_MBX_STATUS_IDLE = 0,
+	NBL_MBX_STATUS_WAITING,
 	NBL_MBX_STATUS_TIMEOUT = -1,
+};
+
+struct nbl_chan_tx_param {
+	enum nbl_chan_msg_type msg_type;
+	void *arg;
+	size_t arg_len;
+	u16 dstid;
+	u16 msgid;
 };
 
 struct nbl_chan_buf {
@@ -100,6 +116,17 @@ struct nbl_chan_ring {
 	dma_addr_t dma;
 };
 
+#define NBL_CHAN_MSG_INDEX_MAX			64
+#define NBL_CHAN_MSG_LOC_MAX			1024
+
+union nbl_chan_msg_id {
+	struct nbl_chan_msg_id_info {
+		u16 index:6;
+		u16 loc:10;
+	} info;
+	u16 id;
+};
+
 struct nbl_chan_waitqueue_head {
 	struct wait_queue_head wait_queue;
 	char *ack_data;
@@ -109,6 +136,7 @@ struct nbl_chan_waitqueue_head {
 	u16 need_waked;
 	u16 msg_type;
 	u8 status;
+	u8 msg_index;
 };
 
 struct nbl_chan_notify_userdev {
@@ -130,6 +158,8 @@ struct nbl_chan_keepalive_info {
 	u16 keepalive_dest;
 	u8 success_cnt;
 	u8 fail_cnt;
+	bool task_setuped;
+	u8 resv[3];
 };
 
 struct nbl_chan_info {
@@ -141,6 +171,8 @@ struct nbl_chan_info {
 
 	struct work_struct *clean_task;
 	struct nbl_chan_keepalive_info keepalive;
+
+	u16 wait_head_index;
 
 	u16 num_txq_entries;
 	u16 num_rxq_entries;
@@ -164,6 +196,7 @@ struct nbl_channel_mgt {
 	struct nbl_common_info *common;
 	struct nbl_phy_ops_tbl *phy_ops_tbl;
 	struct nbl_chan_info *chan_info[NBL_CHAN_TYPE_MAX];
+	struct nbl_cmdq_mgt *cmdq_mgt;
 	struct nbl_chan_notify_userdev *notify;
 	void *handle_hash_tbl;
 };

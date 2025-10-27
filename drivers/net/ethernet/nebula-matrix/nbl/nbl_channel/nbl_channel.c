@@ -5,6 +5,26 @@
  */
 
 #include "nbl_channel.h"
+#include "nbl_cmdq.h"
+
+static int nbl_chan_send_ack(void *priv, struct nbl_chan_ack_info *chan_ack);
+
+static void nbl_chan_delete_msg_handler(struct nbl_channel_mgt *chan_mgt, u16 msg_type)
+{
+	u8 chan_type;
+	struct nbl_chan_info *chan_info;
+
+	nbl_common_free_hash_node(chan_mgt->handle_hash_tbl, &msg_type);
+
+	if (msg_type < NBL_CHAN_MSG_ADMINQ_GET_EMP_VERSION)
+		chan_type = NBL_CHAN_TYPE_MAILBOX;
+	else
+		chan_type = NBL_CHAN_TYPE_ADMINQ;
+
+	chan_info = NBL_CHAN_MGT_TO_CHAN_INFO(chan_mgt, chan_type);
+	if (chan_info && chan_info->clean_task)
+		nbl_common_flush_task(chan_info->clean_task);
+}
 
 static int nbl_chan_add_msg_handler(struct nbl_channel_mgt *chan_mgt, u16 msg_type,
 				    nbl_chan_resp func, void *priv)
@@ -15,7 +35,7 @@ static int nbl_chan_add_msg_handler(struct nbl_channel_mgt *chan_mgt, u16 msg_ty
 	handler.func = func;
 	handler.priv = priv;
 
-	ret = nbl_common_alloc_hash_node(chan_mgt->handle_hash_tbl, &msg_type, &handler);
+	ret = nbl_common_alloc_hash_node(chan_mgt->handle_hash_tbl, &msg_type, &handler, NULL);
 
 	return ret;
 }
@@ -61,9 +81,7 @@ alloc_hashtbl_failed:
 
 static void nbl_chan_remove_msg_handler(struct nbl_channel_mgt *chan_mgt)
 {
-	struct nbl_hash_tbl_del_key del_key = {0};
-
-	nbl_common_remove_hash_table(chan_mgt->handle_hash_tbl, &del_key);
+	nbl_common_remove_hash_table(chan_mgt->handle_hash_tbl, NULL);
 
 	chan_mgt->handle_hash_tbl = NULL;
 
@@ -98,10 +116,8 @@ static int nbl_chan_init_tx_queue(struct nbl_common_info *common,
 	size_t size = chan_info->num_txq_entries * sizeof(struct nbl_chan_tx_desc);
 
 	txq->desc = dmam_alloc_coherent(dma_dev, size, &txq->dma, GFP_KERNEL | __GFP_ZERO);
-	if (!txq->desc) {
-		dev_err(dev, "Allocate DMA for chan tx descriptor ring failed\n");
+	if (!txq->desc)
 		return -ENOMEM;
-	}
 
 	chan_info->wait = devm_kcalloc(dev, chan_info->num_txq_entries,
 				       sizeof(struct nbl_chan_waitqueue_head), GFP_KERNEL);
@@ -288,7 +304,7 @@ static int nbl_chan_cfg_mailbox_qinfo_map_table(struct nbl_channel_mgt *chan_mgt
 	for (func_id = 0; func_id < NBL_MAX_PF; func_id++) {
 		if (!(pf_mask & (1 << func_id)))
 			phy_ops->cfg_mailbox_qinfo(NBL_CHAN_MGT_TO_PHY_PRIV(chan_mgt), func_id,
-						   common->bus, common->devid,
+						   common->hw_bus, common->devid,
 						   NBL_COMMON_TO_PCI_FUNC_ID(common) + func_id);
 	}
 
@@ -301,7 +317,7 @@ static int nbl_chan_cfg_adminq_qinfo_map_table(struct nbl_channel_mgt *chan_mgt)
 	struct nbl_phy_ops *phy_ops = NBL_CHAN_MGT_TO_PHY_OPS(chan_mgt);
 
 	phy_ops->cfg_adminq_qinfo(NBL_CHAN_MGT_TO_PHY_PRIV(chan_mgt),
-				  common->bus, common->devid,
+				  common->hw_bus, common->devid,
 				  NBL_COMMON_TO_PCI_FUNC_ID(common));
 
 	return 0;
@@ -388,7 +404,7 @@ static int nbl_chan_alloc_all_rx_bufs(struct nbl_channel_mgt *chan_mgt,
 	rxq->next_to_use = chan_info->num_rxq_entries - 1;
 	rxq->tail_ptr = chan_info->num_rxq_entries - 1;
 
-	/* mb for doorbell */
+	/* mb for notify */
 	mb();
 
 	NBL_UPDATE_QUEUE_TAIL_PTR(chan_info, phy_ops, chan_mgt, rxq->tail_ptr, NBL_MB_RX_QID);
@@ -598,7 +614,7 @@ alloc_buf_failed:
 static int nbl_chan_reset_queue(struct nbl_channel_mgt *chan_mgt, u8 chan_type, bool tx)
 {
 	struct nbl_chan_info *chan_info = NBL_CHAN_MGT_TO_CHAN_INFO(chan_mgt, chan_type);
-	int ret = 0;
+	int i = 0, j = 0, ret = 0;
 
 	/* If someone else is doing resetting, don't bother */
 	if (test_bit(NBL_CHAN_RESETTING, chan_info->state))
@@ -614,6 +630,25 @@ static int nbl_chan_reset_queue(struct nbl_channel_mgt *chan_mgt, u8 chan_type, 
 
 	/* If we are in a race, and someone else has finished it, just return */
 	if (!test_bit(NBL_CHAN_RESETTING, chan_info->state)) {
+		spin_unlock(&chan_info->txq_lock);
+		return 0;
+	}
+
+	/* Make sure no one is waiting before we reset. */
+	while (i++ < (NBL_CHAN_ACK_WAIT_TIME * 2) / HZ) {
+		for (j = 0; j < NBL_CHAN_QUEUE_LEN; j++)
+			if (chan_info->wait[j].status == NBL_MBX_STATUS_WAITING)
+				break;
+
+		if (j == NBL_CHAN_QUEUE_LEN)
+			break;
+		mdelay(1000);
+	}
+
+	if (j != NBL_CHAN_QUEUE_LEN) {
+		nbl_warn(NBL_CHAN_MGT_TO_COMMON(chan_mgt), NBL_DEBUG_MBX,
+			 "Some wait_head unreleased, fail to reset");
+		clear_bit(NBL_CHAN_RESETTING, chan_info->state);
 		spin_unlock(&chan_info->txq_lock);
 		return 0;
 	}
@@ -636,94 +671,77 @@ static bool nbl_chan_check_dma_err(struct nbl_channel_mgt *chan_mgt, u8 chan_typ
 {
 	struct nbl_phy_ops *phy_ops = NBL_CHAN_MGT_TO_PHY_OPS(chan_mgt);
 
+	if (phy_ops->get_hw_status(NBL_CHAN_MGT_TO_PHY_PRIV(chan_mgt)))
+		return false;
+
 	if (chan_type == NBL_CHAN_TYPE_MAILBOX)
 		return phy_ops->check_mailbox_dma_err(NBL_CHAN_MGT_TO_PHY_PRIV(chan_mgt), tx);
 	else
 		return phy_ops->check_adminq_dma_err(NBL_CHAN_MGT_TO_PHY_PRIV(chan_mgt), tx);
 }
 
-static u16 nbl_chan_update_txqueue(struct nbl_channel_mgt *chan_mgt,
-				   struct nbl_chan_info *chan_info, u16 dstid,
-				   enum nbl_chan_msg_type msg_type,
-				   void *arg, size_t arg_len)
+static int nbl_chan_update_txqueue(struct nbl_channel_mgt *chan_mgt,
+				   struct nbl_chan_info *chan_info, struct nbl_chan_tx_param *param)
 {
-	struct device *dev = NBL_COMMON_TO_DEV(chan_mgt->common);
-	struct nbl_chan_ring *txq;
-	struct nbl_chan_tx_desc *tx_desc;
-	struct nbl_chan_buf *tx_buf;
-	u16 next_to_use;
+	struct nbl_chan_ring *txq = &chan_info->txq;
+	struct nbl_chan_tx_desc *tx_desc = NBL_CHAN_TX_RING_TO_DESC(txq, txq->next_to_use);
+	struct nbl_chan_buf *tx_buf = NBL_CHAN_TX_RING_TO_BUF(txq, txq->next_to_use);
 
-	txq = &chan_info->txq;
-	next_to_use = txq->next_to_use;
-	tx_buf = NBL_CHAN_TX_RING_TO_BUF(txq, next_to_use);
-	tx_desc = NBL_CHAN_TX_RING_TO_DESC(txq, next_to_use);
+	if (param->arg_len > NBL_CHAN_BUF_LEN - sizeof(*tx_desc))
+		return -EINVAL;
 
-	tx_desc->dstid = dstid;
-	tx_desc->msg_type = msg_type;
-	tx_desc->msgid = next_to_use;
-	if (arg_len > NBL_CHAN_BUF_LEN - sizeof(*tx_desc)) {
-		dev_err(dev, "%s, arg_len:%ld, too long!", __func__, arg_len);
-		return -1;
-	}
+	tx_desc->dstid = param->dstid;
+	tx_desc->msg_type = param->msg_type;
+	tx_desc->msgid = param->msgid;
 
-	if (arg_len > NBL_CHAN_TX_DESC_EMBEDDED_DATA_LEN) {
-		memcpy(tx_buf->va, arg, arg_len);
+	if (param->arg_len > NBL_CHAN_TX_DESC_EMBEDDED_DATA_LEN) {
+		memcpy(tx_buf->va, param->arg, param->arg_len);
 		tx_desc->buf_addr = tx_buf->pa;
-		tx_desc->buf_len = arg_len;
+		tx_desc->buf_len = param->arg_len;
 		tx_desc->data_len = 0;
 	} else {
-		memcpy(tx_desc->data, arg, arg_len);
+		memcpy(tx_desc->data, param->arg, param->arg_len);
 		tx_desc->buf_len = 0;
-		tx_desc->data_len = arg_len;
+		tx_desc->data_len = param->arg_len;
 	}
 	tx_desc->flags = NBL_CHAN_TX_DESC_AVAIL;
 
 	/* wmb */
 	wmb();
-	txq->next_to_use++;
-	if (txq->next_to_use == chan_info->num_txq_entries)
-		txq->next_to_use = 0;
+	txq->next_to_use = NBL_NEXT_ID(txq->next_to_use, chan_info->num_txq_entries - 1);
 	txq->tail_ptr++;
 
-	return next_to_use;
+	return 0;
 }
 
 static int nbl_chan_kick_tx_ring(struct nbl_channel_mgt *chan_mgt,
 				 struct nbl_chan_info *chan_info)
 {
-	struct nbl_phy_ops *phy_ops;
-	struct nbl_common_info *common = chan_mgt->common;
-	struct device *dev = NBL_COMMON_TO_DEV(common);
-	struct nbl_chan_ring *txq;
+	struct nbl_phy_ops *phy_ops = NBL_CHAN_MGT_TO_PHY_OPS(chan_mgt);
+	struct nbl_common_info *common = NBL_CHAN_MGT_TO_COMMON(chan_mgt);
+	struct nbl_chan_ring *txq = &chan_info->txq;
 	struct nbl_chan_tx_desc *tx_desc;
-	int i;
+	int i = 0;
 
-	phy_ops = NBL_CHAN_MGT_TO_PHY_OPS(chan_mgt);
-
-	txq = &chan_info->txq;
-
-	/* mb for doorbell */
+	/* mb for tx notify */
 	mb();
 
 	NBL_UPDATE_QUEUE_TAIL_PTR(chan_info, phy_ops, chan_mgt, txq->tail_ptr, NBL_MB_TX_QID);
 
 	tx_desc = NBL_CHAN_TX_RING_TO_DESC(txq, txq->next_to_clean);
 
-	i = 0;
 	while (!(tx_desc->flags & NBL_CHAN_TX_DESC_USED)) {
 		udelay(NBL_CHAN_TX_WAIT_US);
 		i++;
 
-		if (!(i % NBL_CHAN_TX_REKICK_WAIT_TIMES)) {
+		if (!(i % NBL_CHAN_TX_REKICK_WAIT_TIMES))
 			NBL_UPDATE_QUEUE_TAIL_PTR(chan_info, phy_ops, chan_mgt, txq->tail_ptr,
 						  NBL_MB_TX_QID);
-		}
 
 		if (i == NBL_CHAN_TX_WAIT_TIMES) {
-			dev_err(dev, "bus:%u, dev:%u, func:%u, chan send message type: %d timeout\n",
-				common->bus, common->devid, NBL_COMMON_TO_PCI_FUNC_ID(common),
+			nbl_err(common, NBL_DEBUG_MBX, "chan send message type: %d timeout\n",
 				tx_desc->msg_type);
-			return -1;
+			return -EAGAIN;
 		}
 	}
 
@@ -735,45 +753,50 @@ static void nbl_chan_recv_ack_msg(void *priv, u16 srcid, u16 msgid,
 				  void *data, u32 data_len)
 {
 	struct nbl_channel_mgt *chan_mgt = (struct nbl_channel_mgt *)priv;
-	struct nbl_chan_info *chan_info = NULL;
 	struct nbl_common_info *common = NBL_CHAN_MGT_TO_COMMON(chan_mgt);
-	struct device *dev = NBL_COMMON_TO_DEV(common);
-	struct nbl_chan_waitqueue_head *wait_head;
+	struct nbl_chan_info *chan_info = NULL;
+	struct nbl_chan_waitqueue_head *wait_head = NULL;
+	union nbl_chan_msg_id ack_msgid = {{0}};
 	u32 *payload = (u32 *)data;
-	u32 ack_msgid;
-	u32 ack_msgtype;
+	u32 ack_datalen = 0, ack_msgtype = 0, copy_len = 0;
 
 	if (srcid == NBL_CHAN_ADMINQ_FUNCTION_ID)
 		chan_info = NBL_CHAN_MGT_TO_ADMINQ(chan_mgt);
 	else
 		chan_info = NBL_CHAN_MGT_TO_MAILBOX(chan_mgt);
 
+	ack_datalen = data_len - 3 * sizeof(u32);
 	ack_msgtype = *payload;
-	ack_msgid = *(payload + 1);
-	wait_head = &chan_info->wait[ack_msgid];
+	ack_msgid.id = *(u16 *)(payload + 1);
+	wait_head = &chan_info->wait[ack_msgid.info.loc];
 	wait_head->ack_err = *(payload + 2);
 
-	if (ack_msgtype != wait_head->msg_type)
-		nbl_debug(common, NBL_DEBUG_MBX,
-			  "ack_msgtype %d donot match msg_type %d\n",
-			  ack_msgtype, wait_head->msg_type);
+	if (wait_head->msg_type != ack_msgtype) {
+		nbl_warn(common, NBL_DEBUG_MBX, "Skip ack msg type %d donot match msg type %d\n",
+			 ack_msgtype, wait_head->msg_type);
+		return;
+	}
+
 	if (wait_head->status != NBL_MBX_STATUS_WAITING) {
 		nbl_warn(common, NBL_DEBUG_MBX, "Skip ack with status %d", wait_head->status);
 		return;
 	}
 
-	if (wait_head->ack_err >= 0 && (data_len > 3 * sizeof(u32))) {
-		if (data_len - 3 * sizeof(u32) != wait_head->ack_data_len) {
-			dev_err(dev, "%x:%x.%x payload_len donot match ack_data_len!, srcid:%u,\n"
-				"msgtype:%u, msgid:%u, data_len:%u, ack_data_len:%u\n",
-				common->bus, common->devid, NBL_COMMON_TO_PCI_FUNC_ID(common),
-				srcid, ack_msgtype, ack_msgid, data_len, wait_head->ack_data_len);
-			goto wakeup;
-		}
-		memcpy((char *)wait_head->ack_data, payload + 3, data_len - 3 * sizeof(int));
+	if (wait_head->msg_index != ack_msgid.info.index) {
+		nbl_warn(common, NBL_DEBUG_MBX, "Skip ack index %d donot match index %d",
+			 ack_msgid.info.index, wait_head->msg_index);
+		return;
 	}
 
-wakeup:
+	if (ack_datalen != wait_head->ack_data_len)
+		nbl_debug(common, NBL_DEBUG_MBX, "Channel payload_len donot match ack_data_len, msgtype:%u, msgid:%u, rcv_data_len:%u, expect_data_len:%u\n",
+			  ack_msgtype, ack_msgid.id, ack_datalen, wait_head->ack_data_len);
+
+	copy_len = min_t(u32, wait_head->ack_data_len, ack_datalen);
+	if (wait_head->ack_err >= 0 && copy_len > 0)
+		memcpy((char *)wait_head->ack_data, payload + 3, copy_len);
+	wait_head->ack_data_len = (u16)copy_len;
+
 	/* wmb */
 	wmb();
 	wait_head->acked = 1;
@@ -832,6 +855,7 @@ static int nbl_chan_msg_forward_userdev(struct nbl_channel_mgt *chan_mgt,
 
 static void nbl_chan_recv_msg(struct nbl_channel_mgt *chan_mgt, void *data, u32 data_len)
 {
+	struct nbl_chan_ack_info chan_ack;
 	struct nbl_chan_tx_desc *tx_desc;
 	struct nbl_chan_msg_node_data *msg_handler;
 	struct device *dev = NBL_COMMON_TO_DEV(chan_mgt->common);
@@ -840,14 +864,12 @@ static void nbl_chan_recv_msg(struct nbl_channel_mgt *chan_mgt, void *data, u32 
 
 	tx_desc = data;
 	msg_type = tx_desc->msg_type;
-	dev_dbg(dev, "%s recv msg_type: %d\n", __func__, tx_desc->msg_type);
+	dev_dbg(dev, "recv msg_type: %d\n", tx_desc->msg_type);
 
 	srcid = tx_desc->srcid;
 	msgid = tx_desc->msgid;
-	if (msg_type >= NBL_CHAN_MSG_MAX) {
-		dev_err(dev, "Invalid chan message type %u\n", msg_type);
-		return;
-	}
+	if (msg_type >= NBL_CHAN_MSG_MAX)
+		goto send_warning;
 
 	if (tx_desc->data_len) {
 		payload = (void *)tx_desc->data;
@@ -863,7 +885,7 @@ static void nbl_chan_recv_msg(struct nbl_channel_mgt *chan_mgt, void *data, u32 
 		msg_handler->func(msg_handler->priv, srcid, msgid, payload, payload_len);
 	}
 
-	if (chan_mgt->notify) {
+	if (chan_mgt->notify && msg_type < NBL_CHAN_MSG_MAILBOX_MAX) {
 		mutex_lock(&chan_mgt->notify->lock);
 		if (chan_mgt->notify->eventfd && test_bit(msg_type, chan_mgt->notify->msgtype) &&
 		    chan_mgt->notify->shm_msg_ring) {
@@ -873,9 +895,12 @@ static void nbl_chan_recv_msg(struct nbl_channel_mgt *chan_mgt, void *data, u32 
 		mutex_unlock(&chan_mgt->notify->lock);
 	}
 
-	if (warn)
-		dev_warn(dev, "Recv channel msg_type: %d, but msg_handler is null!\n",
-			 tx_desc->msg_type);
+send_warning:
+	if (warn) {
+		NBL_CHAN_ACK(chan_ack, srcid, msg_type, msgid, -EPERM, NULL, 0);
+		nbl_chan_send_ack(chan_mgt, &chan_ack);
+		dev_warn(dev, "Recv channel msg_type: %d, but msg_handler is null!\n", msg_type);
+	}
 }
 
 static void nbl_chan_advance_rx_ring(struct nbl_channel_mgt *chan_mgt,
@@ -938,7 +963,7 @@ static void nbl_chan_clean_queue(struct nbl_channel_mgt *chan_mgt, struct nbl_ch
 	rxq->next_to_clean = next_to_clean;
 }
 
-void nbl_chan_clean_queue_subtask(void *priv, u8 chan_type)
+static void nbl_chan_clean_queue_subtask(void *priv, u8 chan_type)
 {
 	struct nbl_channel_mgt *chan_mgt = (struct nbl_channel_mgt *)priv;
 	struct nbl_chan_info *chan_info = NBL_CHAN_MGT_TO_CHAN_INFO(chan_mgt, chan_type);
@@ -950,70 +975,113 @@ void nbl_chan_clean_queue_subtask(void *priv, u8 chan_type)
 	nbl_chan_clean_queue(chan_mgt, chan_info);
 }
 
+static int nbl_chan_get_msg_id(struct nbl_chan_info *chan_info, union nbl_chan_msg_id *msgid)
+{
+	struct nbl_chan_waitqueue_head *wait = NULL;
+	int valid_loc = chan_info->wait_head_index, i;
+
+	for (i = 0; i < NBL_CHAN_QUEUE_LEN; i++) {
+		wait = &chan_info->wait[valid_loc];
+
+		if (wait->status != NBL_MBX_STATUS_WAITING) {
+			wait->msg_index = NBL_NEXT_ID(wait->msg_index, NBL_CHAN_MSG_INDEX_MAX - 1);
+			msgid->info.index = wait->msg_index;
+			msgid->info.loc = valid_loc;
+
+			valid_loc = NBL_NEXT_ID(valid_loc, chan_info->num_txq_entries - 1);
+			chan_info->wait_head_index = valid_loc;
+			return 0;
+		}
+
+		valid_loc = NBL_NEXT_ID(valid_loc, chan_info->num_txq_entries - 1);
+	}
+
+	return -ENOSPC;
+}
+
 static int nbl_chan_send_msg(void *priv, struct nbl_chan_send_info *chan_send)
 {
 	struct nbl_channel_mgt *chan_mgt = (struct nbl_channel_mgt *)priv;
 	struct nbl_common_info *common = NBL_CHAN_MGT_TO_COMMON(chan_mgt);
-	struct device *dev = NBL_COMMON_TO_DEV(common);
-	struct nbl_chan_info *chan_info = NULL;
+	struct nbl_chan_info *chan_info = NBL_CHAN_GET_INFO(chan_mgt, chan_send->dstid);
 	struct nbl_chan_waitqueue_head *wait_head;
-	u16 msgid;
-	int i = NBL_CHAN_TX_WAIT_ACK_TIMES, ret;
-	int resend_times = 0;
+	union nbl_chan_msg_id msgid = {{0}};
+	struct nbl_chan_tx_param tx_param = {0};
+	int i = NBL_CHAN_TX_WAIT_ACK_TIMES, resend_times = 0, ret = 0;
+	bool need_resend = true; /* neend resend when ack timeout*/
 
-	if (chan_send->dstid == NBL_CHAN_ADMINQ_FUNCTION_ID)
-		chan_info = NBL_CHAN_MGT_TO_ADMINQ(chan_mgt);
-	else
-		chan_info = NBL_CHAN_MGT_TO_MAILBOX(chan_mgt);
+	if (chan_send->arg_len > NBL_CHAN_BUF_LEN - sizeof(struct nbl_chan_tx_desc))
+		return -EINVAL;
+
+	if (test_bit(NBL_CHAN_ABNORMAL, chan_info->state))
+		return -EFAULT;
 
 resend:
 	spin_lock(&chan_info->txq_lock);
-	msgid = nbl_chan_update_txqueue(chan_mgt, chan_info, chan_send->dstid,
-					chan_send->msg_type,
-					chan_send->arg, chan_send->arg_len);
 
-	if (msgid == 0xFFFF) {
+	ret = nbl_chan_get_msg_id(chan_info, &msgid);
+	if (ret) {
 		spin_unlock(&chan_info->txq_lock);
-		dev_err(dev, "chan tx queue full, send msgtype:%u to dstid:%u failed\n",
+		nbl_err(common, NBL_DEBUG_MBX, "Channel tx wait head full, send msgtype:%u to dstid:%u failed\n",
 			chan_send->msg_type, chan_send->dstid);
-		return -1;
+		return ret;
 	}
 
-	if (!chan_send->ack) {
-		ret = nbl_chan_kick_tx_ring(chan_mgt, chan_info);
+	tx_param.msg_type = chan_send->msg_type;
+	tx_param.arg = chan_send->arg;
+	tx_param.arg_len = chan_send->arg_len;
+	tx_param.dstid = chan_send->dstid;
+	tx_param.msgid = msgid.id;
+
+	ret = nbl_chan_update_txqueue(chan_mgt, chan_info, &tx_param);
+	if (ret) {
 		spin_unlock(&chan_info->txq_lock);
-		if (ret)
-			goto check_tx_dma_err;
-		else
-			return ret;
+		nbl_err(common, NBL_DEBUG_MBX, "Channel tx queue full, send msgtype:%u to dstid:%u failed\n",
+			chan_send->msg_type, chan_send->dstid);
+		return ret;
 	}
 
-	wait_head = &chan_info->wait[msgid];
+	wait_head = &chan_info->wait[msgid.info.loc];
 	init_waitqueue_head(&wait_head->wait_queue);
+	wait_head->acked = 0;
 	wait_head->ack_data = chan_send->resp;
 	wait_head->ack_data_len = chan_send->resp_len;
-	wait_head->acked = 0;
 	wait_head->msg_type = chan_send->msg_type;
-	wait_head->need_waked = 1;
-	wait_head->status = NBL_MBX_STATUS_WAITING;
+	wait_head->need_waked = chan_send->ack;
+	wait_head->msg_index = msgid.info.index;
+	wait_head->status = chan_send->ack ? NBL_MBX_STATUS_WAITING : NBL_MBX_STATUS_IDLE;
+
 	ret = nbl_chan_kick_tx_ring(chan_mgt, chan_info);
+
 	spin_unlock(&chan_info->txq_lock);
-	if (ret)
+
+	if (ret) {
+		wait_head->status = NBL_MBX_STATUS_TIMEOUT;
 		goto check_tx_dma_err;
+	}
+
+	if (!chan_send->ack)
+		return 0;
+
+	if (chan_send->dstid != common->mgt_pf && chan_send->msg_type != NBL_CHAN_MSG_KEEP_ALIVE)
+		need_resend = false;
 
 	if (test_bit(NBL_CHAN_INTERRUPT_READY, chan_info->state)) {
 		ret = wait_event_timeout(wait_head->wait_queue, wait_head->acked,
 					 NBL_CHAN_ACK_WAIT_TIME);
 		if (!ret) {
-			dev_err(dev, "wait bus:%u, dev:%u, func:%u, chan send message type: %d\n"
-				"msg id: %u wait ack timeout\n", common->bus, common->devid,
-				NBL_COMMON_TO_PCI_FUNC_ID(common), chan_send->msg_type, msgid);
 			wait_head->status = NBL_MBX_STATUS_TIMEOUT;
+			if (!need_resend)
+				return 0;
+			nbl_err(common, NBL_DEBUG_MBX, "Channel waiting ack failed, message type: %d, msg id: %u\n",
+				chan_send->msg_type, msgid.id);
 			goto check_rx_dma_err;
 		}
 
-		/* rmb for ack */
+		/* rmb for waithead ack */
 		rmb();
+		chan_send->ack_len = wait_head->ack_data_len;
+		wait_head->status = NBL_MBX_STATUS_IDLE;
 		return wait_head->ack_err;
 	}
 
@@ -1021,34 +1089,35 @@ resend:
 	while (i--) {
 		nbl_chan_clean_queue(chan_mgt, chan_info);
 
-		if (wait_head->acked)
+		if (wait_head->acked) {
+			chan_send->ack_len = wait_head->ack_data_len;
+			wait_head->status = NBL_MBX_STATUS_IDLE;
 			return wait_head->ack_err;
+		}
 		usleep_range(NBL_CHAN_TX_WAIT_ACK_US_MIN, NBL_CHAN_TX_WAIT_ACK_US_MAX);
 	}
 
 	wait_head->status = NBL_MBX_STATUS_TIMEOUT;
-	dev_err(dev, "polling bus:%u, dev:%u, func:%u, chan send message type: %d msg id: %u\n"
-		"wait ack timeout\n", common->bus, common->devid,
-		NBL_COMMON_TO_PCI_FUNC_ID(common), chan_send->msg_type, msgid);
+	nbl_err(common, NBL_DEBUG_MBX, "Channel polling ack failed, message type: %d msg id: %u\n",
+		chan_send->msg_type, msgid.id);
 
 check_rx_dma_err:
 	if (nbl_chan_check_dma_err(chan_mgt, chan_info->chan_type, false)) {
-		dev_err(dev, "nbl channel rx dma error\n");
+		nbl_err(common, NBL_DEBUG_MBX, "nbl channel rx dma error\n");
 		nbl_chan_reset_queue(chan_mgt, chan_info->chan_type, false);
 		chan_info->rxq_reset_times++;
 	}
 
 check_tx_dma_err:
 	if (nbl_chan_check_dma_err(chan_mgt, chan_info->chan_type, true)) {
-		dev_err(dev, "nbl channel tx dma error\n");
+		nbl_err(common, NBL_DEBUG_MBX, "nbl channel tx dma error\n");
 		nbl_chan_reset_queue(chan_mgt, chan_info->chan_type, true);
 		chan_info->txq_reset_times++;
 	}
 
-	resend_times++;
-	if (resend_times > NBL_CHAN_RESEND_MAX_TIMES) {
-		dev_err(dev, "nbl channel resend_times %d\n", resend_times);
-		return -1;
+	if (++resend_times >= NBL_CHAN_RESEND_MAX_TIMES) {
+		nbl_err(common, NBL_DEBUG_MBX, "nbl channel resend_times %d\n", resend_times);
+		return -EFAULT;
 	}
 
 	i = NBL_CHAN_TX_WAIT_ACK_TIMES;
@@ -1079,6 +1148,13 @@ static int nbl_chan_send_ack(void *priv, struct nbl_chan_ack_info *chan_ack)
 	return 0;
 }
 
+static void nbl_chan_unregister_msg(void *priv, u16 msg_type)
+{
+	struct nbl_channel_mgt *chan_mgt = (struct nbl_channel_mgt *)priv;
+
+	nbl_chan_delete_msg_handler(chan_mgt, msg_type);
+}
+
 static int nbl_chan_register_msg(void *priv, u16 msg_type, nbl_chan_resp func, void *callback_priv)
 {
 	struct nbl_channel_mgt *chan_mgt = (struct nbl_channel_mgt *)priv;
@@ -1101,19 +1177,6 @@ static bool nbl_chan_check_queue_exist(void *priv, u8 chan_type)
 	chan_info = NBL_CHAN_MGT_TO_CHAN_INFO(chan_mgt, chan_type);
 
 	return chan_info ? true : false;
-}
-
-static int nbl_chan_set_queue_interrupt_state(void *priv, u8 chan_type, bool ready)
-{
-	struct nbl_channel_mgt *chan_mgt = (struct nbl_channel_mgt *)priv;
-	struct nbl_chan_info *chan_info = NBL_CHAN_MGT_TO_CHAN_INFO(chan_mgt, chan_type);
-
-	if (ready)
-		set_bit(NBL_CHAN_INTERRUPT_READY, chan_info->state);
-	else
-		clear_bit(NBL_CHAN_INTERRUPT_READY, chan_info->state);
-
-	return 0;
 }
 
 static int nbl_chan_dump_txq(void *priv, struct seq_file *m, u8 type)
@@ -1296,6 +1359,7 @@ static int nbl_chan_setup_keepalive(void *priv, u16 dest_id, u8 chan_type)
 				 nbl_chan_keepalive_resp, chan_mgt);
 
 	nbl_common_alloc_delayed_task(&keepalive->keepalive_task, nbl_chan_keepalive);
+	keepalive->task_setuped = true;
 
 	nbl_common_queue_delayed_work_keepalive(&keepalive->keepalive_task,
 						jiffies_to_msecs(keepalive->timeout));
@@ -1308,7 +1372,11 @@ static void nbl_chan_remove_keepalive(void *priv, u8 chan_type)
 	struct nbl_channel_mgt *chan_mgt = (struct nbl_channel_mgt *)priv;
 	struct nbl_chan_info *chan_info = NBL_CHAN_MGT_TO_CHAN_INFO(chan_mgt, chan_type);
 
+	if (!chan_info->keepalive.task_setuped)
+		return;
+
 	nbl_common_release_delayed_task(&chan_info->keepalive.keepalive_task);
+	chan_info->keepalive.task_setuped = false;
 }
 
 static void nbl_chan_register_chan_task(void *priv, u8 chan_type, struct work_struct *task)
@@ -1319,15 +1387,26 @@ static void nbl_chan_register_chan_task(void *priv, u8 chan_type, struct work_st
 	chan_info->clean_task = task;
 }
 
+static void nbl_chan_set_queue_state(void *priv, enum nbl_chan_state state, u8 chan_type, u8 set)
+{
+	struct nbl_channel_mgt *chan_mgt = (struct nbl_channel_mgt *)priv;
+	struct nbl_chan_info *chan_info = NBL_CHAN_MGT_TO_CHAN_INFO(chan_mgt, chan_type);
+
+	if (set)
+		set_bit(state, chan_info->state);
+	else
+		clear_bit(state, chan_info->state);
+}
+
 static struct nbl_channel_ops chan_ops = {
 	.send_msg			= nbl_chan_send_msg,
 	.send_ack			= nbl_chan_send_ack,
 	.register_msg			= nbl_chan_register_msg,
+	.unregister_msg			= nbl_chan_unregister_msg,
 	.cfg_chan_qinfo_map_table	= nbl_chan_cfg_qinfo_map_table,
 	.check_queue_exist		= nbl_chan_check_queue_exist,
 	.setup_queue			= nbl_chan_setup_queue,
 	.teardown_queue			= nbl_chan_teardown_queue,
-	.set_queue_interrupt_state	= nbl_chan_set_queue_interrupt_state,
 	.clean_queue_subtask		= nbl_chan_clean_queue_subtask,
 
 	/* for mailbox register msg for userdev */
@@ -1338,9 +1417,14 @@ static struct nbl_channel_ops chan_ops = {
 	.dump_rxq			= nbl_chan_dump_rxq,
 	.get_adminq_tx_buf_size		= nbl_chan_get_adminq_tx_buf_size,
 
+	.init_cmdq			= nbl_chan_cmdq_mgt_start,
+	.deinit_cmdq			= nbl_chan_cmdq_mgt_stop,
+	.send_cmd			= nbl_chan_send_cmdq,
+
 	.setup_keepalive		= nbl_chan_setup_keepalive,
 	.remove_keepalive		= nbl_chan_remove_keepalive,
 	.register_chan_task		= nbl_chan_register_chan_task,
+	.set_queue_state		= nbl_chan_set_queue_state,
 };
 
 static int nbl_chan_setup_chan_mgt(struct nbl_adapter *adapter,
@@ -1406,6 +1490,11 @@ static void nbl_chan_remove_chan_mgt(struct nbl_common_info *common,
 	if (NBL_CHAN_MGT_TO_ADMINQ(&(*chan_mgt_leonis)->chan_mgt))
 		devm_kfree(dev, NBL_CHAN_MGT_TO_ADMINQ(&(*chan_mgt_leonis)->chan_mgt));
 	devm_kfree(dev, NBL_CHAN_MGT_TO_MAILBOX(&(*chan_mgt_leonis)->chan_mgt));
+
+	/* check and remove command queue */
+	if ((*chan_mgt_leonis)->chan_mgt.cmdq_mgt)
+		nbl_chan_cmdq_mgt_stop(dev, &(*chan_mgt_leonis)->chan_mgt,
+				       common->tc_inst_id);
 
 	devm_kfree(dev, *chan_mgt_leonis);
 	*chan_mgt_leonis = NULL;

@@ -81,7 +81,8 @@
 #define SFF_COPPER_8431_APPENDIX_E	1
 #define SFF_COPPER_8431_LIMITING	4
 #define SFF_8636_TURNPAGE_ADDR		(127)
-#define SFF_8638_PAGESIZE		(128)
+#define SFF_8638_PAGESIZE		(128U)
+#define SFF_8638_PAGE0_SIZE		(256U)
 
 #define SFF_8636_TEMP			(0x60)
 #define SFF_8636_TEMP_MAX		(0x4)
@@ -90,6 +91,8 @@
 #define SFF_8636_QSFP28_TEMP		(0x16)
 #define SFF_8636_QSFP28_TEMP_MAX	(0x204)
 #define SFF_8636_QSFP28_TEMP_CIRT	(0x200)
+
+#define NBL_ADMINQ_ETH_WOL_REG_OFFSET	(0x1604000 + 0x500)
 
 /* Firmware version */
 #define FIRMWARE_MAGIC		"M181FWV0"
@@ -100,10 +103,16 @@
 				(((_s) >> 8) & 0xF) * 100 + (((_s) >> 12) & 0xF) * 1000); })
 
 /* VSI fixed number of queues*/
-#define NBL_VSI_PF_REAL_QUEUE_NUM(num)		(((num) * 2) + NBL_DEFAULT_REP_HW_QUEUE_NUM)
+#define NBL_VSI_PF_LEGAL_QUEUE_NUM(num)		((num) + NBL_DEFAULT_REP_HW_QUEUE_NUM)
+#define NBL_VSI_PF_MAX_QUEUE_NUM(num)		(((num) * 2) + NBL_DEFAULT_REP_HW_QUEUE_NUM)
 #define NBL_VSI_VF_REAL_QUEUE_NUM(num)		(num)
 
-#define NBL_ADMINQ_PFA_TLV_PFVF_RING_ID	(0x5805)
+#define NBL_ADMINQ_PFA_TLV_VF_NUM		(0x5804)
+#define NBL_ADMINQ_PFA_TLV_NET_RING_NUM		(0x5805)
+#define NBL_ADMINQ_PFA_TLV_REP_RING_NUM		(0x5806)
+#define NBL_ADMINQ_PFA_TLV_ECPU_RING_NUM	(0x5807)
+#define NBL_ADMINQ_PFA_TLV_RDMA_CAP		(0x5808)
+#define NBL_ADMINQ_PFA_TLV_RDMA_MEM_TYPE	(0x5809)
 
 enum {
 	NBL_FW_VERSION_BANK0 = 0,
@@ -206,6 +215,7 @@ struct nbl_leonis_eth_rx_stats {
 	u64 octets_rxd_ok;
 	u64 octets_rxd_badfcs;
 	u64 octets_rxd_dropped;
+	u64 unsupported_opcodes_rx;
 };
 
 struct nbl_leonis_eth_stats {
@@ -216,5 +226,37 @@ struct nbl_leonis_eth_stats {
 struct nbl_leonis_eth_stats_info {
 	const char *descp;
 };
+
+struct nbl_port_key {
+	u32 id; /* port id */
+	u32 subop; /* 1: read, 2: write */
+	u64 data[]; /* [47:0]: data, [55:48]: rsvd, [63:56]: key */
+};
+
+#define NBL_PORT_KEY_ILLEGAL 0x0
+#define NBL_PORT_KEY_CAPABILITIES 0x1
+#define NBL_PORT_KEY_ENABLE 0x2 /* BIT(0): NBL_PORT_FLAG_ENABLE_NOTIFY */
+#define NBL_PORT_KEY_DISABLE 0x3
+#define NBL_PORT_KEY_ADVERT 0x4
+#define NBL_PORT_KEY_LOOPBACK 0x5 /* 0: disable eth loopback, 1: enable eth loopback */
+#define NBL_PORT_KEY_MODULE_SWITCH 0x6 /* 0: sfp off, 1: sfp on */
+#define NBL_PORT_KEY_MAC_ADDRESS 0x7
+#define NBL_PORT_KEY_LED_BLINK 0x8
+#define NBL_PORT_KEY_RESTORE_DEFAULTE_CFG 11
+#define NBL_PORT_KEY_SET_PFC_CFG 12
+#define NBL_PORT_KEY_GET_LINK_STATUS_OPCODE 17
+
+enum {
+	NBL_PORT_SUBOP_READ = 1,
+	NBL_PORT_SUBOP_WRITE = 2,
+};
+
+#define NBL_PORT_FLAG_ENABLE_NOTIFY	BIT(0)
+#define NBL_PORT_ENABLE_LOOPBACK	1
+#define NBL_PORT_DISABLE_LOOPBCK	0
+#define NBL_PORT_SFP_ON			1
+#define NBL_PORT_SFP_OFF		0
+#define NBL_PORT_KEY_KEY_SHIFT		56
+#define NBL_PORT_KEY_DATA_MASK		0xFFFFFFFFFFFF
 
 #endif

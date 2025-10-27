@@ -113,6 +113,7 @@ static int nbl_res_intr_configure_msix_map(void *priv, u16 func_id, u16 num_net_
 
 	intr_mgt->func_intr_res[func_id].interrupts = interrupts;
 	intr_mgt->func_intr_res[func_id].num_interrupts = requested;
+	intr_mgt->func_intr_res[func_id].num_net_interrupts = num_net_msix;
 
 	for (i = 0; i < num_net_msix; i++) {
 		intr_index = find_first_zero_bit(intr_mgt->interrupt_net_bitmap,
@@ -156,7 +157,7 @@ static int nbl_res_intr_configure_msix_map(void *priv, u16 func_id, u16 num_net_
 
 	/* use ctrl dev bdf */
 	phy_ops->configure_msix_map(NBL_RES_MGT_TO_PHY_PRIV(res_mgt), func_id, true,
-				    msix_map_table->dma, common->bus, common->devid,
+				    msix_map_table->dma, common->hw_bus, common->devid,
 				    NBL_COMMON_TO_PCI_FUNC_ID(common));
 
 	return 0;
@@ -217,17 +218,6 @@ static int nbl_res_intr_enable_abnormal_irq(void *priv, u16 vector_id, bool enab
 	return 0;
 }
 
-static int nbl_res_intr_enable_msix_irq(void *priv, u16 global_vector_id)
-{
-	struct nbl_resource_mgt *res_mgt = (struct nbl_resource_mgt *)priv;
-	struct nbl_phy_ops *phy_ops;
-
-	phy_ops = NBL_RES_MGT_TO_PHY_OPS(res_mgt);
-
-	phy_ops->enable_msix_irq(NBL_RES_MGT_TO_PHY_PRIV(res_mgt), global_vector_id);
-	return 0;
-}
-
 static u8 *nbl_res_get_msix_irq_enable_info(void *priv, u16 global_vector_id, u32 *irq_data)
 {
 	struct nbl_resource_mgt *res_mgt = (struct nbl_resource_mgt *)priv;
@@ -254,7 +244,7 @@ static u16 nbl_res_intr_get_msix_entry_id(void *priv, u16 vsi_id, u16 local_vect
 }
 
 static void nbl_res_intr_get_coalesce(void *priv, u16 func_id, u16 vector_id,
-				      struct ethtool_coalesce *ec)
+				      struct nbl_chan_param_get_coalesce *ec)
 {
 	struct nbl_resource_mgt *res_mgt = (struct nbl_resource_mgt *)priv;
 	struct nbl_phy_ops *phy_ops = NBL_RES_MGT_TO_PHY_OPS(res_mgt);
@@ -266,10 +256,7 @@ static void nbl_res_intr_get_coalesce(void *priv, u16 func_id, u16 vector_id,
 	global_vector_id = intr_mgt->func_intr_res[func_id].interrupts[vector_id];
 	phy_ops->get_coalesce(NBL_RES_MGT_TO_PHY_PRIV(res_mgt), global_vector_id, &pnum, &rate);
 	/* tx and rx using the same interrupt */
-	ec->tx_coalesce_usecs = rate;
-	ec->tx_max_coalesced_frames = pnum;
-	ec->rx_coalesce_usecs = rate;
-	ec->rx_max_coalesced_frames = pnum;
+	NBL_SET_INTR_COALESCE(ec, rate, pnum, rate, pnum);
 }
 
 static void nbl_res_intr_set_coalesce(void *priv, u16 func_id, u16 vector_id,
@@ -319,7 +306,7 @@ static int nbl_res_intr_get_abnormal_irq_num(void *priv)
 	return 1;
 }
 
-static u16 nbl_res_intr_get_suppress_level(void *priv, u64 rates, u16 last_level)
+u16 nbl_res_intr_get_suppress_level(void *priv, u64 rates, u16 last_level)
 {
 	switch (last_level) {
 	case NBL_INTR_SUPPRESS_LEVEL0:
@@ -328,17 +315,24 @@ static u16 nbl_res_intr_get_suppress_level(void *priv, u64 rates, u16 last_level
 		else
 			return NBL_INTR_SUPPRESS_LEVEL0;
 	case NBL_INTR_SUPPRESS_LEVEL1:
-		if (rates > NBL_INTR_SUPPRESS_LEVEL1_DOWNGRADE_THRESHOLD)
+		if (rates > NBL_INTR_SUPPRESS_LEVEL2_THRESHOLD)
+			return NBL_INTR_SUPPRESS_LEVEL2;
+		else if (rates > NBL_INTR_SUPPRESS_LEVEL1_DOWNGRADE_THRESHOLD)
 			return NBL_INTR_SUPPRESS_LEVEL1;
 		else
 			return NBL_INTR_SUPPRESS_LEVEL0;
+	case NBL_INTR_SUPPRESS_LEVEL2:
+		if (rates > NBL_INTR_SUPPRESS_LEVEL2_DOWNGRADE_THRESHOLD)
+			return NBL_INTR_SUPPRESS_LEVEL2;
+		else
+			return NBL_INTR_SUPPRESS_LEVEL1;
 	default:
 		return NBL_INTR_SUPPRESS_LEVEL0;
 	}
 }
 
-static void nbl_res_intr_set_intr_suppress_level(void *priv, u16 func_id, u16 vector_id,
-						 u16 num_net_msix, u16 level)
+void nbl_res_intr_set_intr_suppress_level(void *priv, u16 func_id, u16 vector_id,
+					  u16 num_net_msix, u16 level)
 {
 	struct nbl_resource_mgt *res_mgt = (struct nbl_resource_mgt *)priv;
 	struct nbl_phy_ops *phy_ops = NBL_RES_MGT_TO_PHY_OPS(res_mgt);
@@ -357,11 +351,24 @@ static void nbl_res_intr_set_intr_suppress_level(void *priv, u16 func_id, u16 ve
 			rate = NBL_INTR_SUPPRESS_LEVEL1_25G_RATE;
 		}
 		break;
+	case NBL_INTR_SUPPRESS_LEVEL2:
+		if (res_mgt->resource_info->board_info.eth_speed == NBL_FW_PORT_SPEED_100G) {
+			pnum = NBL_INTR_SUPPRESS_LEVEL2_100G_PNUM;
+			rate = NBL_INTR_SUPPRESS_LEVEL2_100G_RATE;
+		} else {
+			pnum = NBL_INTR_SUPPRESS_LEVEL1_25G_PNUM;
+			rate = NBL_INTR_SUPPRESS_LEVEL1_25G_RATE;
+		}
+		break;
 	default:
 		pnum = NBL_INTR_SUPPRESS_LEVEL0_PNUM;
 		rate = NBL_INTR_SUPPRESS_LEVEL0_RATE;
 		break;
 	}
+
+	if (num_net_msix == U16_MAX)
+		num_net_msix = intr_mgt->func_intr_res[func_id].num_net_interrupts;
+
 	for (i = 0; i < num_net_msix; i++) {
 		global_vector_id = intr_mgt->func_intr_res[func_id].interrupts[vector_id + i];
 		phy_ops->set_coalesce(NBL_RES_MGT_TO_PHY_PRIV(res_mgt),
@@ -412,7 +419,6 @@ do {											\
 	NBL_INTR_SET_OPS(enable_mailbox_irq, nbl_res_intr_enable_mailbox_irq);		\
 	NBL_INTR_SET_OPS(enable_abnormal_irq, nbl_res_intr_enable_abnormal_irq);	\
 	NBL_INTR_SET_OPS(enable_adminq_irq, nbl_res_intr_enable_adminq_irq);		\
-	NBL_INTR_SET_OPS(enable_msix_irq, nbl_res_intr_enable_msix_irq);		\
 	NBL_INTR_SET_OPS(get_msix_irq_enable_info, nbl_res_get_msix_irq_enable_info);	\
 	NBL_INTR_SET_OPS(get_global_vector, nbl_res_intr_get_global_vector);		\
 	NBL_INTR_SET_OPS(get_msix_entry_id, nbl_res_intr_get_msix_entry_id);		\

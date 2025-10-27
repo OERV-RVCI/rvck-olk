@@ -10,14 +10,15 @@ static int nbl_res_adminq_update_ring_num(void *priv);
 
 /* ****   FW CMD FILTERS START  **** */
 
-static int nbl_res_adminq_check_ring_num(struct nbl_resource_mgt *res_mgt,
-					 struct nbl_fw_cmd_ring_num_param *param)
+static int nbl_res_adminq_check_net_ring_num(struct nbl_resource_mgt *res_mgt,
+					     struct nbl_fw_cmd_net_ring_num_param *param)
 {
+	struct nbl_resource_info *res_info = NBL_RES_MGT_TO_RES_INFO(res_mgt);
 	struct nbl_common_info *common = NBL_RES_MGT_TO_COMMON(res_mgt);
 	u32 sum = 0, pf_real_num = 0, vf_real_num = 0;
 	int i;
 
-	pf_real_num = NBL_VSI_PF_REAL_QUEUE_NUM(param->pf_def_max_net_qp_num);
+	pf_real_num = NBL_VSI_PF_LEGAL_QUEUE_NUM(param->pf_def_max_net_qp_num);
 	vf_real_num = NBL_VSI_VF_REAL_QUEUE_NUM(param->vf_def_max_net_qp_num);
 
 	if (pf_real_num > NBL_MAX_TXRX_QUEUE_PER_FUNC || vf_real_num > NBL_MAX_TXRX_QUEUE_PER_FUNC)
@@ -26,18 +27,24 @@ static int nbl_res_adminq_check_ring_num(struct nbl_resource_mgt *res_mgt,
 	/* TODO: should we consider when pf_num is 8? */
 	for (i = 0; i < NBL_COMMON_TO_ETH_MODE(common); i++) {
 		pf_real_num = param->net_max_qp_num[i] ?
-			      NBL_VSI_PF_REAL_QUEUE_NUM(param->net_max_qp_num[i]) :
-			      NBL_VSI_PF_REAL_QUEUE_NUM(param->pf_def_max_net_qp_num);
+			      NBL_VSI_PF_LEGAL_QUEUE_NUM(param->net_max_qp_num[i]) :
+			      NBL_VSI_PF_LEGAL_QUEUE_NUM(param->pf_def_max_net_qp_num);
 
 		if (pf_real_num > NBL_MAX_TXRX_QUEUE_PER_FUNC)
 			return -EINVAL;
 
+		pf_real_num = param->net_max_qp_num[i] ?
+			      NBL_VSI_PF_MAX_QUEUE_NUM(param->net_max_qp_num[i]) :
+			      NBL_VSI_PF_MAX_QUEUE_NUM(param->pf_def_max_net_qp_num);
+		if (pf_real_num > NBL_MAX_TXRX_QUEUE_PER_FUNC)
+			pf_real_num = NBL_MAX_TXRX_QUEUE_PER_FUNC;
+
 		sum += pf_real_num;
 	}
 
-	for (i = NBL_MAX_PF; i < NBL_MAX_FUNC; i++) {
-		vf_real_num = param->net_max_qp_num[i] ?
-			      NBL_VSI_VF_REAL_QUEUE_NUM(param->net_max_qp_num[i]) :
+	for (i = 0; i < res_info->max_vf_num; i++) {
+		vf_real_num = param->net_max_qp_num[i + NBL_MAX_PF] ?
+			      NBL_VSI_VF_REAL_QUEUE_NUM(param->net_max_qp_num[i + NBL_MAX_PF]) :
 			      NBL_VSI_VF_REAL_QUEUE_NUM(param->vf_def_max_net_qp_num);
 
 		if (vf_real_num > NBL_MAX_TXRX_QUEUE_PER_FUNC)
@@ -52,15 +59,100 @@ static int nbl_res_adminq_check_ring_num(struct nbl_resource_mgt *res_mgt,
 	return 0;
 }
 
-static int nbl_res_fw_cmd_filter_rw_in(struct nbl_resource_mgt *res_mgt, void *data, int len)
+static int nbl_res_adminq_check_rdma_cap(struct nbl_resource_mgt *res_mgt,
+					 struct nbl_fw_cmd_rdma_cap_param *param)
+{
+	int count = 0, i, j;
+
+	for (i = 0; i < NBL_RDMA_CAP_CMD_LEN; i++)
+		for (j = 0; j < BITS_PER_BYTE; j++)
+			if (param->rdma_func_bitmaps[i] & BIT(j))
+				count++;
+
+	if (count > NBL_RES_RDMA_MAX)
+		return -EINVAL;
+
+	return 0;
+}
+
+static int nbl_res_adminq_check_rdma_mem_type(struct nbl_resource_mgt *res_mgt,
+					      struct nbl_fw_cmd_rdma_mem_type_param *param)
+{
+	return param->mem_type > NBL_RDMA_MEM_TYPE_MAX ? -EINVAL : 0;
+}
+
+static u32 nbl_res_adminq_sum_vf_num(struct nbl_fw_cmd_vf_num_param *param)
+{
+	u32 count = 0;
+	int i;
+
+	for (i = 0; i < NBL_VF_NUM_CMD_LEN; i++)
+		count += param->vf_max_num[i];
+
+	return count;
+}
+
+static int nbl_res_adminq_check_vf_num_type(struct nbl_resource_mgt *res_mgt,
+					    struct nbl_fw_cmd_vf_num_param *param)
+{
+	u32 count;
+
+	count = nbl_res_adminq_sum_vf_num(param);
+	if (count > NBL_MAX_VF)
+		return -EINVAL;
+
+	return 0;
+}
+
+static int nbl_res_fw_cmd_filter_rw_in(struct nbl_resource_mgt *res_mgt, void *data, u16 len)
 {
 	struct nbl_chan_resource_write_param *param = (struct nbl_chan_resource_write_param *)data;
-	struct nbl_fw_cmd_ring_num_param *num_param;
+	struct nbl_fw_cmd_net_ring_num_param *net_ring_num_param;
+	struct nbl_fw_cmd_rdma_cap_param *rdma_cap_param;
+	struct nbl_fw_cmd_rdma_mem_type_param *rdma_mem_type_param;
+	struct nbl_fw_cmd_vf_num_param *vf_num_param;
 
 	switch (param->resid) {
-	case NBL_ADMINQ_PFA_TLV_PFVF_RING_ID:
-		num_param = (struct nbl_fw_cmd_ring_num_param *)param->data;
-		return nbl_res_adminq_check_ring_num(res_mgt, num_param);
+	case NBL_ADMINQ_PFA_TLV_NET_RING_NUM:
+		net_ring_num_param = (struct nbl_fw_cmd_net_ring_num_param *)param->data;
+		return nbl_res_adminq_check_net_ring_num(res_mgt, net_ring_num_param);
+	case NBL_ADMINQ_PFA_TLV_RDMA_CAP:
+		rdma_cap_param = (struct nbl_fw_cmd_rdma_cap_param *)param->data;
+		return nbl_res_adminq_check_rdma_cap(res_mgt, rdma_cap_param);
+	case NBL_ADMINQ_PFA_TLV_RDMA_MEM_TYPE:
+		rdma_mem_type_param = (struct nbl_fw_cmd_rdma_mem_type_param *)param->data;
+		return nbl_res_adminq_check_rdma_mem_type(res_mgt, rdma_mem_type_param);
+	case NBL_ADMINQ_PFA_TLV_VF_NUM:
+		vf_num_param = (struct nbl_fw_cmd_vf_num_param *)param->data;
+		return nbl_res_adminq_check_vf_num_type(res_mgt, vf_num_param);
+	default:
+		break;
+	}
+
+	return 0;
+}
+
+static int nbl_res_fw_cmd_filter_rw_out(struct nbl_resource_mgt *res_mgt, void *in, u16 in_len,
+					void *out, u16 out_len)
+{
+	struct nbl_resource_info *res_info = NBL_RES_MGT_TO_RES_INFO(res_mgt);
+	struct nbl_net_ring_num_info *num_info = &res_info->net_ring_num_info;
+	struct nbl_chan_resource_write_param *param = (struct nbl_chan_resource_write_param *)in;
+	struct nbl_fw_cmd_net_ring_num_param *net_ring_num_param;
+	struct nbl_fw_cmd_vf_num_param *vf_num_param;
+	size_t copy_len;
+	u32 count;
+
+	switch (param->resid) {
+	case NBL_ADMINQ_PFA_TLV_NET_RING_NUM:
+		net_ring_num_param = (struct nbl_fw_cmd_net_ring_num_param *)param->data;
+		copy_len = min_t(size_t, sizeof(*num_info), (size_t)in_len);
+		memcpy(num_info, net_ring_num_param, copy_len);
+		break;
+	case NBL_ADMINQ_PFA_TLV_VF_NUM:
+		vf_num_param = (struct nbl_fw_cmd_vf_num_param *)param->data;
+		count = nbl_res_adminq_sum_vf_num(vf_num_param);
+		res_info->max_vf_num = count;
 	default:
 		break;
 	}
@@ -74,13 +166,13 @@ static void nbl_res_adminq_add_cmd_filter_res_write(struct nbl_resource_mgt *res
 	struct nbl_common_info *common = NBL_RES_MGT_TO_COMMON(res_mgt);
 	struct nbl_res_fw_cmd_filter filter = {
 		.in = nbl_res_fw_cmd_filter_rw_in,
-		.out = NULL,
+		.out = nbl_res_fw_cmd_filter_rw_out,
 	};
 	u16 key = 0;
 
 	key = NBL_CHAN_MSG_ADMINQ_RESOURCE_WRITE;
 
-	if (nbl_common_alloc_hash_node(adminq_mgt->cmd_filter, &key, &filter))
+	if (nbl_common_alloc_hash_node(adminq_mgt->cmd_filter, &key, &filter, NULL))
 		nbl_warn(common, NBL_DEBUG_ADMINQ, "Fail to register res_write in filter");
 }
 
@@ -114,6 +206,7 @@ static int nbl_res_adminq_set_module_eeprom_info(struct nbl_resource_mgt *res_mg
 		param.page = page;
 		param.bank = bank;
 		param.write = 1;
+		param.version = 1;
 		param.offset = offset + byte_offset;
 		param.length = xfer_size;
 		memcpy(param.data, data + byte_offset, xfer_size);
@@ -123,11 +216,11 @@ static int nbl_res_adminq_set_module_eeprom_info(struct nbl_resource_mgt *res_mg
 			      &param, sizeof(param), NULL, 0, 1);
 		ret = chan_ops->send_msg(NBL_RES_MGT_TO_CHAN_PRIV(res_mgt), &chan_send);
 		if (ret) {
-			dev_err(dev, "adminq send msg failed with ret: %d, msg_type: 0x%x, eth_id:%d,\n"
-				"i2c_address:%d, page:%d, bank:%d, offset:%d, length:%d\n",
+			dev_err(dev, "adminq send msg failed: %d, msg: 0x%x, eth_id:%d, addr:%d,",
 				ret, NBL_CHAN_MSG_ADMINQ_GET_MODULE_EEPROM,
-				eth_info->logic_eth_id[eth_id],
-				i2c_address, page, bank, offset + byte_offset, xfer_size);
+				eth_info->logic_eth_id[eth_id], i2c_address);
+			dev_err(dev, "page:%d, bank:%d, offset:%d, length:%d\n",
+				page, bank, offset + byte_offset, xfer_size);
 		}
 		byte_offset += xfer_size;
 	} while (!ret && data_length > 0);
@@ -193,6 +286,7 @@ static int nbl_res_adminq_get_module_eeprom_info(struct nbl_resource_mgt *res_mg
 		param.page = page;
 		param.bank = bank;
 		param.write = 0;
+		param.version = 1;
 		param.offset = offset + byte_offset;
 		param.length = xfer_size;
 
@@ -201,11 +295,11 @@ static int nbl_res_adminq_get_module_eeprom_info(struct nbl_resource_mgt *res_mg
 			      &param, sizeof(param), data + byte_offset, xfer_size, 1);
 		ret = chan_ops->send_msg(NBL_RES_MGT_TO_CHAN_PRIV(res_mgt), &chan_send);
 		if (ret) {
-			dev_err(dev, "adminq send msg failed with ret: %d, msg_type: 0x%x, eth_id:%d,\n"
-				"i2c_address:%d, page:%d, bank:%d, offset:%d, length:%d\n",
+			dev_err(dev, "adminq send msg failed: %d, msg: 0x%x, eth_id:%d, addr:%d,",
 				ret, NBL_CHAN_MSG_ADMINQ_GET_MODULE_EEPROM,
-				eth_info->logic_eth_id[eth_id],
-				i2c_address, page, bank, offset + byte_offset, xfer_size);
+				eth_info->logic_eth_id[eth_id], i2c_address);
+			dev_err(dev, "page:%d, bank:%d, offset:%d, length:%d\n",
+				page, bank, offset + byte_offset, xfer_size);
 		}
 		byte_offset += xfer_size;
 	} while (!ret && data_length > 0);
@@ -663,7 +757,7 @@ static bool nbl_res_adminq_check_fw_heartbeat(void *priv)
 	struct nbl_adminq_mgt *adminq_mgt = NBL_RES_MGT_TO_ADMINQ_MGT(res_mgt);
 	struct nbl_phy_ops *phy_ops = NBL_RES_MGT_TO_PHY_OPS(res_mgt);
 	unsigned long check_time;
-	unsigned long seq_acked;
+	u32 seq_acked;
 
 	if (adminq_mgt->fw_resetting) {
 		adminq_mgt->fw_last_hb_seq++;
@@ -690,7 +784,7 @@ static bool nbl_res_adminq_check_fw_reset(void *priv)
 	struct nbl_resource_mgt *res_mgt = (struct nbl_resource_mgt *)priv;
 	struct nbl_adminq_mgt *adminq_mgt = NBL_RES_MGT_TO_ADMINQ_MGT(res_mgt);
 	struct nbl_phy_ops *phy_ops = NBL_RES_MGT_TO_PHY_OPS(res_mgt);
-	unsigned long seq_acked;
+	u32 seq_acked;
 
 	seq_acked = phy_ops->get_fw_pong(NBL_RES_MGT_TO_PHY_PRIV(res_mgt));
 	if (adminq_mgt->fw_last_hb_seq != seq_acked) {
@@ -1036,16 +1130,56 @@ static void nbl_res_eth_task_schedule(struct nbl_adminq_mgt *adminq_mgt)
 	nbl_common_queue_work(&adminq_mgt->eth_task, true, false);
 }
 
+static int nbl_res_adminq_get_bond_link_state(struct nbl_resource_mgt *res_mgt, u8 eth_id)
+{
+	struct nbl_eth_info *eth_info = NBL_RES_MGT_TO_ETH_INFO(res_mgt);
+	struct nbl_eth_bond_info *eth_bond_info = NBL_RES_MGT_TO_ETH_BOND_INFO(res_mgt);
+	struct nbl_eth_bond_entry *entry = NULL;
+	int lag_id = nbl_res_eth_id_to_lag_id(res_mgt, eth_id);
+	int i, link_state = 0;
+
+	if (lag_id < 0 || lag_id >= NBL_LAG_MAX_NUM)
+		return eth_info->link_state[eth_id];
+
+	/* bond_link_state will be 1 if any eth port is up */
+	entry = &eth_bond_info->entry[lag_id];
+	for (i = 0; i < entry->lag_num && NBL_ETH_BOND_VALID_PORT(i); i++)
+		link_state |= !!(eth_info->link_state[entry->eth_id[i]]);
+
+	return link_state;
+}
+
+static int nbl_res_adminq_handle_link_state_update(u16 type, void *event_data, void *callback_data)
+{
+	struct nbl_resource_mgt *res_mgt = (struct nbl_resource_mgt *)callback_data;
+	struct nbl_adminq_mgt *adminq_mgt = NBL_RES_MGT_TO_ADMINQ_MGT(res_mgt);
+	struct nbl_event_link_status_update_data *data =
+		(struct nbl_event_link_status_update_data *)event_data;
+	int i;
+
+	mutex_lock(&adminq_mgt->eth_lock);
+
+	for (i = 0; i < data->num; i++)
+		adminq_mgt->link_state_changed[data->eth_id[i]] = 1;
+
+	mutex_unlock(&adminq_mgt->eth_lock);
+
+	nbl_res_eth_task_schedule(adminq_mgt);
+
+	return 0;
+}
+
 static void nbl_res_adminq_recv_port_notify(void *priv, void *data)
 {
 	struct nbl_resource_mgt *res_mgt = (struct nbl_resource_mgt *)priv;
 	struct nbl_adminq_mgt *adminq_mgt = NBL_RES_MGT_TO_ADMINQ_MGT(res_mgt);
 	struct nbl_eth_info *eth_info = NBL_RES_MGT_TO_ETH_INFO(res_mgt);
+	struct nbl_eth_bond_info *eth_bond_info = NBL_RES_MGT_TO_ETH_BOND_INFO(res_mgt);
 	struct device *dev = NBL_COMMON_TO_DEV(res_mgt->common);
 	struct nbl_port_notify *notify;
 	u8 last_module_inplace = 0;
 	u8 last_link_state = 0;
-	int eth_id = 0;
+	int i, eth_id = 0, eth_tmp = 0, lag_id = -1;
 
 	notify = (struct nbl_port_notify *)data;
 	eth_id = notify->id;
@@ -1060,6 +1194,9 @@ static void nbl_res_adminq_recv_port_notify(void *priv, void *data)
 	last_module_inplace = eth_info->module_inplace[eth_id];
 	last_link_state = eth_info->link_state[eth_id];
 
+	if (!notify->link_state)
+		eth_info->link_down_count[eth_id]++;
+
 	eth_info->link_state[eth_id] = notify->link_state;
 	eth_info->module_inplace[eth_id] = notify->module_inplace;
 	/* when eth link down, don not update speed
@@ -1072,6 +1209,7 @@ static void nbl_res_adminq_recv_port_notify(void *priv, void *data)
 	eth_info->active_fc[eth_id] = notify->flow_ctrl;
 	eth_info->active_fec[eth_id] = notify->fec;
 	eth_info->port_lp_advertising[eth_id] = notify->lp_advertising;
+	eth_info->port_advertising[eth_id] = notify->advertising;
 
 	if (!last_module_inplace && notify->module_inplace) {
 		adminq_mgt->module_inplace_changed[eth_id] = 1;
@@ -1079,23 +1217,22 @@ static void nbl_res_adminq_recv_port_notify(void *priv, void *data)
 	}
 
 	if (last_link_state != notify->link_state) {
+		/* If this eth belongs to a bond, any link_state update has to notify all vfs for
+		 * all eths in this bond group.
+		 */
+		lag_id = nbl_res_eth_id_to_lag_id(res_mgt, eth_id);
+		if (lag_id >= 0 && lag_id < NBL_LAG_MAX_NUM)
+			for (i = 0; i < eth_bond_info->entry[lag_id].lag_num &&
+			     NBL_ETH_BOND_VALID_PORT(i); i++) {
+				eth_tmp = eth_bond_info->entry[lag_id].eth_id[i];
+				adminq_mgt->link_state_changed[eth_tmp] = 1;
+			}
+
 		adminq_mgt->link_state_changed[eth_id] = 1;
 		nbl_res_eth_task_schedule(adminq_mgt);
 	}
 
 	mutex_unlock(&adminq_mgt->eth_lock);
-}
-
-static int nbl_get_highest_bit(u64 advertise)
-{
-	int highest_bit_pos = 0;
-
-	while (advertise != 0) {
-		advertise >>= 1;
-		highest_bit_pos++;
-	}
-
-	return highest_bit_pos;
 }
 
 static int nbl_res_adminq_set_port_advertising(void *priv,
@@ -1106,7 +1243,6 @@ static int nbl_res_adminq_set_port_advertising(void *priv,
 	struct nbl_eth_info *eth_info = NBL_RES_MGT_TO_ETH_INFO(res_mgt);
 	struct device *dev = NBL_COMMON_TO_DEV(res_mgt->common);
 	struct nbl_chan_send_info chan_send;
-	int highest_bit_pos = 0;
 	struct nbl_port_key *param;
 	int param_len = 0;
 	int eth_id = 0;
@@ -1139,10 +1275,12 @@ static int nbl_res_adminq_set_port_advertising(void *priv,
 
 	/* set FEC */
 	if (advertising->active_fec != 0) {
-		new_advert = new_advert & ~NBL_PORT_CAP_FEC_MASK;
+		new_advert = new_advert & ~NBL_PORT_CAP_FEC_MASK & ~BIT(NBL_PORT_CAP_FEC_AUTONEG);
 
 		/* when ethtool set FEC_AUTO, we set default fec mode */
-		if (advertising->active_fec == NBL_PORT_FEC_AUTO && !advertising->autoneg) {
+		if (advertising->active_fec == NBL_PORT_FEC_AUTO &&
+		    (!advertising->autoneg &&
+		     !(eth_info->port_caps[eth_id] & BIT(NBL_PORT_CAP_FEC_AUTONEG)))) {
 			advertising->active_fec = NBL_PORT_FEC_OFF;
 			if (eth_info->link_speed[eth_id] == SPEED_1000)
 				advertising->active_fec = NBL_ETH_1G_DEFAULT_FEC_MODE;
@@ -1153,34 +1291,28 @@ static int nbl_res_adminq_set_port_advertising(void *priv,
 		}
 
 		if (advertising->active_fec == NBL_PORT_FEC_OFF)
-			new_advert |= BIT(NBL_PORT_CAP_FEC_NONE);
+			new_advert |= BIT(NBL_PORT_CAP_FEC_OFF);
 		if (advertising->active_fec == NBL_PORT_FEC_RS)
 			new_advert |= BIT(NBL_PORT_CAP_FEC_RS);
 		if (advertising->active_fec == NBL_PORT_FEC_BASER)
 			new_advert |= BIT(NBL_PORT_CAP_FEC_BASER);
-		if (advertising->active_fec == NBL_PORT_FEC_AUTO)
+		if (advertising->active_fec == NBL_PORT_FEC_AUTO) {
 			new_advert |= NBL_PORT_CAP_FEC_MASK;
+			if (eth_info->port_caps[eth_id] & BIT(NBL_PORT_CAP_FEC_AUTONEG))
+				new_advert |= BIT(NBL_PORT_CAP_FEC_AUTONEG);
+		}
 	}
 
 	/* set speed */
 	if (advertising->speed_advert != 0) {
 		new_advert = (new_advert & (NBL_PORT_CAP_AUTONEG_MASK | NBL_PORT_CAP_FEC_MASK |
-			      NBL_PORT_CAP_PAUSE_MASK)) | advertising->speed_advert;
+			      NBL_PORT_CAP_PAUSE_MASK | BIT(NBL_PORT_CAP_FEC_AUTONEG))) |
+			      advertising->speed_advert;
 	}
 
-	highest_bit_pos = nbl_get_highest_bit(new_advert);
-	/* speed 10G only can set fec off or baseR, if set RS we change it to baseR */
-	if (highest_bit_pos <= NBL_PORT_CAP_10GBASE_SR &&
-	    highest_bit_pos >= NBL_PORT_CAP_10GBASE_T && !advertising->autoneg) {
-		if (new_advert & BIT(NBL_PORT_CAP_FEC_RS)) {
-			new_advert = new_advert & ~NBL_PORT_CAP_FEC_MASK;
-			new_advert |= BIT(NBL_PORT_CAP_FEC_BASER);
-			dev_notice(dev, "speed 10G default set fec baseR, set fec baseR\n");
-			dev_notice(dev, "set new_advert:%llx\n", new_advert);
-		}
-	}
-
-	if (eth_info->port_max_rate[eth_id] != NBL_PORT_MAX_RATE_100G_PAM4)
+	if (eth_info->port_max_rate[eth_id] != NBL_PORT_MAX_RATE_100G_PAM4 ||
+	    (!(new_advert & NBL_PORT_CAP_SPEED_100G_MASK) &&
+	     eth_info->port_max_rate[eth_id] == NBL_PORT_MAX_RATE_100G_PAM4))
 		new_advert &= ~NBL_PORT_CAP_PAM4_MASK;
 	else
 		new_advert |= NBL_PORT_CAP_PAM4_MASK;
@@ -1200,11 +1332,11 @@ static int nbl_res_adminq_set_port_advertising(void *priv,
 		      param, param_len, NULL, 0, 1);
 	ret = chan_ops->send_msg(NBL_RES_MGT_TO_CHAN_PRIV(res_mgt), &chan_send);
 	if (ret) {
-		dev_err(dev, "adminq send msg failed with ret: %d, msg_type: 0x%x, eth_id:%d, set_port_advertising\n",
+		dev_err(dev, "adminq send msg failed: %d, msg: 0x%x, eth_id:%d,\n",
 			ret, NBL_CHAN_MSG_ADMINQ_MANAGE_PORT_ATTRIBUTES,
 			eth_info->logic_eth_id[eth_id]);
 		kfree(param);
-		return ret;
+		return -EIO;
 	}
 
 	eth_info->port_advertising[eth_id] = new_advert;
@@ -1227,6 +1359,8 @@ static int nbl_res_adminq_get_port_state(void *priv, u8 eth_id, struct nbl_port_
 	port_state->link_state = eth_info->link_state[eth_id];
 	port_state->module_inplace = eth_info->module_inplace[eth_id];
 	port_state->fw_port_max_speed = res_mgt->resource_info->board_info.eth_speed;
+	port_state->module_repluged = eth_info->module_repluged[eth_id];
+	eth_info->module_repluged[eth_id] = 0;
 	if (port_state->module_inplace) {
 		port_state->port_type = eth_info->port_type[eth_id];
 		port_state->port_max_rate = eth_info->port_max_rate[eth_id];
@@ -1309,7 +1443,8 @@ static int nbl_res_adminq_get_module_eeprom(void *priv, u8 eth_id,
 	struct device *dev = NBL_COMMON_TO_DEV(res_mgt->common);
 	u8 module_inplace = 0; /* 1 inplace, 0 not inplace */
 	u32 start = eeprom->offset;
-	u32 length = eeprom->len;
+	u32 total_len = eeprom->len;
+	u32 length;
 	u8 turn_page, offset;
 	int ret;
 
@@ -1324,12 +1459,12 @@ static int nbl_res_adminq_get_module_eeprom(void *priv, u8 eth_id,
 	}
 
 	if (res_mgt->resource_info->board_info.eth_speed == NBL_FW_PORT_SPEED_100G) {
-		while (start < ETH_MODULE_SFF_8636_MAX_LEN) {
-			length = SFF_8638_PAGESIZE;
-			if (start + length > ETH_MODULE_SFF_8636_MAX_LEN)
-				length = ETH_MODULE_SFF_8636_MAX_LEN - start;
-
+		while (start < ETH_MODULE_SFF_8636_MAX_LEN && total_len) {
 			nbl_res_get_module_eeprom_page(start, &turn_page, &offset);
+			length = min(SFF_8638_PAGESIZE, total_len);
+			if (offset % SFF_8638_PAGESIZE + length > SFF_8638_PAGESIZE)
+				length = SFF_8638_PAGESIZE - offset % SFF_8638_PAGESIZE;
+
 			ret = nbl_res_adminq_turn_module_eeprom_page(res_mgt, eth_id, turn_page);
 			if (ret) {
 				dev_err(dev, "eth %d get_module_eeprom_info failed %d\n",
@@ -1338,7 +1473,7 @@ static int nbl_res_adminq_get_module_eeprom(void *priv, u8 eth_id,
 			}
 
 			ret = nbl_res_adminq_get_module_eeprom_info(res_mgt, eth_id,
-								    I2C_DEV_ADDR_A0, 0, 0,
+								    I2C_DEV_ADDR_A0, turn_page, 0,
 								    offset, length, data);
 			if (ret) {
 				dev_err(dev, "eth %d get_module_eeprom_info failed %d\n",
@@ -1347,14 +1482,15 @@ static int nbl_res_adminq_get_module_eeprom(void *priv, u8 eth_id,
 			}
 			start += length;
 			data += length;
-			length = eeprom->len - length;
+			total_len -= length;
 		}
 		return 0;
 	}
 
+	length = total_len;
 	/* Read A0 portion of eth EEPROM */
 	if (start < ETH_MODULE_SFF_8079_LEN) {
-		if (start + eeprom->len > ETH_MODULE_SFF_8079_LEN)
+		if (start + length > ETH_MODULE_SFF_8079_LEN)
 			length = ETH_MODULE_SFF_8079_LEN - start;
 
 		ret = nbl_res_adminq_get_module_eeprom_info(res_mgt, eth_id, I2C_DEV_ADDR_A0, 0, 0,
@@ -1366,7 +1502,7 @@ static int nbl_res_adminq_get_module_eeprom(void *priv, u8 eth_id,
 		}
 		start += length;
 		data += length;
-		length = eeprom->len - length;
+		length = total_len - length;
 	}
 
 	/* Read A2 portion of eth EEPROM */
@@ -1393,6 +1529,56 @@ static int nbl_res_adminq_get_link_state(void *priv, u8 eth_id,
 	eth_link_info->link_status = eth_info->link_state[eth_id];
 	eth_link_info->link_speed = eth_info->link_speed[eth_id];
 
+	return 0;
+}
+
+static int nbl_res_adminq_get_link_down_count(void *priv, u8 eth_id, u64 *link_down_count)
+{
+	struct nbl_resource_mgt *res_mgt = (struct nbl_resource_mgt *)priv;
+	struct nbl_eth_info *eth_info = NBL_RES_MGT_TO_ETH_INFO(res_mgt);
+
+	*link_down_count = eth_info->link_down_count[eth_id];
+	return 0;
+}
+
+static int nbl_res_adminq_get_link_status_opcode(void *priv, u8 eth_id, u32 *link_status_opcode)
+{
+	struct nbl_resource_mgt *res_mgt = (struct nbl_resource_mgt *)priv;
+	struct nbl_channel_ops *chan_ops = NBL_RES_MGT_TO_CHAN_OPS(res_mgt);
+	struct nbl_eth_info *eth_info = NBL_RES_MGT_TO_ETH_INFO(res_mgt);
+	struct device *dev = NBL_COMMON_TO_DEV(res_mgt->common);
+	struct nbl_chan_send_info chan_send;
+	struct nbl_port_key *param;
+	u64 data = 0, key = 0, result = 0;
+	int param_len = 0, ret = 0;
+
+	param_len = sizeof(struct nbl_port_key) + 1 * sizeof(u64);
+	param = kzalloc(param_len, GFP_KERNEL);
+
+	key = NBL_PORT_KEY_GET_LINK_STATUS_OPCODE;
+
+	data += (key << NBL_PORT_KEY_KEY_SHIFT);
+
+	memset(param, 0, param_len);
+	param->id = eth_id;
+	param->subop = NBL_PORT_SUBOP_READ;
+	param->data[0] = data;
+
+	NBL_CHAN_SEND(chan_send, NBL_CHAN_ADMINQ_FUNCTION_ID,
+		      NBL_CHAN_MSG_ADMINQ_MANAGE_PORT_ATTRIBUTES,
+		      param, param_len, &result, sizeof(result), 1);
+	ret = chan_ops->send_msg(NBL_RES_MGT_TO_CHAN_PRIV(res_mgt), &chan_send);
+	if (ret) {
+		dev_err(dev, "adminq send msg failed with ret: %d, msg_type: 0x%x, eth_id:%d\n",
+			ret, NBL_CHAN_MSG_ADMINQ_MANAGE_PORT_ATTRIBUTES,
+			eth_info->logic_eth_id[eth_id]);
+		kfree(param);
+		return ret;
+	}
+
+	*link_status_opcode = result;
+
+	kfree(param);
 	return 0;
 }
 
@@ -1498,6 +1684,26 @@ static int nbl_res_adminq_set_eth_mac_addr(void *priv, u8 *mac, u8 eth_id)
 	return 0;
 }
 
+static int nbl_res_adminq_get_fec_stats(void *priv, u32 eth_id,
+					struct nbl_fec_stats *fec_stats)
+{
+	struct nbl_resource_mgt *res_mgt = (struct nbl_resource_mgt *)priv;
+	struct nbl_channel_ops *chan_ops = NBL_RES_MGT_TO_CHAN_OPS(res_mgt);
+	struct device *dev = NBL_COMMON_TO_DEV(res_mgt->common);
+	struct nbl_chan_send_info chan_send;
+	int data_len = sizeof(struct nbl_fec_stats);
+	int ret;
+
+	NBL_CHAN_SEND(chan_send, NBL_CHAN_ADMINQ_FUNCTION_ID,
+		      NBL_CHAN_MSG_ADMINQ_GET_FEC_STATS, &eth_id,
+		      sizeof(eth_id), fec_stats, data_len, 1);
+	ret = chan_ops->send_msg(NBL_RES_MGT_TO_CHAN_PRIV(res_mgt), &chan_send);
+	if (ret)
+		dev_err(dev, "ctrl eth %d fec stats failed", eth_id);
+
+	return ret;
+}
+
 static int nbl_res_adminq_ctrl_port_led(void *priv, u8 eth_id,
 					enum nbl_led_reg_ctrl led_ctrl, u32 *led_reg)
 {
@@ -1515,7 +1721,7 @@ static int nbl_res_adminq_ctrl_port_led(void *priv, u8 eth_id,
 	param_len = sizeof(struct nbl_port_key) + 1 * sizeof(u64);
 	param = kzalloc(param_len, GFP_KERNEL);
 
-	key = NBL_PORT_KRY_LED_BLINK;
+	key = NBL_PORT_KEY_LED_BLINK;
 
 	switch (led_ctrl) {
 	case NBL_LED_REG_ACTIVE:
@@ -1549,6 +1755,52 @@ static int nbl_res_adminq_ctrl_port_led(void *priv, u8 eth_id,
 	return 0;
 }
 
+static int nbl_res_adminq_set_eth_pfc(void *priv, u8 eth_id, u8 *pfc)
+{
+	struct nbl_resource_mgt *res_mgt = (struct nbl_resource_mgt *)priv;
+	struct nbl_channel_ops *chan_ops = NBL_RES_MGT_TO_CHAN_OPS(res_mgt);
+	struct nbl_eth_info *eth_info = NBL_RES_MGT_TO_ETH_INFO(res_mgt);
+	struct device *dev = NBL_COMMON_TO_DEV(res_mgt->common);
+	struct nbl_chan_send_info chan_send;
+	struct nbl_port_key *param;
+	int param_len = 0;
+	u64 data = 0;
+	u64 key = 0;
+	int ret;
+	int i;
+
+	param_len = sizeof(struct nbl_port_key) + 1 * sizeof(u64);
+	param = kzalloc(param_len, GFP_KERNEL);
+
+	for (i = 0; i < NBL_MAX_PFC_PRIORITIES; i++) {
+		if (pfc[i])
+			data |= 1 << i;
+	}
+
+	key = NBL_PORT_KEY_SET_PFC_CFG;
+	data += (key << NBL_PORT_KEY_KEY_SHIFT);
+
+	memset(param, 0, param_len);
+	param->id = eth_id;
+	param->subop = NBL_PORT_SUBOP_WRITE;
+	param->data[0] = data;
+
+	NBL_CHAN_SEND(chan_send, NBL_CHAN_ADMINQ_FUNCTION_ID,
+		      NBL_CHAN_MSG_ADMINQ_MANAGE_PORT_ATTRIBUTES,
+		      param, param_len, NULL, 0, 1);
+	ret = chan_ops->send_msg(NBL_RES_MGT_TO_CHAN_PRIV(res_mgt), &chan_send);
+	if (ret) {
+		dev_err(dev, "adminq send msg failed with ret: %d, msg_type: 0x%x, eth_id:%d,\n",
+			ret, NBL_CHAN_MSG_ADMINQ_MANAGE_PORT_ATTRIBUTES,
+			eth_info->logic_eth_id[eth_id]);
+		kfree(param);
+		return ret;
+	}
+
+	kfree(param);
+	return 0;
+}
+
 static int nbl_res_adminq_pt_filter_in(struct nbl_resource_mgt *res_mgt,
 				       struct nbl_passthrough_fw_cmd_param *param)
 {
@@ -1563,7 +1815,8 @@ static int nbl_res_adminq_pt_filter_in(struct nbl_resource_mgt *res_mgt,
 }
 
 static int nbl_res_adminq_pt_filter_out(struct nbl_resource_mgt *res_mgt,
-					struct nbl_passthrough_fw_cmd_param *param)
+					struct nbl_passthrough_fw_cmd_param *param,
+					struct nbl_passthrough_fw_cmd_param *result)
 {
 	struct nbl_adminq_mgt *adminq_mgt = NBL_RES_MGT_TO_ADMINQ_MGT(res_mgt);
 	struct nbl_res_fw_cmd_filter *filter;
@@ -1571,9 +1824,10 @@ static int nbl_res_adminq_pt_filter_out(struct nbl_resource_mgt *res_mgt,
 
 	filter = nbl_common_get_hash_node(adminq_mgt->cmd_filter, &param->opcode);
 	if (filter && filter->out)
-		ret = filter->out(res_mgt, param->data, param->out_size);
+		ret = filter->out(res_mgt, param->data, param->in_size,
+				  result->data, result->out_size);
 
-	return ret;
+	return 0;
 }
 
 static int nbl_res_adminq_passthrough(void *priv, struct nbl_passthrough_fw_cmd_param *param,
@@ -1617,7 +1871,7 @@ static int nbl_res_adminq_passthrough(void *priv, struct nbl_passthrough_fw_cmd_
 	if (result->out_size)
 		memcpy(result->data, out_data, param->out_size);
 
-	nbl_res_adminq_pt_filter_out(res_mgt, result);
+	nbl_res_adminq_pt_filter_out(res_mgt, param, result);
 
 send_fail:
 	kfree(out_data);
@@ -1650,7 +1904,7 @@ static int nbl_res_adminq_update_ring_num(void *priv)
 		goto alloc_info_fail;
 	}
 
-	param->resid = NBL_ADMINQ_PFA_TLV_PFVF_RING_ID;
+	param->resid = NBL_ADMINQ_PFA_TLV_NET_RING_NUM;
 	param->offset = 0;
 	param->len = sizeof(*info);
 	NBL_CHAN_SEND(chan_send, NBL_CHAN_ADMINQ_FUNCTION_ID, NBL_CHAN_MSG_ADMINQ_RESOURCE_READ,
@@ -1663,7 +1917,9 @@ static int nbl_res_adminq_update_ring_num(void *priv)
 		goto send_fail;
 	}
 
-	if (info->pf_def_max_net_qp_num && info->vf_def_max_net_qp_num)
+	if (info->pf_def_max_net_qp_num && info->vf_def_max_net_qp_num &&
+	    !nbl_res_adminq_check_net_ring_num(res_mgt,
+					      (struct nbl_fw_cmd_net_ring_num_param *)info))
 		memcpy(&res_info->net_ring_num_info, info, sizeof(res_info->net_ring_num_info));
 
 send_fail:
@@ -1674,24 +1930,179 @@ alloc_param_fail:
 	return ret;
 }
 
-static int nbl_res_adminq_set_ring_num(void *priv, struct nbl_fw_cmd_ring_num_param *param)
+static int nbl_res_adminq_rdma_cap_default(struct nbl_resource_mgt *res_mgt)
+{
+	struct nbl_resource_info *res_info = NBL_RES_MGT_TO_RES_INFO(res_mgt);
+	u16 func_id = 0, vsi_id = 0;
+	int pf_num = NBL_RES_MGT_TO_PF_NUM(res_mgt);
+	int per_pf_num = (NBL_RES_RDMA_MAX - pf_num + 1) / pf_num, i, j;
+	int per_pf_vf_num = res_info->max_vf_num / pf_num;
+	int rdma_reserve = NBL_RES_MGT_TO_COMMON(res_mgt)->product_type == NBL_LEONIS_TYPE;
+
+	per_pf_num = min_t(int, per_pf_num, per_pf_vf_num);
+	for (i = 0; i < pf_num; i++) {
+		vsi_id = nbl_res_pfvfid_to_vsi_id(res_mgt, i, -1, NBL_VSI_DATA);
+		func_id = nbl_res_vsi_id_to_func_id(res_mgt, vsi_id);
+		if (func_id < NBL_MAX_FUNC)
+			set_bit(func_id, res_info->rdma_info.func_cap);
+
+		/* If we have reserved rdma aux dev, remove these on the last pf */
+		for (j = 0; j < per_pf_num - (!(pf_num - i - 1)) * rdma_reserve; j++) {
+			vsi_id = nbl_res_pfvfid_to_vsi_id(res_mgt, i, j, NBL_VSI_DATA);
+			func_id = nbl_res_vsi_id_to_func_id(res_mgt, vsi_id);
+
+			if (func_id < NBL_MAX_FUNC)
+				set_bit(func_id, res_info->rdma_info.func_cap);
+		}
+	}
+
+	return 0;
+}
+
+static int nbl_res_adminq_rdma_cap_tlv(struct nbl_resource_mgt *res_mgt,
+				       struct nbl_rdma_cap_info *info)
+{
+	struct nbl_resource_info *res_info = NBL_RES_MGT_TO_RES_INFO(res_mgt);
+	int i, j;
+
+	for (i = 0; i < NBL_RDMA_CAP_CMD_LEN; i++)
+		for (j = 0; j < BITS_PER_BYTE; j++)
+			if (info->rdma_func_bitmaps[i] & BIT(j))
+				set_bit(i * BITS_PER_BYTE + j, res_info->rdma_info.func_cap);
+
+	return 0;
+}
+
+static int nbl_res_adminq_update_rdma_cap(void *priv)
+{
+	struct nbl_resource_mgt *res_mgt = (struct nbl_resource_mgt *)priv;
+	struct nbl_channel_ops *chan_ops = NBL_RES_MGT_TO_CHAN_OPS(res_mgt);
+	struct device *dev = NBL_COMMON_TO_DEV(NBL_RES_MGT_TO_COMMON(res_mgt));
+	struct nbl_chan_send_info chan_send;
+	struct nbl_chan_resource_read_param *param;
+	struct nbl_rdma_cap_info *info;
+	int ret = 0;
+
+	param = kzalloc(sizeof(*param), GFP_KERNEL);
+	if (!param) {
+		ret = -ENOMEM;
+		goto alloc_param_fail;
+	}
+
+	info = kzalloc(sizeof(*info), GFP_KERNEL);
+	if (!info) {
+		ret = -ENOMEM;
+		goto alloc_info_fail;
+	}
+
+	param->resid = NBL_ADMINQ_PFA_TLV_RDMA_CAP;
+	param->offset = 0;
+	param->len = sizeof(*info);
+	NBL_CHAN_SEND(chan_send, NBL_CHAN_ADMINQ_FUNCTION_ID, NBL_CHAN_MSG_ADMINQ_RESOURCE_READ,
+		      param, sizeof(*param), info, sizeof(*info), 1);
+
+	ret = chan_ops->send_msg(NBL_RES_MGT_TO_CHAN_PRIV(res_mgt), &chan_send);
+	if (ret) {
+		dev_err(dev, "adminq send msg failed with ret: %d, msg_type: 0x%x\n",
+			ret, NBL_CHAN_MSG_ADMINQ_RESOURCE_READ);
+		info->valid = 1;
+	}
+
+	/* For some reason, valid == 0 means valid, and 1 means invalid */
+	if (info->valid)
+		nbl_res_adminq_rdma_cap_default(res_mgt);
+	else
+		nbl_res_adminq_rdma_cap_tlv(res_mgt, info);
+
+	kfree(info);
+alloc_info_fail:
+	kfree(param);
+alloc_param_fail:
+	return ret;
+}
+
+static u16 nbl_res_adminq_get_rdma_cap_num(void *priv)
+{
+	struct nbl_resource_mgt *res_mgt = (struct nbl_resource_mgt *)priv;
+	struct nbl_resource_info *res_info = NBL_RES_MGT_TO_RES_INFO(res_mgt);
+	u16 rdma_cap_num = 0;
+	int i;
+
+	for (i = 0; i < NBL_MAX_FUNC; i++)
+		if (test_bit(i, res_info->rdma_info.func_cap))
+			rdma_cap_num++;
+
+	return rdma_cap_num;
+}
+
+static int nbl_res_adminq_update_rdma_mem_type(void *priv)
+{
+	struct nbl_resource_mgt *res_mgt = (struct nbl_resource_mgt *)priv;
+	struct nbl_resource_info *res_info = NBL_RES_MGT_TO_RES_INFO(res_mgt);
+	struct nbl_channel_ops *chan_ops = NBL_RES_MGT_TO_CHAN_OPS(res_mgt);
+	struct device *dev = NBL_COMMON_TO_DEV(NBL_RES_MGT_TO_COMMON(res_mgt));
+	struct nbl_chan_send_info chan_send;
+	struct nbl_chan_resource_read_param *param;
+	struct nbl_rdma_mem_type_info *info;
+	int ret = 0;
+
+	param = kzalloc(sizeof(*param), GFP_KERNEL);
+	if (!param) {
+		ret = -ENOMEM;
+		goto alloc_param_fail;
+	}
+
+	info = kzalloc(sizeof(*info), GFP_KERNEL);
+	if (!info) {
+		ret = -ENOMEM;
+		goto alloc_info_fail;
+	}
+
+	param->resid = NBL_ADMINQ_PFA_TLV_RDMA_MEM_TYPE;
+	param->offset = 0;
+	param->len = sizeof(*info);
+	NBL_CHAN_SEND(chan_send, NBL_CHAN_ADMINQ_FUNCTION_ID, NBL_CHAN_MSG_ADMINQ_RESOURCE_READ,
+		      param, sizeof(*param), info, sizeof(*info), 1);
+
+	ret = chan_ops->send_msg(NBL_RES_MGT_TO_CHAN_PRIV(res_mgt), &chan_send);
+	if (ret) {
+		dev_err(dev, "adminq send msg failed with ret: %d, msg_type: 0x%x\n",
+			ret, NBL_CHAN_MSG_ADMINQ_RESOURCE_READ);
+		goto send_fail;
+	}
+
+	if (info->mem_type <= NBL_RDMA_MEM_TYPE_MAX)
+		res_info->rdma_info.mem_type = info->mem_type;
+	else
+		res_info->rdma_info.mem_type = NBL_RDMA_MEM_TYPE_MAX;
+
+send_fail:
+	kfree(info);
+alloc_info_fail:
+	kfree(param);
+alloc_param_fail:
+	return ret;
+}
+
+static int nbl_res_adminq_set_ring_num(void *priv, struct nbl_fw_cmd_net_ring_num_param *param)
 {
 	struct nbl_resource_mgt *res_mgt = (struct nbl_resource_mgt *)priv;
 	struct nbl_channel_ops *chan_ops = NBL_RES_MGT_TO_CHAN_OPS(res_mgt);
 	struct device *dev = NBL_COMMON_TO_DEV(NBL_RES_MGT_TO_COMMON(res_mgt));
 	struct nbl_chan_send_info chan_send;
 	struct nbl_chan_resource_write_param *data;
-	int data_len = sizeof(struct nbl_fw_cmd_ring_num_param);
+	int data_len = sizeof(struct nbl_fw_cmd_net_ring_num_param);
 	int ret = 0;
 
 	data = kzalloc(sizeof(*data) + data_len, GFP_KERNEL);
 	if (!data)
-		goto alloc_data_fail;
+		return -ENOMEM;
 
-	data->resid = NBL_ADMINQ_PFA_TLV_PFVF_RING_ID;
+	data->resid = NBL_ADMINQ_PFA_TLV_NET_RING_NUM;
 	data->offset = 0;
 	data->len = data_len;
-	memcpy(data->data, param, data_len);
+
+	memcpy(data + 1, param, data_len);
 
 	NBL_CHAN_SEND(chan_send, NBL_CHAN_ADMINQ_FUNCTION_ID, NBL_CHAN_MSG_ADMINQ_RESOURCE_WRITE,
 		      data, sizeof(*data) + data_len, NULL, 0, 1);
@@ -1700,117 +2111,10 @@ static int nbl_res_adminq_set_ring_num(void *priv, struct nbl_fw_cmd_ring_num_pa
 		dev_err(dev, "adminq send msg failed with ret: %d\n", ret);
 
 	kfree(data);
-alloc_data_fail:
 	return ret;
 }
 
-static void nbl_res_adminq_set_eth_speed(struct nbl_resource_mgt *res_mgt,
-					 u8 eth_id, u32 speed, u8 active_fec, u8 autoneg)
-{
-	struct nbl_eth_info *eth_info = NBL_RES_MGT_TO_ETH_INFO(res_mgt);
-	struct device *dev = NBL_RES_MGT_TO_DEV(res_mgt);
-	struct nbl_port_advertising port_advertising = {0};
-	u64 speed_advert = 0;
-
-	speed_advert = nbl_speed_to_link_mode(speed, autoneg);
-	speed_advert &= eth_info->port_caps[eth_id];
-
-	if (!speed_advert) {
-		dev_err(dev, "eth %d speed %d is not support, exit\n",
-			eth_info->logic_eth_id[eth_id], speed);
-		return;
-	}
-
-	if (active_fec == NBL_PORT_FEC_OFF) {
-		if (!(eth_info->port_caps[eth_id] & BIT(NBL_PORT_CAP_FEC_NONE))) {
-			dev_err(dev, "eth %d optical module plug in, want to set fec mode off, but eth caps %llx donot support it\n",
-				eth_info->logic_eth_id[eth_id], eth_info->port_caps[eth_id]);
-		}
-	}
-	if (active_fec == NBL_PORT_FEC_RS) {
-		if (!(eth_info->port_caps[eth_id] & BIT(NBL_PORT_CAP_FEC_RS))) {
-			dev_err(dev, "eth %d optical module plug in, want to set fec mode RS, but eth caps %llx donot support it\n",
-				eth_info->logic_eth_id[eth_id], eth_info->port_caps[eth_id]);
-		}
-	}
-	if (active_fec == NBL_PORT_FEC_BASER) {
-		if (!(eth_info->port_caps[eth_id] & BIT(NBL_PORT_CAP_FEC_BASER))) {
-			dev_err(dev, "eth %d optical module plug in, want to set fec mode baseR, but eth caps %llx donot support it\n",
-				eth_info->logic_eth_id[eth_id], eth_info->port_caps[eth_id]);
-		}
-	}
-	if (active_fec == NBL_PORT_FEC_AUTO) {
-		if (!(eth_info->port_caps[eth_id] & BIT(NBL_PORT_CAP_AUTONEG))) {
-			dev_err(dev, "eth %d optical module plug in, want to set fec mode auto, but eth caps %llx donot support it\n",
-				eth_info->logic_eth_id[eth_id], eth_info->port_caps[eth_id]);
-		}
-	}
-	port_advertising.eth_id = eth_id;
-	port_advertising.speed_advert = speed_advert;
-	port_advertising.active_fec = active_fec;
-	port_advertising.autoneg = autoneg;
-	dev_info(dev, "eth %d optical module plug in, set speed_advert:%llx, active_fec:%x, autoneg %d\n",
-		 eth_info->logic_eth_id[eth_id], speed_advert, active_fec, autoneg);
-	nbl_res_adminq_set_port_advertising(res_mgt, &port_advertising);
-}
-
-static void nbl_res_adminq_recovery_eth(struct nbl_resource_mgt *res_mgt, u8 eth_id)
-{
-	struct nbl_eth_info *eth_info = NBL_RES_MGT_TO_ETH_INFO(res_mgt);
-	u8 port_max_rate = 0;
-	u8 port_type;
-	u32 port_max_speed = 0;
-	u8 active_fec = 0;
-	u8 autoneg = 0;
-
-	if (!eth_info->module_inplace[eth_id])
-		return;
-
-	port_max_rate = eth_info->port_max_rate[eth_id];
-
-	switch (port_max_rate) {
-	case NBL_PORT_MAX_RATE_1G:
-		port_max_speed = SPEED_1000;
-		active_fec = NBL_ETH_1G_DEFAULT_FEC_MODE;
-		break;
-	case NBL_PORT_MAX_RATE_10G:
-		port_max_speed = SPEED_10000;
-		active_fec = NBL_ETH_10G_DEFAULT_FEC_MODE;
-		break;
-	case NBL_PORT_MAX_RATE_25G:
-		port_max_speed = SPEED_25000;
-		active_fec = NBL_ETH_25G_DEFAULT_FEC_MODE;
-		break;
-	case NBL_PORT_MAX_RATE_100G:
-	case NBL_PORT_MAX_RATE_100G_PAM4:
-		port_max_speed = SPEED_100000;
-		active_fec = NBL_ETH_100G_DEFAULT_FEC_MODE;
-		break;
-	default:
-		/* default set 25G */
-		port_max_speed = SPEED_25000;
-		active_fec = NBL_ETH_25G_DEFAULT_FEC_MODE;
-		break;
-	}
-
-	port_type = eth_info->port_type[eth_id];
-	/* cooper support auto-negotiation */
-	if (port_type == NBL_PORT_TYPE_COPPER) {
-		if (port_max_speed >= SPEED_25000)
-			autoneg = 1;
-		else
-			autoneg = 0; /* disable autoneg when 10G module pluged */
-
-		eth_info->port_caps[eth_id] |= BIT(NBL_PORT_CAP_AUTONEG);
-	} else {
-		autoneg = 0;
-		eth_info->port_caps[eth_id] &= ~BIT_MASK(NBL_PORT_CAP_AUTONEG);
-	}
-	/* when optical module plug in, we must set default fec */
-	nbl_res_adminq_set_eth_speed(res_mgt, eth_id, port_max_speed, active_fec, autoneg);
-}
-
-static int nbl_res_adminq_nway_reset(void *priv, u8 eth_id)
+static int nbl_res_adminq_restore_default_cfg(void *priv, u8 eth_id)
 {
 	struct nbl_resource_mgt *res_mgt = (struct nbl_resource_mgt *)priv;
 	struct nbl_channel_ops *chan_ops = NBL_RES_MGT_TO_CHAN_OPS(res_mgt);
@@ -1823,7 +2127,7 @@ static int nbl_res_adminq_nway_reset(void *priv, u8 eth_id)
 	u64 key = 0;
 	int ret;
 
-	key = NBL_PORT_KEY_DISABLE;
+	key = NBL_PORT_KEY_RESTORE_DEFAULTE_CFG;
 	data = (key << NBL_PORT_KEY_KEY_SHIFT);
 	param_len = sizeof(struct nbl_port_key) + 1 * sizeof(u64);
 	param = kzalloc(param_len, GFP_KERNEL);
@@ -1836,31 +2140,64 @@ static int nbl_res_adminq_nway_reset(void *priv, u8 eth_id)
 		      param, param_len, NULL, 0, 1);
 	ret = chan_ops->send_msg(NBL_RES_MGT_TO_CHAN_PRIV(res_mgt), &chan_send);
 	if (ret) {
-		dev_err(dev, "ctrl eth %d disable failed ret %d\n",
+		dev_err(dev, "ctrl eth %d restore defaulte cfg failed ret %d\n",
 			eth_info->logic_eth_id[eth_id], ret);
 		kfree(param);
 		return ret;
 	}
-
-	key = NBL_PORT_KEY_ENABLE;
-	data = NBL_PORT_FLAG_ENABLE_NOTIFY + (key << NBL_PORT_KEY_KEY_SHIFT);
-
-	param_len = sizeof(struct nbl_port_key) + 1 * sizeof(u64);
-	param->data[0] = data;
-	param->id = eth_id;
-	param->subop = NBL_PORT_SUBOP_WRITE;
-	ret = chan_ops->send_msg(NBL_RES_MGT_TO_CHAN_PRIV(res_mgt), &chan_send);
-	if (ret) {
-		dev_err(dev, "ctrl eth %d enable failed %d\n",
-			eth_info->logic_eth_id[eth_id], ret);
-		kfree(param);
-		return ret;
-	}
-
-	nbl_res_adminq_recovery_eth(res_mgt, eth_id);
 
 	kfree(param);
 	return 0;
+}
+
+static int nbl_res_adminq_nway_reset(void *priv, u8 eth_id)
+{
+	return nbl_res_adminq_restore_default_cfg(priv, eth_id);
+}
+
+static int nbl_res_adminq_init_port(void *priv)
+{
+	struct nbl_resource_mgt *res_mgt = (struct nbl_resource_mgt *)priv;
+	struct nbl_eth_info *eth_info = NBL_RES_MGT_TO_ETH_INFO(res_mgt);
+	u8 eth_id;
+
+	for_each_set_bit(eth_id, eth_info->eth_bitmap, NBL_MAX_ETHERNET)
+		nbl_res_adminq_restore_default_cfg(priv, eth_id);
+
+	return 0;
+}
+
+static int nbl_res_adminq_set_wol(void *priv, u8 eth_id, bool enable)
+{
+	struct nbl_resource_mgt *res_mgt = (struct nbl_resource_mgt *)priv;
+	struct nbl_channel_ops *chan_ops = NBL_RES_MGT_TO_CHAN_OPS(res_mgt);
+	struct device *dev = NBL_COMMON_TO_DEV(NBL_RES_MGT_TO_COMMON(res_mgt));
+	struct nbl_chan_send_info chan_send;
+	struct nbl_chan_adminq_reg_write_param reg_write = {0};
+	struct nbl_chan_adminq_reg_read_param reg_read = {0};
+	u32 value;
+	int ret = 0;
+
+	dev_info(dev, "set_wol ethid %d %sabled", eth_id, enable ? "en" : "dis");
+
+	reg_read.reg = NBL_ADMINQ_ETH_WOL_REG_OFFSET;
+	NBL_CHAN_SEND(chan_send, NBL_CHAN_ADMINQ_FUNCTION_ID, NBL_CHAN_MSG_ADMINQ_REGISTER_READ,
+		      &reg_read, sizeof(reg_read), &value, sizeof(value), 1);
+	ret = chan_ops->send_msg(NBL_RES_MGT_TO_CHAN_PRIV(res_mgt), &chan_send);
+	if (ret) {
+		dev_err(dev, "adminq send msg failed with ret: %d\n", ret);
+		return ret;
+	}
+
+	reg_write.reg = NBL_ADMINQ_ETH_WOL_REG_OFFSET;
+	reg_write.value = (value & ~(1 << eth_id)) | (enable << eth_id);
+	NBL_CHAN_SEND(chan_send, NBL_CHAN_ADMINQ_FUNCTION_ID, NBL_CHAN_MSG_ADMINQ_REGISTER_WRITE,
+		      &reg_write, sizeof(reg_write), NULL, 0, 1);
+	ret = chan_ops->send_msg(NBL_RES_MGT_TO_CHAN_PRIV(res_mgt), &chan_send);
+	if (ret)
+		dev_err(dev, "adminq send msg failed with ret: %d\n", ret);
+
+	return ret;
 }
 
 #define ADD_ETH_STATISTICS(name)  {#name}
@@ -1892,8 +2229,8 @@ static struct nbl_leonis_eth_stats_info _eth_statistics[] = {
 	ADD_ETH_STATISTICS(eth_frames_tx_128_to_255B),
 	ADD_ETH_STATISTICS(eth_frames_tx_256_to_511B),
 	ADD_ETH_STATISTICS(eth_frames_tx_512_to_1023B),
-	ADD_ETH_STATISTICS(eth_frames_tx_1024_to_1535B),
-	ADD_ETH_STATISTICS(eth_frames_tx_1536_to_2047B),
+	ADD_ETH_STATISTICS(eth_frames_tx_1024_to_1518B),
+	ADD_ETH_STATISTICS(eth_frames_tx_1519_to_2047B),
 	ADD_ETH_STATISTICS(eth_frames_tx_2048_to_MAXB),
 	ADD_ETH_STATISTICS(eth_undersize_frames_tx_goodfcs),
 	ADD_ETH_STATISTICS(eth_oversize_frames_tx_goodfcs),
@@ -1939,13 +2276,14 @@ static struct nbl_leonis_eth_stats_info _eth_statistics[] = {
 	ADD_ETH_STATISTICS(eth_frames_rx_128_to_255B),
 	ADD_ETH_STATISTICS(eth_frames_rx_256_to_511B),
 	ADD_ETH_STATISTICS(eth_frames_rx_512_to_1023B),
-	ADD_ETH_STATISTICS(eth_frames_rx_1024_to_1535B),
-	ADD_ETH_STATISTICS(eth_frames_rx_1536_to_2047B),
+	ADD_ETH_STATISTICS(eth_frames_rx_1024_to_1518B),
+	ADD_ETH_STATISTICS(eth_frames_rx_1519_to_2047B),
 	ADD_ETH_STATISTICS(eth_frames_rx_2048_to_MAXB),
 	ADD_ETH_STATISTICS(eth_octets_rx),
 	ADD_ETH_STATISTICS(eth_octets_rx_ok),
 	ADD_ETH_STATISTICS(eth_octets_rx_badfcs),
 	ADD_ETH_STATISTICS(eth_octets_rx_dropped),
+	ADD_ETH_STATISTICS(eth_unsupported_opcodes_rx),
 };
 
 static void nbl_res_adminq_get_private_stat_len(void *priv, u32 *len)
@@ -1953,23 +2291,77 @@ static void nbl_res_adminq_get_private_stat_len(void *priv, u32 *len)
 	*len = ARRAY_SIZE(_eth_statistics);
 }
 
-static void nbl_res_adminq_get_private_stat_data(void *priv, u32 eth_id, u64 *data)
+static void nbl_res_adminq_get_private_stat_data(void *priv, u32 eth_id, u64 *data, u32 data_len)
 {
 	struct nbl_resource_mgt *res_mgt = (struct nbl_resource_mgt *)priv;
 	struct nbl_channel_ops *chan_ops = NBL_RES_MGT_TO_CHAN_OPS(res_mgt);
 	struct nbl_eth_info *eth_info = NBL_RES_MGT_TO_ETH_INFO(res_mgt);
 	struct device *dev = NBL_COMMON_TO_DEV(res_mgt->common);
 	struct nbl_chan_send_info chan_send;
+	int ret = 0;
+
+	NBL_CHAN_SEND(chan_send, NBL_CHAN_ADMINQ_FUNCTION_ID,
+		      NBL_CHAN_MSG_ADMINQ_GET_ETH_STATS,
+		      &eth_id, sizeof(eth_id), data, data_len, 1);
+	ret = chan_ops->send_msg(NBL_RES_MGT_TO_CHAN_PRIV(res_mgt), &chan_send);
+	if (ret)
+		dev_err(dev, "adminq get eth %d stats failed ret: %d\n",
+			eth_info->logic_eth_id[eth_id], ret);
+}
+
+static int nbl_res_adminq_get_eth_ctrl_stats(void *priv, u32 eth_id,
+					     struct nbl_eth_ctrl_stats *eth_ctrl_stats)
+{
+	struct nbl_resource_mgt *res_mgt = (struct nbl_resource_mgt *)priv;
+	struct nbl_channel_ops *chan_ops = NBL_RES_MGT_TO_CHAN_OPS(res_mgt);
+	struct nbl_eth_info *eth_info = NBL_RES_MGT_TO_ETH_INFO(res_mgt);
+	struct device *dev = NBL_COMMON_TO_DEV(res_mgt->common);
+	struct nbl_chan_send_info chan_send;
+	struct nbl_leonis_eth_stats eth_stats = {{0}};
 	int data_length = sizeof(struct nbl_leonis_eth_stats);
 	int ret = 0;
 
 	NBL_CHAN_SEND(chan_send, NBL_CHAN_ADMINQ_FUNCTION_ID,
 		      NBL_CHAN_MSG_ADMINQ_GET_ETH_STATS,
-		      &eth_id, sizeof(eth_id), data, data_length, 1);
+		      &eth_id, sizeof(eth_id), &eth_stats, data_length, 1);
 	ret = chan_ops->send_msg(NBL_RES_MGT_TO_CHAN_PRIV(res_mgt), &chan_send);
-	if (ret)
-		dev_err(dev, "adminq get eth %d stats failed ret: %d\n",
+	if (ret) {
+		dev_err(dev, "adminq get eth %d ctrl stats failed ret: %d\n",
 			eth_info->logic_eth_id[eth_id], ret);
+		return ret;
+	}
+	eth_ctrl_stats->macctrl_frames_txd_ok = eth_stats.tx_stats.macctrl_frames_txd_ok;
+	eth_ctrl_stats->macctrl_frames_rxd = eth_stats.rx_stats.macctrl_frames_rxd;
+	eth_ctrl_stats->unsupported_opcodes_rx = eth_stats.rx_stats.unsupported_opcodes_rx;
+
+	return ret;
+}
+
+static int nbl_res_adminq_get_pause_stats(void *priv, u32 eth_id,
+					  struct nbl_pause_stats *pause_stats)
+{
+	struct nbl_resource_mgt *res_mgt = (struct nbl_resource_mgt *)priv;
+	struct nbl_channel_ops *chan_ops = NBL_RES_MGT_TO_CHAN_OPS(res_mgt);
+	struct nbl_eth_info *eth_info = NBL_RES_MGT_TO_ETH_INFO(res_mgt);
+	struct device *dev = NBL_COMMON_TO_DEV(res_mgt->common);
+	struct nbl_chan_send_info chan_send;
+	struct nbl_leonis_eth_stats eth_stats;
+	int data_length = sizeof(struct nbl_leonis_eth_stats);
+	int ret = 0;
+
+	NBL_CHAN_SEND(chan_send, NBL_CHAN_ADMINQ_FUNCTION_ID,
+		      NBL_CHAN_MSG_ADMINQ_GET_ETH_STATS,
+		      &eth_id, sizeof(eth_id), (void *)&eth_stats, data_length, 1);
+	ret = chan_ops->send_msg(NBL_RES_MGT_TO_CHAN_PRIV(res_mgt), &chan_send);
+	if (ret) {
+		dev_err(dev, "adminq get eth %d pause stats failed ret: %d\n",
+			eth_info->logic_eth_id[eth_id], ret);
+		return ret;
+	}
+	pause_stats->rx_pause_frames = eth_stats.rx_stats.pause_macctrl_frames_rxd;
+	pause_stats->tx_pause_frames = eth_stats.tx_stats.pause_macctrl_frames_txd;
+
+	return ret;
 }
 
 static void nbl_res_adminq_fill_private_stat_strings(void *priv, u8 *strings)
@@ -1982,37 +2374,70 @@ static void nbl_res_adminq_fill_private_stat_strings(void *priv, u8 *strings)
 	}
 }
 
-static u32 nbl_convert_temp_type_eeprom_offset(enum nbl_module_temp_type type)
+static int
+nbl_res_adminq_get_eth_abnormal_stats(void *priv, u32 eth_id,
+				      struct nbl_eth_abnormal_stats *eth_abnormal_stats)
+{
+	struct nbl_resource_mgt *res_mgt = (struct nbl_resource_mgt *)priv;
+	struct nbl_channel_ops *chan_ops = NBL_RES_MGT_TO_CHAN_OPS(res_mgt);
+	struct nbl_eth_info *eth_info = NBL_RES_MGT_TO_ETH_INFO(res_mgt);
+	struct device *dev = NBL_COMMON_TO_DEV(res_mgt->common);
+	struct nbl_chan_send_info chan_send;
+	struct nbl_leonis_eth_stats eth_stats = {{ 0 }};
+	int data_length = sizeof(struct nbl_leonis_eth_stats);
+	int ret = 0;
+
+	NBL_CHAN_SEND(chan_send, NBL_CHAN_ADMINQ_FUNCTION_ID,
+		      NBL_CHAN_MSG_ADMINQ_GET_ETH_STATS,
+		      &eth_id, sizeof(eth_id), (u64 *)&eth_stats, data_length, 1);
+	ret = chan_ops->send_msg(NBL_RES_MGT_TO_CHAN_PRIV(res_mgt), &chan_send);
+	if (ret) {
+		dev_err(dev, "adminq get eth %d stats failed ret: %d\n",
+			eth_info->logic_eth_id[eth_id], ret);
+		return ret;
+	}
+
+	eth_abnormal_stats->rx_crc_errors = eth_stats.rx_stats.frames_rxd_badfcs;
+	eth_abnormal_stats->rx_frame_errors = eth_stats.rx_stats.frames_rxd_misc_error;
+	eth_abnormal_stats->rx_length_errors = eth_stats.rx_stats.undersize_frames_rxd_goodfcs +
+						eth_stats.rx_stats.oversize_frames_rxd_goodfcs;
+
+	return 0;
+}
+
+static u32 nbl_convert_temp_type_eeprom_offset(enum nbl_hwmon_type type)
 {
 	switch (type) {
-	case NBL_MODULE_TEMP:
+	case NBL_HWMON_TEMP_INPUT:
 		return SFF_8636_TEMP;
-	case NBL_MODULE_TEMP_MAX:
+	case NBL_HWMON_TEMP_MAX:
 		return SFF_8636_TEMP_MAX;
-	case NBL_MODULE_TEMP_CRIT:
+	case NBL_HWMON_TEMP_CRIT:
 		return SFF_8636_TEMP_CIRT;
 	default:
 		return SFF_8636_TEMP;
 	}
 }
 
-static u32 nbl_convert_temp_type_qsfp28_eeprom_offset(enum nbl_module_temp_type type)
+static u32 nbl_convert_temp_type_qsfp28_eeprom_offset(enum nbl_hwmon_type type)
 {
 	switch (type) {
-	case NBL_MODULE_TEMP:
+	case NBL_HWMON_TEMP_INPUT:
 		return SFF_8636_QSFP28_TEMP;
-	case NBL_MODULE_TEMP_MAX:
+	case NBL_HWMON_TEMP_MAX:
 		return SFF_8636_QSFP28_TEMP_MAX;
-	case NBL_MODULE_TEMP_CRIT:
+	case NBL_HWMON_TEMP_CRIT:
 		return SFF_8636_QSFP28_TEMP_CIRT;
 	default:
 		return SFF_8636_QSFP28_TEMP;
 	}
 }
 
-static int nbl_res_adminq_get_module_temp_common(struct nbl_resource_mgt *res_mgt, u8 eth_id,
-						 enum nbl_module_temp_type type)
+/* return value need to convert to Mil degree Celsius(1/1000) */
+static int nbl_res_adminq_get_module_temp_common(void *priv, u8 eth_id,
+						 enum nbl_hwmon_type type)
 {
+	struct nbl_resource_mgt *res_mgt = (struct nbl_resource_mgt *)priv;
 	struct device *dev = NBL_COMMON_TO_DEV(res_mgt->common);
 	struct nbl_eth_info *eth_info = NBL_RES_MGT_TO_ETH_INFO(res_mgt);
 	struct ethtool_modinfo info = {0};
@@ -2040,11 +2465,99 @@ static int nbl_res_adminq_get_module_temp_common(struct nbl_resource_mgt *res_mg
 		return 0;
 	}
 
-	return temp;
+	return temp * 1000;
 }
 
+static int nbl_res_adminq_get_eth_mac_stats(void *priv, u32 eth_id,
+					    struct nbl_eth_mac_stats *eth_mac_stats)
+{
+	struct nbl_resource_mgt *res_mgt = (struct nbl_resource_mgt *)priv;
+	struct nbl_channel_ops *chan_ops = NBL_RES_MGT_TO_CHAN_OPS(res_mgt);
+	struct nbl_eth_info *eth_info = NBL_RES_MGT_TO_ETH_INFO(res_mgt);
+	struct device *dev = NBL_COMMON_TO_DEV(res_mgt->common);
+	struct nbl_chan_send_info chan_send;
+
+	struct nbl_leonis_eth_stats eth_stats;
+	int data_length = sizeof(struct nbl_leonis_eth_stats);
+	int ret = 0;
+
+	NBL_CHAN_SEND(chan_send, NBL_CHAN_ADMINQ_FUNCTION_ID,
+		      NBL_CHAN_MSG_ADMINQ_GET_ETH_STATS,
+		      &eth_id, sizeof(eth_id), (void *)&eth_stats, data_length, 1);
+	ret = chan_ops->send_msg(NBL_RES_MGT_TO_CHAN_PRIV(res_mgt), &chan_send);
+	if (ret) {
+		dev_err(dev, "adminq get eth %d stats failed ret: %d\n",
+			eth_info->logic_eth_id[eth_id], ret);
+		return ret;
+	}
+	eth_mac_stats->frames_txd_ok = eth_stats.tx_stats.frames_txd_ok;
+	eth_mac_stats->frames_rxd_ok = eth_stats.rx_stats.frames_rxd_ok;
+	eth_mac_stats->octets_txd_ok = eth_stats.tx_stats.octets_txd_ok;
+	eth_mac_stats->octets_rxd_ok = eth_stats.rx_stats.octets_rxd_ok;
+	eth_mac_stats->multicast_frames_txd_ok = eth_stats.tx_stats.multicast_frames_txd_ok;
+	eth_mac_stats->broadcast_frames_txd_ok = eth_stats.tx_stats.broadcast_frames_txd_ok;
+	eth_mac_stats->multicast_frames_rxd_ok = eth_stats.rx_stats.multicast_frames_rxd_ok;
+	eth_mac_stats->broadcast_frames_rxd_ok = eth_stats.rx_stats.broadcast_frames_rxd_ok;
+
+	return ret;
+}
+
+static int nbl_res_adminq_get_rmon_stats(void *priv, u32 eth_id,
+					 struct nbl_rmon_stats *rmon_stats)
+{
+	struct nbl_resource_mgt *res_mgt = (struct nbl_resource_mgt *)priv;
+	struct nbl_channel_ops *chan_ops = NBL_RES_MGT_TO_CHAN_OPS(res_mgt);
+	struct nbl_eth_info *eth_info = NBL_RES_MGT_TO_ETH_INFO(res_mgt);
+	struct device *dev = NBL_COMMON_TO_DEV(res_mgt->common);
+	struct nbl_chan_send_info chan_send;
+	struct nbl_leonis_eth_stats eth_stats = {{0}};
+	int data_length = sizeof(struct nbl_leonis_eth_stats);
+	u64 *rx = rmon_stats->rmon_rx_range;
+	u64 *tx = rmon_stats->rmon_tx_range;
+	int ret = 0;
+
+	NBL_CHAN_SEND(chan_send, NBL_CHAN_ADMINQ_FUNCTION_ID,
+		      NBL_CHAN_MSG_ADMINQ_GET_ETH_STATS,
+		      &eth_id, sizeof(eth_id), (void *)&eth_stats, data_length, 1);
+	ret = chan_ops->send_msg(NBL_RES_MGT_TO_CHAN_PRIV(res_mgt), &chan_send);
+	if (ret) {
+		dev_err(dev, "adminq get eth %d rmon stats failed ret: %d\n",
+			eth_info->logic_eth_id[eth_id], ret);
+		return ret;
+	}
+	rmon_stats->undersize_frames_rxd_goodfcs =
+		eth_stats.rx_stats.undersize_frames_rxd_goodfcs;
+	rmon_stats->oversize_frames_rxd_goodfcs =
+		eth_stats.rx_stats.oversize_frames_rxd_goodfcs;
+	rmon_stats->undersize_frames_rxd_badfcs =
+		eth_stats.rx_stats.undersize_frames_rxd_badfcs;
+	rmon_stats->oversize_frames_rxd_badfcs =
+		eth_stats.rx_stats.oversize_frames_rxd_badfcs;
+
+	rx[ETHER_STATS_PKTS_64_OCTETS] = eth_stats.rx_stats.frames_rxd_sizerange0;
+	rx[ETHER_STATS_PKTS_65_TO_127_OCTETS] = eth_stats.rx_stats.frames_rxd_sizerange1;
+	rx[ETHER_STATS_PKTS_128_TO_255_OCTETS] = eth_stats.rx_stats.frames_rxd_sizerange2;
+	rx[ETHER_STATS_PKTS_256_TO_511_OCTETS] = eth_stats.rx_stats.frames_rxd_sizerange3;
+	rx[ETHER_STATS_PKTS_512_TO_1023_OCTETS] = eth_stats.rx_stats.frames_rxd_sizerange4;
+	rx[ETHER_STATS_PKTS_1024_TO_1518_OCTETS] = eth_stats.rx_stats.frames_rxd_sizerange5;
+	rx[ETHER_STATS_PKTS_1519_TO_2047_OCTETS] = eth_stats.rx_stats.frames_rxd_sizerange6;
+	rx[ETHER_STATS_PKTS_2048_TO_MAX_OCTETS] = eth_stats.rx_stats.frames_rxd_sizerange7;
+
+	tx[ETHER_STATS_PKTS_64_OCTETS] = eth_stats.tx_stats.frames_txd_sizerange0;
+	tx[ETHER_STATS_PKTS_65_TO_127_OCTETS] = eth_stats.tx_stats.frames_txd_sizerange1;
+	tx[ETHER_STATS_PKTS_128_TO_255_OCTETS] = eth_stats.tx_stats.frames_txd_sizerange2;
+	tx[ETHER_STATS_PKTS_256_TO_511_OCTETS] = eth_stats.tx_stats.frames_txd_sizerange3;
+	tx[ETHER_STATS_PKTS_512_TO_1023_OCTETS] = eth_stats.tx_stats.frames_txd_sizerange4;
+	tx[ETHER_STATS_PKTS_1024_TO_1518_OCTETS] = eth_stats.tx_stats.frames_txd_sizerange5;
+	tx[ETHER_STATS_PKTS_1519_TO_2047_OCTETS] = eth_stats.tx_stats.frames_txd_sizerange6;
+	tx[ETHER_STATS_PKTS_2048_TO_MAX_OCTETS] = eth_stats.tx_stats.frames_txd_sizerange7;
+
+	return ret;
+}
+
+/* return value need to convert to Mil degree Celsius(1/1000) */
 static int nbl_res_adminq_get_module_temp_special(struct nbl_resource_mgt *res_mgt, u8 eth_id,
-						  enum nbl_module_temp_type type)
+						  enum nbl_hwmon_type type)
 {
 	struct device *dev = NBL_COMMON_TO_DEV(res_mgt->common);
 	struct nbl_eth_info *eth_info = NBL_RES_MGT_TO_ETH_INFO(res_mgt);
@@ -2065,18 +2578,18 @@ static int nbl_res_adminq_get_module_temp_special(struct nbl_resource_mgt *res_m
 	}
 
 	ret = nbl_res_adminq_get_module_eeprom_info(res_mgt, eth_id, I2C_DEV_ADDR_A0,
-						    0, 0, offset, 1, (u8 *)&temp);
+						    turn_page, 0, offset, 1, (u8 *)&temp);
 	if (ret) {
 		dev_err(dev, "eth %d get_module_eeprom_info failed %d\n",
 			eth_info->logic_eth_id[eth_id], ret);
 		return 0;
 	}
 
-	return temp;
+	return temp * 1000;
 }
 
 static int nbl_res_adminq_get_module_temperature(void *priv, u8 eth_id,
-						 enum nbl_module_temp_type type)
+						 enum nbl_hwmon_type type)
 {
 	struct nbl_resource_mgt *res_mgt = (struct nbl_resource_mgt *)priv;
 	struct nbl_eth_info *eth_info = NBL_RES_MGT_TO_ETH_INFO(res_mgt);
@@ -2090,7 +2603,7 @@ static int nbl_res_adminq_get_module_temperature(void *priv, u8 eth_id,
 		return nbl_res_adminq_get_module_temp_common(res_mgt, eth_id, type);
 }
 
-static int nbl_res_adminq_load_p4(void *priv, struct nbl_load_p4_param *p4_param)
+static __maybe_unused int nbl_res_adminq_load_p4(void *priv, struct nbl_load_p4_param *p4_param)
 {
 	struct nbl_resource_mgt *res_mgt = (struct nbl_resource_mgt *)priv;
 	struct nbl_channel_ops *chan_ops = NBL_RES_MGT_TO_CHAN_OPS(res_mgt);
@@ -2123,7 +2636,7 @@ static int nbl_res_adminq_load_p4(void *priv, struct nbl_load_p4_param *p4_param
 	return ret;
 }
 
-static int nbl_res_adminq_load_p4_default(void *priv)
+static __maybe_unused int nbl_res_adminq_load_p4_default(void *priv)
 {
 	struct nbl_resource_mgt *res_mgt = (struct nbl_resource_mgt *)priv;
 	struct nbl_channel_ops *chan_ops = NBL_RES_MGT_TO_CHAN_OPS(res_mgt);
@@ -2139,6 +2652,23 @@ static int nbl_res_adminq_load_p4_default(void *priv)
 			ret, NBL_CHAN_MSG_ADMINQ_LOAD_P4_DEFAULT);
 
 	return ret;
+}
+
+static void nbl_res_adminq_cfg_eth_bond_event(void *priv, bool enable)
+{
+	struct nbl_resource_mgt *res_mgt = (struct nbl_resource_mgt *)priv;
+	struct nbl_common_info *common = NBL_RES_MGT_TO_COMMON(res_mgt);
+	struct nbl_event_callback event_callback = {0};
+
+	event_callback.callback_data = res_mgt;
+	event_callback.callback = nbl_res_adminq_handle_link_state_update;
+
+	if (enable)
+		nbl_event_register(NBL_EVENT_LINK_STATE_UPDATE, &event_callback,
+				   NBL_COMMON_TO_VSI_ID(common), NBL_COMMON_TO_BOARD_ID(common));
+	else
+		nbl_event_unregister(NBL_EVENT_LINK_STATE_UPDATE, &event_callback,
+				     NBL_COMMON_TO_VSI_ID(common), NBL_COMMON_TO_BOARD_ID(common));
 }
 
 /* NBL_ADMINQ_SET_OPS(ops_name, func)
@@ -2159,7 +2689,11 @@ do {												\
 	NBL_ADMINQ_SET_OPS(check_fw_reset, nbl_res_adminq_check_fw_reset);			\
 	NBL_ADMINQ_SET_OPS(get_port_attributes, nbl_res_adminq_get_port_attributes);		\
 	NBL_ADMINQ_SET_OPS(update_ring_num, nbl_res_adminq_update_ring_num);			\
+	NBL_ADMINQ_SET_OPS(update_rdma_cap, nbl_res_adminq_update_rdma_cap);			\
+	NBL_ADMINQ_SET_OPS(update_rdma_mem_type, nbl_res_adminq_update_rdma_mem_type);		\
+	NBL_ADMINQ_SET_OPS(get_rdma_cap_num, nbl_res_adminq_get_rdma_cap_num);			\
 	NBL_ADMINQ_SET_OPS(set_ring_num, nbl_res_adminq_set_ring_num);				\
+	NBL_ADMINQ_SET_OPS(init_port, nbl_res_adminq_init_port);				\
 	NBL_ADMINQ_SET_OPS(enable_port, nbl_res_adminq_enable_port);				\
 	NBL_ADMINQ_SET_OPS(recv_port_notify, nbl_res_adminq_recv_port_notify);			\
 	NBL_ADMINQ_SET_OPS(set_port_advertising, nbl_res_adminq_set_port_advertising);		\
@@ -2167,16 +2701,26 @@ do {												\
 	NBL_ADMINQ_SET_OPS(get_module_info, nbl_res_adminq_get_module_info);			\
 	NBL_ADMINQ_SET_OPS(get_module_eeprom, nbl_res_adminq_get_module_eeprom);		\
 	NBL_ADMINQ_SET_OPS(get_link_state, nbl_res_adminq_get_link_state);			\
+	NBL_ADMINQ_SET_OPS(get_link_down_count, nbl_res_adminq_get_link_down_count);		\
+	NBL_ADMINQ_SET_OPS(get_link_status_opcode, nbl_res_adminq_get_link_status_opcode);	\
 	NBL_ADMINQ_SET_OPS(set_eth_mac_addr, nbl_res_adminq_set_eth_mac_addr);			\
+	NBL_ADMINQ_SET_OPS(get_eth_ctrl_stats, nbl_res_adminq_get_eth_ctrl_stats);		\
 	NBL_ADMINQ_SET_OPS(ctrl_port_led, nbl_res_adminq_ctrl_port_led);			\
+	NBL_ADMINQ_SET_OPS(set_wol, nbl_res_adminq_set_wol);					\
 	NBL_ADMINQ_SET_OPS(nway_reset, nbl_res_adminq_nway_reset);				\
+	NBL_ADMINQ_SET_OPS(set_eth_pfc, nbl_res_adminq_set_eth_pfc);				\
 	NBL_ADMINQ_SET_OPS(passthrough_fw_cmd, nbl_res_adminq_passthrough);			\
 	NBL_ADMINQ_SET_OPS(get_private_stat_len, nbl_res_adminq_get_private_stat_len);		\
 	NBL_ADMINQ_SET_OPS(get_private_stat_data, nbl_res_adminq_get_private_stat_data);	\
+	NBL_ADMINQ_SET_OPS(get_pause_stats, nbl_res_adminq_get_pause_stats);			\
+	NBL_ADMINQ_SET_OPS(get_eth_mac_stats, nbl_res_adminq_get_eth_mac_stats);		\
 	NBL_ADMINQ_SET_OPS(fill_private_stat_strings, nbl_res_adminq_fill_private_stat_strings);\
 	NBL_ADMINQ_SET_OPS(get_module_temperature, nbl_res_adminq_get_module_temperature);	\
-	NBL_ADMINQ_SET_OPS(load_p4, nbl_res_adminq_load_p4);					\
 	NBL_ADMINQ_SET_OPS(load_p4_default, nbl_res_adminq_load_p4_default);			\
+	NBL_ADMINQ_SET_OPS(cfg_eth_bond_event, nbl_res_adminq_cfg_eth_bond_event);		\
+	NBL_ADMINQ_SET_OPS(get_eth_abnormal_stats, nbl_res_adminq_get_eth_abnormal_stats);	\
+	NBL_ADMINQ_SET_OPS(get_fec_stats, nbl_res_adminq_get_fec_stats);			\
+	NBL_ADMINQ_SET_OPS(get_rmon_stats, nbl_res_adminq_get_rmon_stats);			\
 } while (0)
 
 /* Structure starts here, adding an op should not modify anything below */
@@ -2212,14 +2756,32 @@ static int nbl_res_adminq_chan_notify_link_state_req(struct nbl_resource_mgt *re
 	return chan_ops->send_msg(NBL_RES_MGT_TO_CHAN_PRIV(res_mgt), &chan_send);
 }
 
+static int nbl_res_adminq_notify_eth_rep_link_req(struct nbl_resource_mgt *res_mgt,
+						  u16 fid, u8 eth_id, u8 link_state)
+{
+	struct nbl_channel_ops *chan_ops = NBL_RES_MGT_TO_CHAN_OPS(res_mgt);
+	struct nbl_chan_param_eth_rep_notify_link_state param = {0};
+	struct nbl_chan_send_info chan_send;
+
+	chan_ops = NBL_RES_MGT_TO_CHAN_OPS(res_mgt);
+
+	param.eth_id = eth_id;
+	param.link_state = link_state;
+	NBL_CHAN_SEND(chan_send, fid, NBL_CHAN_MSG_NOTIFY_ETH_REP_LINK_STATE, &param, sizeof(param),
+		      NULL, 0, 0);
+	return chan_ops->send_msg(NBL_RES_MGT_TO_CHAN_PRIV(res_mgt), &chan_send);
+}
+
 static void nbl_res_adminq_notify_link_state(struct nbl_resource_mgt *res_mgt, u8 eth_id,
 					     u8 link_state)
 {
 	struct nbl_eth_info *eth_info = NBL_RES_MGT_TO_ETH_INFO(res_mgt);
 	struct nbl_queue_mgt *queue_mgt = NBL_RES_MGT_TO_QUEUE_MGT(res_mgt);
+	struct nbl_resource_mgt_leonis *res_mgt_leonis = (struct nbl_resource_mgt_leonis *)res_mgt;
+	struct nbl_pmd_status *pmd_status = &res_mgt_leonis->pmd_status;
 	struct nbl_sriov_info *sriov_info;
 	struct nbl_queue_info *queue_info;
-	u16 pf_fid = 0, vf_fid = 0, link_speed = 0;
+	u16 pf_fid = 0, vf_fid = 0, bond_link_state = 0, link_speed = 0;
 	int i = 0, j = 0;
 
 	for (i = 0; i < NBL_RES_MGT_TO_PF_NUM(res_mgt); i++) {
@@ -2238,6 +2800,11 @@ static void nbl_res_adminq_notify_link_state(struct nbl_resource_mgt *res_mgt, u
 								  link_state,
 								  eth_info->link_speed[eth_id]);
 
+		/* Use bond_link_state for vfs.
+		 * If there is no bond, then it will equals to link_state.
+		 */
+		bond_link_state = nbl_res_adminq_get_bond_link_state(res_mgt, eth_id);
+
 		/* send eth's link state to pf's all vf */
 		for (j = 0; j < sriov_info->num_vfs; j++) {
 			vf_fid = sriov_info->start_vf_func_id + j;
@@ -2245,10 +2812,16 @@ static void nbl_res_adminq_notify_link_state(struct nbl_resource_mgt *res_mgt, u
 			if (queue_info->num_txrx_queues) {
 				link_speed = eth_info->link_speed[eth_id];
 				nbl_res_adminq_chan_notify_link_state_req(res_mgt, vf_fid,
-									  link_state,
+									  bond_link_state,
 									  link_speed);
 			}
 		}
+	}
+
+	if (pmd_status->upcall_port_info.upcall_port_active) {
+		nbl_res_adminq_notify_eth_rep_link_req(res_mgt,
+						       pmd_status->upcall_port_info.func_id,
+						       eth_id, link_state);
 	}
 }
 
@@ -2260,59 +2833,21 @@ static void nbl_res_adminq_eth_task(struct work_struct *work)
 	struct nbl_eth_info *eth_info = NBL_RES_MGT_TO_ETH_INFO(res_mgt);
 	u8 eth_id = 0;
 	u8 port_max_rate = 0;
-	u32 port_max_speed = 0;
-	u8 active_fec = 0;
-	u8 autoneg = 0;
 
 	for (eth_id = 0 ; eth_id < NBL_MAX_ETHERNET; eth_id++) {
 		if (adminq_mgt->module_inplace_changed[eth_id]) {
 			/* module not-inplace, transitions to inplace status */
-			/* read module register and set speed, */
-			/* set fec mode: 10G default OFF, 25G default RS */
+			/* read module register */
 			port_max_rate = nbl_res_adminq_get_module_bitrate(res_mgt, eth_id);
-			switch (port_max_rate) {
-			case NBL_PORT_MAX_RATE_1G:
-				port_max_speed = SPEED_1000;
-				active_fec = NBL_ETH_1G_DEFAULT_FEC_MODE;
-				break;
-			case NBL_PORT_MAX_RATE_10G:
-				port_max_speed = SPEED_10000;
-				active_fec = NBL_ETH_10G_DEFAULT_FEC_MODE;
-				break;
-			case NBL_PORT_MAX_RATE_25G:
-				port_max_speed = SPEED_25000;
-				active_fec = NBL_ETH_25G_DEFAULT_FEC_MODE;
-				break;
-			case NBL_PORT_MAX_RATE_100G:
-			case NBL_PORT_MAX_RATE_100G_PAM4:
-				port_max_speed = SPEED_100000;
-				active_fec = NBL_ETH_100G_DEFAULT_FEC_MODE;
-				break;
-			default:
-				/* default set 25G */
-				port_max_speed = SPEED_25000;
-				active_fec = NBL_ETH_25G_DEFAULT_FEC_MODE;
-				break;
-			}
 
 			eth_info->port_max_rate[eth_id] = port_max_rate;
 			eth_info->port_type[eth_id] = nbl_res_adminq_get_port_type(res_mgt, eth_id);
+			eth_info->module_repluged[eth_id] = 1;
 			/* cooper support auto-negotiation */
-			if (eth_info->port_type[eth_id] == NBL_PORT_TYPE_COPPER) {
-				if (port_max_speed >= SPEED_25000)
-					autoneg = 1;
-				else
-					autoneg = 0; /* disable autoneg when 10G module pluged */
-
+			if (eth_info->port_type[eth_id] == NBL_PORT_TYPE_COPPER)
 				eth_info->port_caps[eth_id] |= BIT(NBL_PORT_CAP_AUTONEG);
-			} else {
-				autoneg = 0;
+			else
 				eth_info->port_caps[eth_id] &= ~BIT_MASK(NBL_PORT_CAP_AUTONEG);
-			}
-
-			/* when optical module plug in, we must set default fec */
-			nbl_res_adminq_set_eth_speed(res_mgt, eth_id, port_max_speed,
-						     active_fec, autoneg);
 
 			adminq_mgt->module_inplace_changed[eth_id] = 0;
 		}
@@ -2348,10 +2883,9 @@ static int nbl_res_adminq_setup_cmd_filter(struct nbl_resource_mgt *res_mgt)
 static void nbl_res_adminq_remove_cmd_filter(struct nbl_resource_mgt *res_mgt)
 {
 	struct nbl_adminq_mgt *adminq_mgt = NBL_RES_MGT_TO_ADMINQ_MGT(res_mgt);
-	struct nbl_hash_tbl_del_key del_key = {0};
 
 	if (adminq_mgt->cmd_filter)
-		nbl_common_remove_hash_table(adminq_mgt->cmd_filter, &del_key);
+		nbl_common_remove_hash_table(adminq_mgt->cmd_filter, NULL);
 
 	adminq_mgt->cmd_filter = NULL;
 }

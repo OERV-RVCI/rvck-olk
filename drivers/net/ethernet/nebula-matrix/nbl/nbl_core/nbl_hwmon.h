@@ -9,8 +9,6 @@
 
 #include "nbl_dev.h"
 
-#define NBL_HWMON_TEMP_MAP	0x000001FF
-#define NBL_HWMON_TEMP_UNIT	1000
 #define NBL_HWMON_TEMP_OFF	16
 #define NBL_HWMON_VISIBLE	0444
 #define NBL_HWMON_CHIP_SENSOR	0

@@ -8,13 +8,13 @@
 #define _NBL_CORE_H_
 
 #include "nbl_product_base.h"
-#include "nbl_def_common.h"
+#include "nbl_def_channel.h"
 #include "nbl_def_phy.h"
 #include "nbl_def_resource.h"
 #include "nbl_def_dispatch.h"
 #include "nbl_def_service.h"
 #include "nbl_def_dev.h"
-#include "nbl_def_channel.h"
+#include "nbl_def_common.h"
 
 #define NBL_ADAPTER_TO_PDEV(adapter)		((adapter)->pdev)
 #define NBL_ADAPTER_TO_DEV(adapter)		(&((adapter)->pdev->dev))
@@ -65,6 +65,7 @@
 #define NBL_CAP_IS_USER(val)			NBL_CAP_TEST_BIT(val, NBL_CAP_HAS_USER_BIT)
 #define NBL_CAP_IS_GRC(val)			NBL_CAP_TEST_BIT(val, NBL_CAP_HAS_GRC_BIT)
 #define NBL_CAP_IS_BLK(val)			NBL_CAP_TEST_BIT(val, NBL_CAP_IS_BLK_BIT)
+#define NBL_CAP_IS_OCP(val)			NBL_CAP_TEST_BIT(val, NBL_CAP_IS_OCP_BIT)
 #define NBL_CAP_IS_DPU_HOST(val)		({ typeof(val) _val = (val);			\
 						!NBL_CAP_TEST_BIT(_val, NBL_CAP_IS_NIC_BIT) &&	\
 						NBL_CAP_TEST_BIT(_val, NBL_CAP_DPU_IS_HOST_BIT); })
@@ -89,6 +90,7 @@ enum {
 	NBL_CAP_IS_BLK_BIT,
 	NBL_CAP_HAS_USER_BIT,
 	NBL_CAP_HAS_GRC_BIT,
+	NBL_CAP_IS_OCP_BIT,
 	NBL_CAP_HAS_FACTORY_CTRL_BIT,
 };
 
@@ -101,6 +103,8 @@ enum nbl_adapter_state {
 	NBL_RUNNING,
 	NBL_TESTING,
 	NBL_USER,
+	NBL_FATAL_ERR,
+	NBL_XDP,
 	NBL_STATE_NBITS
 };
 
@@ -140,15 +144,29 @@ struct nbl_adapter {
 	DECLARE_BITMAP(state, NBL_STATE_NBITS);
 };
 
+struct nbl_rep_data {
+	struct net_device *netdev;
+	struct nbl_netdev_name_attr dev_name_attr;
+	struct u64_stats_sync rep_syncp;
+	u64 rx_packets;
+	u64 rx_bytes;
+	u64 tx_packets;
+	u64 tx_bytes;
+	u16 rep_vsi_id;
+	u8  base_queue_id;
+	u8  rep_queue_num;
+};
+
 struct nbl_netdev_priv {
 	struct nbl_adapter *adapter;
+	struct nbl_rep_data *rep;
 	struct net_device *netdev;
 	u16 tx_queue_num;
 	u16 rx_queue_num;
 	u16 queue_size;
 	/* default traffic destination in kernel/dpdk/coexist scene */
-	u16 default_vsi_index;
-	u16 default_vsi_id;
+	u16 data_vsi;
+	u16 user_vsi;
 	s64 last_st_time;
 };
 
@@ -164,6 +182,13 @@ struct nbl_devlink_priv {
 	void *dev_mgt;
 };
 
+struct nbl_tc_insts_info {
+	int (*send_cmdq)(void *priv, const void *hdr, void *cmd);
+	void *chan_mgt;
+	void *tc_flow_mgt;
+	int locked;
+};
+
 struct nbl_software_tool_id_entry {
 	struct list_head node;
 	u16 bus;
@@ -171,7 +196,7 @@ struct nbl_software_tool_id_entry {
 	u8 refcount;
 };
 
-#define NBL_ST_MAX_DEVICE_NUM			64
+#define NBL_ST_MAX_DEVICE_NUM			96
 struct nbl_software_tool_table {
 	DECLARE_BITMAP(devid, NBL_ST_MAX_DEVICE_NUM);
 	int major;
@@ -179,10 +204,22 @@ struct nbl_software_tool_table {
 	struct class *cls;
 };
 
+extern spinlock_t nbl_tc_flow_inst_lock;
+
+#define NBL_TC_FLOW_INST_COUNT			(NBL_DRIVER_DEV_MAX)
+
 struct nbl_adapter *nbl_core_init(struct pci_dev *pdev, struct nbl_init_param *param);
 void nbl_core_remove(struct nbl_adapter *adapter);
 int nbl_core_start(struct nbl_adapter *adapter, struct nbl_init_param *param);
 void nbl_core_stop(struct nbl_adapter *adapter);
+void nbl_tc_set_cmdq_info(int (*send_cmdq)(void *, const void *, void *),
+			  void *priv, u8 index);
+void nbl_tc_unset_cmdq_info(u8 index);
+void nbl_tc_set_flow_info(void *priv, u8 index);
+void *nbl_tc_get_flow_info(u8 index);
+void nbl_tc_unset_flow_info(u8 index);
+u8 nbl_tc_alloc_inst_id(void);
+int nbl_tc_call_inst_cmdq(u8 inst_id, const void *hdr, void *cmd);
 
 int nbl_st_init(struct nbl_software_tool_table *st_table);
 void nbl_st_remove(struct nbl_software_tool_table *st_table);

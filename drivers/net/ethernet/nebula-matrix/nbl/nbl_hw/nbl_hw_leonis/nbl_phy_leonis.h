@@ -11,7 +11,6 @@
 #include "nbl_hw.h"
 #include "nbl_phy.h"
 
-#define NBL_NOTIFY_DELAY_MIN_TIME_FOR_REGS	200 /* 200us for palladium,3us for s2c */
 #define NBL_NOTIFY_DELAY_MAX_TIME_FOR_REGS	300 /* 300us for palladium,5us for s2c */
 
 #define NBL_DRAIN_WAIT_TIMES			(30000)
@@ -27,18 +26,19 @@
 #define KT_MASK_LEN32_ACTION_INFO		(0x0)
 #define KT_MASK_LEN12_ACTION_INFO		(0xFFFFF000)
 #define NBL_FEM_SEARCH_KEY_LEN			44
+#define NBL_HW_DUMMY_REG			(0x1300904)
 
-#define HT_PORT0_BANK_SEL             (0b01000000)
-#define HT_PORT1_BANK_SEL             (0b00110000)
+#define HT_PORT0_BANK_SEL             (0b01100000)
+#define HT_PORT1_BANK_SEL             (0b00011000)
 #define HT_PORT2_BANK_SEL             (0b00000111)
-#define KT_PORT0_BANK_SEL             (0b11000000)
-#define KT_PORT1_BANK_SEL             (0b00110000)
-#define KT_PORT2_BANK_SEL             (0b00001111)
+#define KT_PORT0_BANK_SEL             (0b11100000)
+#define KT_PORT1_BANK_SEL             (0b00011000)
+#define KT_PORT2_BANK_SEL             (0b00000111)
 #define AT_PORT0_BANK_SEL             (0b000000000000)
-#define AT_PORT1_BANK_SEL             (0b111000000000)
-#define AT_PORT2_BANK_SEL             (0b000111111111)
-#define HT_PORT0_BTM                  1
-#define HT_PORT1_BTM                  3
+#define AT_PORT1_BANK_SEL             (0b111110000000)
+#define AT_PORT2_BANK_SEL             (0b000001111111)
+#define HT_PORT0_BTM                  2
+#define HT_PORT1_BTM                  6
 #define HT_PORT2_BTM                  16
 #define NBL_1BIT                        1
 #define NBL_8BIT                        8
@@ -74,8 +74,8 @@
 
 #define NBL_KT_PHY_L2_DW_LEN				40
 
-#define NBL_ACL_VSI_PF_UPCALL 3
-#define NBL_ACL_ETH_PF_UPCALL 2
+#define NBL_ACL_VSI_PF_UPCALL			9
+#define NBL_ACL_ETH_PF_UPCALL			8
 #define NBL_ACL_INDIRECT_ACCESS_WRITE		(0)
 #define NBL_ACL_INDIRECT_ACCESS_READ		(1)
 #define NBL_ETH_BASE_IDX 8
@@ -91,6 +91,11 @@
 
 #define NBL_ACL_TCAM_DATA_X(t)		(NBL_PPE_ACL_BASE + 0x00000904 + ((t) * 8))
 #define NBL_ACL_TCAM_DATA_Y(t)		(NBL_PPE_ACL_BASE + 0x00000990 + ((t) * 8))
+
+struct nbl_acl_tcam_common_data_u {
+	u8 data[5];
+	u8 rsv[3];
+};
 
 /*  ----------  MCC  ----------  */
 #define NBL_MCC_MODULE	(0x00B44000)
@@ -404,6 +409,8 @@ union nbl_fem_profile_tbl_u {
 #define NBL_LB_PF_CONFIGSPACE_BASE_ADDR		(NBL_LB_PCIEX16_TOP_BASE + 0x00024000)
 #define NBL_LB_PCIEX16_TOP_AHB			(NBL_LB_PCIEX16_TOP_BASE + 0x00000020)
 
+#define NBL_SRIOV_CAPS_OFFSET			(0x140)
+
 /*  --------  MAILBOX BAR2 -----  */
 #define NBL_MAILBOX_NOTIFY_ADDR			(0x00000000)
 #define NBL_MAILBOX_BAR_REG			(0x00000000)
@@ -452,7 +459,7 @@ struct nbl_adminq_qinfo_map_table {
 	u32 devid:5;
 	u32 bus:8;
 	u32 msix_idx:13;
-	u32 msix_idx_vaild:1;
+	u32 msix_idx_valid:1;
 	u32 rsv:2;
 };
 
@@ -476,7 +483,7 @@ struct nbl_mailbox_qinfo_map_table {
 	u32 devid:5;
 	u32 bus:8;
 	u32 msix_idx:13;
-	u32 msix_idx_vaild:1;
+	u32 msix_idx_valid:1;
 	u32 rsv:2;
 };
 
@@ -484,6 +491,7 @@ struct nbl_mailbox_qinfo_map_table {
 #define NBL_PCIE_HOST_K_PF_MASK_REG		(NBL_INTF_HOST_PCIE_BASE + 0x00001004)
 #define NBL_PCIE_HOST_K_PF_FID(pf_id) \
 	(NBL_INTF_HOST_PCIE_BASE + 0x0000106C + 4 * (pf_id))
+#define NBL_PCIE_HOST_TL_CFG_BUSDEV		(NBL_INTF_HOST_PCIE_BASE + 0x11040)
 
 /*  --------  HOST_PADPT  --------  */
 #define NBL_HOST_PADPT_HOST_CFG_FC_PD_DN	(NBL_INTF_HOST_PADPT_BASE + 0x00000160)
@@ -675,11 +683,13 @@ struct nbl_ped_hw_edit_profile_cfg {
 #define NBL_LR_LEONIS_NET_SHAPING_DPETH		600
 #define NBL_LR_LEONIS_NET_BUCKET_DEPTH		9600
 
-#define NBL_SHAPING_DPORT_25G_RATE		0x601E
-#define NBL_SHAPING_DPORT_HALF_25G_RATE		0x300F
+#define NBL_SHAPING_DPORT_25G_RATE		0x61A8
+#define NBL_SHAPING_DPORT_HALF_25G_RATE		0x30D4
 
 #define NBL_SHAPING_DPORT_100G_RATE		0x1A400
 #define NBL_SHAPING_DPORT_HALF_100G_RATE	0xD200
+
+#define NBL_UCAR_MAX_BUCKET_DEPTH		524287
 
 #define NBL_DSTORE_DROP_XOFF_TH			0xC8
 #define NBL_DSTORE_DROP_XON_TH			0x64
@@ -726,6 +736,19 @@ struct dsch_vn_sha2net_map_tbl {
 struct dsch_vn_net2sha_map_tbl {
 	u32 vld:1;
 	u32 reserve:31;
+};
+
+#define NBL_NET_SHAPING_RDMA_BASE_ID (448)
+
+struct dsch_rdma_net2sha_map_tbl {
+	u32 net_shaping_id:10;
+	u32 reserve:21;
+	u32 vld:1;
+};
+
+struct dsch_rdma_sha2net_map_tbl {
+	u32 rdma_vf_id:31;
+	u32 vld:1;
 };
 
 struct dsch_psha_en {
@@ -901,6 +924,8 @@ struct nbl_dvn_stat_cnt {
 #define NBL_DVN_PKT_DIF_ERR_CNT			(NBL_DP_DVN_BASE + 0x00000034)
 #define NBL_DVN_ERR_QUEUE_ID_GET		(NBL_DP_DVN_BASE + 0x0000040C)
 #define NBL_DVN_BACK_PRESSURE_MASK		(NBL_DP_DVN_BASE + 0x00000464)
+#define NBL_DVN_DESCRD_L2_UNAVAIL_CNT		(NBL_DP_DVN_BASE + 0x00000A1C)
+#define NBL_DVN_DESCRD_L2_NOAVAIL_CNT		(NBL_DP_DVN_BASE + 0x00000A20)
 
 #define DEFAULT_DVN_DESCREQ_NUMCFG		(0x00080014)
 #define DEFAULT_DVN_100G_DESCREQ_NUMCFG		(0x00080020)
@@ -1030,9 +1055,17 @@ struct dvn_back_pressure_mask {
 #define NBL_UVN_QUEUE_ERR_MASK			(NBL_DP_UVN_BASE + 0x00000224)
 #define NBL_UVN_ECPU_QUEUE_NUM			(NBL_DP_UVN_BASE + 0x0000023C)
 #define NBL_UVN_DESC_WR_TIMEOUT			(NBL_DP_UVN_BASE + 0x00000214)
+#define NBL_UVN_DIF_DELAY_REQ			(NBL_DP_UVN_BASE + 0x000010D0)
+#define NBL_UVN_DIF_DELAY_TIME			(NBL_DP_UVN_BASE + 0x000010D4)
+#define NBL_UVN_DIF_DELAY_MAX			(NBL_DP_UVN_BASE + 0x000010D8)
+#define NBL_UVN_DESC_PRE_DESC_REQ_NULL		(NBL_DP_UVN_BASE + 0x000012C8)
+#define NBL_UVN_DESC_PRE_DESC_REQ_LACK		(NBL_DP_UVN_BASE + 0x000012CC)
 #define NBL_UVN_DESC_RD_ENTRY			(NBL_DP_UVN_BASE + 0x000012D0)
+#define NBL_UVN_DESC_RD_DROP_DESC_LACK		(NBL_DP_UVN_BASE + 0x000012E0)
 #define NBL_UVN_DIF_REQ_RO_FLAG			(NBL_DP_UVN_BASE + 0x00000250)
+#define NBL_UVN_DESC_PREFETCH_INIT		(NBL_DP_UVN_BASE + 0x00000204)
 #define NBL_UVN_DESC_WR_TIMEOUT_4US		(0x960)
+#define NBL_UVN_DESC_PREFETCH_NUM		(4)
 
 #define NBL_UVN_INT_QUEUE_ERR			(5)
 
@@ -1126,16 +1159,27 @@ struct uvn_queue_err_mask {
 	u32 rsv1:26;
 };
 
+struct uvn_desc_prefetch_init {
+	u32 num:8;
+	u32 rsv1:8;
+	u32 sel:1;
+	u32 rsv:15;
+};
+
 /*  --------  USTORE  --------  */
 #define NBL_USTORE_PKT_LEN_ADDR			(NBL_DP_USTORE_BASE + 0x00000108)
 #define NBL_USTORE_PORT_FC_TH_REG_ARR(port_id) \
 	(NBL_DP_USTORE_BASE + 0x00000134 + (port_id) * sizeof(struct nbl_ustore_port_fc_th))
-
 #define NBL_USTORE_COS_FC_TH_REG_ARR(cos_id) \
 	(NBL_DP_USTORE_BASE + 0x00000200 + (cos_id) * sizeof(struct nbl_ustore_cos_fc_th))
-
 #define NBL_USTORE_PORT_DROP_TH_REG_ARR(port_id) \
 	(NBL_DP_USTORE_BASE + 0x00000150 + (port_id) * sizeof(struct nbl_ustore_port_drop_th))
+#define NBL_USTORE_BUF_TOTAL_DROP_PKT		(NBL_DP_USTORE_BASE + 0x000010A8)
+#define NBL_USTORE_BUF_TOTAL_TRUN_PKT		(NBL_DP_USTORE_BASE + 0x000010AC)
+#define NBL_USTORE_BUF_PORT_DROP_PKT(eth_id) \
+	(NBL_DP_USTORE_BASE + 0x00002500 + (eth_id) * sizeof(u32))
+#define NBL_USTORE_BUF_PORT_TRUN_PKT(eth_id) \
+	(NBL_DP_USTORE_BASE + 0x00002540 + (eth_id) * sizeof(u32))
 
 #define NBL_USTORE_SIGNLE_ETH_DROP_TH		0xC80
 #define NBL_USTORE_DUAL_ETH_DROP_TH		0x640
@@ -1171,6 +1215,8 @@ struct nbl_ustore_cos_fc_th {
 	u32 fc_en:1;
 };
 
+#define NBL_MAX_USTORE_COS_FC_TH (4080)
+
 /* USTORE port_drop_th */
 struct nbl_ustore_port_drop_th {
 	u32 disc_th:12;
@@ -1181,11 +1227,33 @@ struct nbl_ustore_port_drop_th {
 /*  ----------  UL4S  ----------  */
 #define NBL_UL4S_SCH_PAD_ADDR			(NBL_DP_UL4S_BASE + 0x000006c4)
 
-/* UL4S UL4S_sch_pad */
-struct UL4S_sch_pad {
+/* UL4S ul4s_sch_pad */
+struct ul4s_sch_pad {
 	u32 en:1;
 	u32 clr:1;
 	u32 rsv:30;
+};
+
+/*  ---------  DSTAT  ---------  */
+#define NBL_DSTAT_VSI_STAT(vsi_id)	\
+	(NBL_DP_DSTAT_BASE + 0x00008000 + (vsi_id) * sizeof(struct nbl_dstat_vsi_stat))
+
+struct nbl_dstat_vsi_stat {
+	u32 fwd_byte_cnt_low;
+	u32 fwd_byte_cnt_high;
+	u32 fwd_pkt_cnt_low;
+	u32 fwd_pkt_cnt_high;
+};
+
+/*  ---------  USTAT  ---------  */
+#define NBL_USTAT_VSI_STAT(vsi_id)	\
+	(NBL_DP_USTAT_BASE + 0x00008000 + (vsi_id) * sizeof(struct nbl_ustat_vsi_stat))
+
+struct nbl_ustat_vsi_stat {
+	u32 fwd_byte_cnt_low;
+	u32 fwd_byte_cnt_high;
+	u32 fwd_pkt_cnt_low;
+	u32 fwd_pkt_cnt_high;
 };
 
 /*  ----------  IPRO  ----------  */
@@ -1219,7 +1287,7 @@ struct nbl_ipro_dn_src_port_tbl {
 	u32 mirror_id:4;
 	u32 vlan_layer_num_1:2;
 	u32 phy_flow:1;
-	u32 not_used_0:4;
+	u32 mtu_sel:4;
 	u32 addr_check_en:1;
 	u32 smac_low:16;
 	u32 smac_high;
@@ -1256,6 +1324,11 @@ struct nbl_ipro_upsport_tbl {
 	u32 car_pr:2;
 	u32 car_id:10;
 	u32 rsv:1;
+};
+
+struct nbl_ipro_mtu_sel {
+	u32 mtu_1:16;            /* [15:0] Default:0x0 RW */
+	u32 mtu_0:16;            /* [31:16] Default:0x0 RW */
 };
 
 /*  ----------  EPRO  ----------  */
@@ -1522,8 +1595,30 @@ struct nbl_dqm_rxmac_tx_cos_bp_en_cfg {
 	u32 eth3:8;
 };
 
-#define NBL_UQM_RX_COS_BP_EN		(NBL_DP_UQM_BASE + 0x00000614)
-#define NBL_UQM_TX_COS_BP_EN		(NBL_DP_UQM_BASE + 0x00000604)
+#define NBL_UQM_QUE_TYPE			(NBL_DP_UQM_BASE + 0x0000013c)
+#define NBL_UQM_RX_COS_BP_EN			(NBL_DP_UQM_BASE + 0x00000614)
+#define NBL_UQM_TX_COS_BP_EN			(NBL_DP_UQM_BASE + 0x00000604)
+
+#define NBL_UQM_DROP_PKT_CNT			(NBL_DP_UQM_BASE + 0x000009C0)
+#define NBL_UQM_DROP_PKT_SLICE_CNT		(NBL_DP_UQM_BASE + 0x000009C4)
+#define NBL_UQM_DROP_PKT_LEN_ADD_CNT		(NBL_DP_UQM_BASE + 0x000009C8)
+#define NBL_UQM_DROP_HEAD_PNTR_ADD_CNT		(NBL_DP_UQM_BASE + 0x000009CC)
+#define NBL_UQM_DROP_WEIGHT_ADD_CNT		(NBL_DP_UQM_BASE + 0x000009D0)
+#define NBL_UQM_PORT_DROP_PKT_CNT		(NBL_DP_UQM_BASE + 0x000009D4)
+#define NBL_UQM_PORT_DROP_PKT_SLICE_CNT		(NBL_DP_UQM_BASE + 0x000009F4)
+#define NBL_UQM_PORT_DROP_PKT_LEN_ADD_CNT	(NBL_DP_UQM_BASE + 0x00000A14)
+#define NBL_UQM_PORT_DROP_HEAD_PNTR_ADD_CNT	(NBL_DP_UQM_BASE + 0x00000A34)
+#define NBL_UQM_PORT_DROP_WEIGHT_ADD_CNT	(NBL_DP_UQM_BASE + 0x00000A54)
+#define NBL_UQM_FWD_DROP_CNT			(NBL_DP_UQM_BASE + 0x00000A80)
+#define NBL_UQM_DPORT_DROP_CNT			(NBL_DP_UQM_BASE + 0x00000B74)
+
+#define NBL_UQM_PORT_DROP_DEPTH			6
+#define NBL_UQM_DPORT_DROP_DEPTH		16
+
+struct nbl_uqm_que_type {
+	u32 bp_drop:1;
+	u32 rsv:31;
+};
 
 /* UQM rx_cos_bp_en */
 struct nbl_uqm_rx_cos_bp_en_cfg {
@@ -1560,7 +1655,7 @@ struct nbl_uqm_tx_port_bp_en_cfg {
 
 /* dl4s */
 #define NBL_DL4S_KEY_SALT(_i)		(NBL_DP_DL4S_BASE + 0x00010000 + (_i) * 64)
-/* UL4S */
+/* ul4s */
 #define NBL_UL4S_SYNC_TRIG		(NBL_DP_UL4S_BASE + 0x00000700)
 #define NBL_UL4S_SYNC_SID		(NBL_DP_UL4S_BASE + 0x00000704)
 #define NBL_UL4S_SYNC_TCP_SN		(NBL_DP_UL4S_BASE + 0x00000710)
@@ -1887,6 +1982,8 @@ union nbl_ipsec_lifetime_diff {
 #define NBL_TOP_CTRL_MODULE		(0x01300000)
 #define NBL_TOP_CTRL_INT_STATUS		(NBL_TOP_CTRL_MODULE + 0X0000)
 #define NBL_TOP_CTRL_INT_MASK		(NBL_TOP_CTRL_MODULE + 0X0004)
+#define NBL_TOP_CTRL_LB_CLK		(NBL_TOP_CTRL_MODULE + 0X0100)
+#define NBL_TOP_CTRL_LB_RST		(NBL_TOP_CTRL_MODULE + 0X0104)
 #define NBL_TOP_CTRL_TVSENSOR0		(NBL_TOP_CTRL_MODULE + 0X0254)
 #define NBL_TOP_CTRL_SOFT_DEF0		(NBL_TOP_CTRL_MODULE + 0x0430)
 #define NBL_TOP_CTRL_SOFT_DEF1		(NBL_TOP_CTRL_MODULE + 0x0434)
@@ -1899,10 +1996,14 @@ union nbl_ipsec_lifetime_diff {
 
 #define NBL_FW_HEARTBEAT_PONG		NBL_TOP_CTRL_SOFT_DEF1
 
-#define NBL_PP_NUM				(3)
-#define NBL_PP_TYPE_0				(0)
-#define NBL_PP_TYPE_1				(1)
-#define NBL_PP_TYPE_2				(2)
+#define NBL_TOP_CTRL_RDMA_LB_RST	BIT(10)
+#define NBL_TOP_CTRL_RDMA_LB_CLK	BIT(10)
+
+/* temperature threshold1 */
+#define NBL_LEONIS_TEMP_MAX			(105)
+/* temperature threshold2 */
+#define NBL_LEONIS_TEMP_CRIT			(115)
+
 #define NBL_ACT_DATA_BITS			(16)
 
 #define NBL_CMDQ_DIF_MODE_VALUE			(2)
@@ -1944,7 +2045,7 @@ union nbl_ipsec_lifetime_diff {
 #define NBL_CMDQ_HI_DWORD(x)				((u32)(((x) >> 32) & 0xFFFFFFFF))
 #define NBL_CMDQ_LO_DWORD(x)				((u32)(x) & 0xFFFFFFFF)
 #define NBL_FEM_INIT_START_KERN			(0xFE)
-#define NBL_FEM_INIT_START_VALUE		(0x7E)
+#define NBL_FEM_INIT_START_VALUE		(0x3E)
 #define NBL_PED_VSI_TYPE_ETH_BASE		(1027)
 #define NBL_DPED_VLAN_TYPE_PORT_NUM		(1031)
 #define NBL_CHAN_REG_MAX_LEN			(32)
@@ -1990,11 +2091,21 @@ union nbl_ipsec_lifetime_diff {
 #define NBL_DSCH_VN_NET2SHA_MAP_TBL_REG(r) (NBL_DSCH_VN_NET2SHA_MAP_TBL_ADDR + \
 		(NBL_DSCH_VN_NET2SHA_MAP_TBL_DWLEN * 4) * (r))
 
+#define NBL_DSCH_RDMA_SHA2NET_MAP_TBL_ADDR (0x49c000)
+#define NBL_DSCH_RDMA_SHA2NET_MAP_TBL_DWLEN (1)
+#define NBL_DSCH_RDMA_SHA2NET_MAP_TBL_REG(r) (NBL_DSCH_RDMA_SHA2NET_MAP_TBL_ADDR + \
+		(NBL_DSCH_RDMA_SHA2NET_MAP_TBL_DWLEN * 4) * (r))
+#define NBL_DSCH_RDMA_NET2SHA_MAP_TBL_ADDR (0x494000)
+#define NBL_DSCH_RDMA_NET2SHA_MAP_TBL_DWLEN (1)
+#define NBL_DSCH_RDMA_NET2SHA_MAP_TBL_REG(r) (NBL_DSCH_RDMA_NET2SHA_MAP_TBL_ADDR + \
+		(NBL_DSCH_RDMA_NET2SHA_MAP_TBL_DWLEN * 4) * (r))
+
 /* Mailbox bar phy register offset begin */
 #define NBL_FW_HEARTBEAT_PING			0x84
 #define NBL_FW_BOARD_CONFIG			0x200
 #define NBL_FW_BOARD_DW3_OFFSET			(NBL_FW_BOARD_CONFIG + 12)
 #define NBL_FW_BOARD_DW6_OFFSET			(NBL_FW_BOARD_CONFIG + 24)
+#define NBL_ETH_REP_INFO_BASE			(1024)
 
 /* Mailbox bar phy register offset end */
 
@@ -2008,14 +2119,6 @@ enum nbl_ethdev_repr_flag {
 enum nbl_ped_vlan_type_e {
 	INNER_VLAN_TYPE,
 	OUTER_VLAN_TYPE,
-};
-
-enum nbl_eth_rep_id {
-	ETH_NET_REP_ID_0 = 2048,
-	ETH_NET_REP_ID_1,
-	ETH_NET_REP_ID_2,
-	ETH_NET_REP_ID_3,
-	ETH_NET_REP_ID_MAX
 };
 
 enum nbl_ped_vlan_tpid_e {
@@ -2111,61 +2214,14 @@ enum rss_field_type {
 #define NBL_KEY_IP4_L4_RSS_BIT 1
 #define NBL_KEY_IP6_L4_RSS_BIT 2
 
-#define NBL_DPED_L4_CK_CMD_40_ADDR  (0x75c338)
-#define NBL_DPED_L4_CK_CMD_40_DEPTH (1)
-#define NBL_DPED_L4_CK_CMD_40_WIDTH (32)
-#define NBL_DPED_L4_CK_CMD_40_DWLEN (1)
-struct dped_l4_ck_cmd_40 {
-	u32 value:8;             /* [7:0] Default:0x0 RW */
-	u32 len_in_oft:7;        /* [14:8] Default:0x0 RW */
-	u32 len_phid:2;          /* [16:15] Default:0x0 RW */
-	u32 len_vld:1;           /* [17] Default:0x0 RW */
-	u32 data_vld:1;          /* [18] Default:0x0 RW */
-	u32 in_oft:7;            /* [25:19] Default:0x8 RW */
-	u32 phid:2;              /* [27:26] Default:0x3 RW */
-	u32 flag:1;              /* [28] Default:0x0 RW */
-	u32 mode:1;              /* [29] Default:0x1 RW */
-	u32 rsv:1;               /* [30] Default:0x0 RO */
-	u32 en:1;                /* [31] Default:0x0 RW */
-};
-
-#define NBL_DSTORE_D_DPORT_FC_TH_ADDR  (0x704600)
-#define NBL_DSTORE_D_DPORT_FC_TH_DEPTH (5)
-#define NBL_DSTORE_D_DPORT_FC_TH_WIDTH (32)
-#define NBL_DSTORE_D_DPORT_FC_TH_DWLEN (1)
-
-struct dstore_d_dport_fc_th {
-	u32 xoff_th:11;          /* [10:0] Default:200 RW */
-	u32 rsv1:5;              /* [15:11] Default:0x0 RO */
-	u32 xon_th:11;           /* [26:16] Default:100 RW */
-	u32 rsv:3;               /* [29:27] Default:0x0 RO */
-	u32 fc_set:1;            /* [30:30] Default:0x0 RW */
-	u32 fc_en:1;             /* [31:31] Default:0x0 RW */
-};
-
-#define NBL_DSTORE_D_DPORT_FC_TH_REG(r) (NBL_DSTORE_D_DPORT_FC_TH_ADDR + \
-		(NBL_DSTORE_D_DPORT_FC_TH_DWLEN * 4) * (r))
-
-#define NBL_DSTORE_PORT_DROP_TH_ADDR  (0x704150)
-#define NBL_DSTORE_PORT_DROP_TH_DEPTH (6)
-#define NBL_DSTORE_PORT_DROP_TH_WIDTH (32)
-#define NBL_DSTORE_PORT_DROP_TH_DWLEN (1)
-
-struct dstore_port_drop_th {
-	u32 disc_th:10;          /* [9:0] Default:800 RW */
-	u32 rsv:21;              /* [30:10] Default:0x0 RO */
-	u32 en:1;                /* [31] Default:0x1 RW */
-};
-
-#define NBL_DSTORE_PORT_DROP_TH_REG(r) (NBL_DSTORE_PORT_DROP_TH_ADDR + \
-		(NBL_DSTORE_PORT_DROP_TH_DWLEN * 4) * (r))
-
 union nbl_fw_board_cfg_dw3 {
 	struct board_cfg_dw3 {
-		u32 port_typpe:1;
+		u32 port_type:1;
 		u32 port_num:7;
 		u32 port_speed:2;
-		u32 rsv:22;
+		u32 gpio_type:3;
+		u32 p4_version:1; /* 0: low version; 1: high version */
+		u32 rsv:18;
 	} __packed info;
 	u32 data;
 };
@@ -2178,5 +2234,9 @@ union nbl_fw_board_cfg_dw6 {
 	} __packed info;
 	u32 data;
 };
+
+#define NBL_LEONIS_QUIRKS_OFFSET	(0x00000140)
+
+#define NBL_LEONIS_ILLEGAL_REG_VALUE	(0xDEADBEEF)
 
 #endif

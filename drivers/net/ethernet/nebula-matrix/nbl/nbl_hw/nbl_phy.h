@@ -24,7 +24,17 @@ struct nbl_phy_mgt {
 	u32 hw_size;
 	spinlock_t reg_lock;  /* Protect reg access */
 	bool should_lock;
+	u8 resv[3];
+	enum nbl_hw_status hw_status;
 };
+
+struct nbl_phy_ped_tbl {
+	u64 addr:56;
+	u64 addr_len:8;
+};
+
+#define NBL_DELAY_MIN_TIME_FOR_REGS		400 /* 200us for palladium,3us for s2c */
+#define NBL_DELAY_MAX_TIME_FOR_REGS		500 /* 300us for palladium,5us for s2c */
 
 static inline __maybe_unused u32 rd32(u8 __iomem *addr, u64 reg)
 {
@@ -45,6 +55,11 @@ static inline __maybe_unused void nbl_hw_read_regs(struct nbl_phy_mgt *phy_mgt, 
 	if (len % 4)
 		return;
 
+	if (phy_mgt->hw_status) {
+		for (i = 0; i < size; i++)
+			*(u32 *)(data + i * sizeof(u32)) = U32_MAX;
+	}
+
 	if (size > 1 && phy_mgt->should_lock)
 		spin_lock(&phy_mgt->reg_lock);
 
@@ -64,6 +79,9 @@ static inline __maybe_unused void nbl_hw_write_regs(struct nbl_phy_mgt *phy_mgt,
 	if (len % 4)
 		return;
 
+	if (phy_mgt->hw_status)
+		return;
+
 	if (size > 1 && phy_mgt->should_lock)
 		spin_lock(&phy_mgt->reg_lock);
 
@@ -76,14 +94,44 @@ static inline __maybe_unused void nbl_hw_write_regs(struct nbl_phy_mgt *phy_mgt,
 		spin_unlock(&phy_mgt->reg_lock);
 }
 
+static inline __maybe_unused void nbl_hw_write_be_regs(struct nbl_phy_mgt *phy_mgt,
+						       u64 reg, const u8 *data, u32 len)
+{
+	u32 size = len / 4;
+	u32 i = 0;
+	u32 data_le;
+
+	if (len % 4)
+		return;
+
+	if (size > 1 && phy_mgt->should_lock)
+		spin_lock(&phy_mgt->reg_lock);
+
+	for (i = 0; i < size; i++) {
+		data_le = swab32(*(u32 *)(data + i * sizeof(u32)));
+		/* Used for emu, make sure that we won't write too frequently */
+		wr32_barrier(phy_mgt->hw_addr, reg + i * sizeof(u32), data_le);
+	}
+
+	data_le = rd32(phy_mgt->hw_addr, 0x0);
+	if (size > 1 && phy_mgt->should_lock)
+		spin_unlock(&phy_mgt->reg_lock);
+}
+
 static __maybe_unused void nbl_hw_wr32(struct nbl_phy_mgt *phy_mgt, u64 reg, u32 value)
 {
+	if (phy_mgt->hw_status)
+		return;
+
 	/* Used for emu, make sure that we won't write too frequently */
 	wr32_barrier(phy_mgt->hw_addr, reg, value);
 }
 
 static __maybe_unused u32 nbl_hw_rd32(struct nbl_phy_mgt *phy_mgt, u64 reg)
 {
+	if (phy_mgt->hw_status)
+		return U32_MAX;
+
 	return rd32(phy_mgt->hw_addr, reg);
 }
 
@@ -91,12 +139,18 @@ static __maybe_unused void nbl_mbx_wr32(void *priv, u64 reg, u32 value)
 {
 	struct nbl_phy_mgt *phy_mgt = (struct nbl_phy_mgt *)priv;
 
+	if (phy_mgt->hw_status)
+		return;
+
 	writel((value), ((phy_mgt)->mailbox_bar_hw_addr + (reg)));
 }
 
 static __maybe_unused u32 nbl_mbx_rd32(void *priv, u64 reg)
 {
 	struct nbl_phy_mgt *phy_mgt = (struct nbl_phy_mgt *)priv;
+
+	if (phy_mgt->hw_status)
+		return U32_MAX;
 
 	return readl((phy_mgt)->mailbox_bar_hw_addr + (reg));
 }
