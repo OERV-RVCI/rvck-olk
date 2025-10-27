@@ -55,6 +55,7 @@
 #include <linux/delayacct.h>
 #include <linux/cacheinfo.h>
 #include <linux/dynamic_pool.h>
+#include <linux/numa_remote.h>
 #include <asm/div64.h>
 #include "internal.h"
 #include "shuffle.h"
@@ -3341,6 +3342,12 @@ check_alloc_wmark:
 			if (alloc_flags & ALLOC_NO_WATERMARKS)
 				goto try_this_zone;
 
+			if (numa_remote_try_wait_undo_fake_online(zone_to_nid(zone))) {
+				if (zone_watermark_ok(zone, order, mark,
+					ac->highest_zoneidx, alloc_flags))
+					goto try_this_zone;
+			}
+
 			if (!node_reclaim_enabled() ||
 			    !zone_allows_reclaim(ac->preferred_zoneref->zone, zone))
 				continue;
@@ -5299,6 +5306,10 @@ int find_next_best_node(int node, nodemask_t *used_node_mask)
 		if (node_isset(n, *used_node_mask))
 			continue;
 
+		/* Don't fallback to remote node */
+		if (numa_remote_nofallback(n))
+			continue;
+
 		/* Use the distance array to find the distance */
 		val = node_distance(node, n);
 
@@ -6100,9 +6111,13 @@ static void __setup_per_zone_wmarks(void)
 	struct zone *zone;
 	unsigned long flags;
 
-	/* Calculate total number of !ZONE_HIGHMEM and !ZONE_MOVABLE pages */
+	/*
+	 * Calculate total number of !ZONE_HIGHMEM and !ZONE_MOVABLE and
+	 * !ZONE_EXTMEM pages.
+	 */
 	for_each_zone(zone) {
-		if (!is_highmem(zone) && zone_idx(zone) != ZONE_MOVABLE)
+		if (!is_highmem(zone) && zone_idx(zone) != ZONE_MOVABLE
+		    && !zone_is_zone_extmem(zone))
 			lowmem_pages += zone_managed_pages(zone);
 	}
 
@@ -6112,7 +6127,8 @@ static void __setup_per_zone_wmarks(void)
 		spin_lock_irqsave(&zone->lock, flags);
 		tmp = (u64)pages_min * zone_managed_pages(zone);
 		do_div(tmp, lowmem_pages);
-		if (is_highmem(zone) || zone_idx(zone) == ZONE_MOVABLE) {
+		if (is_highmem(zone) || zone_idx(zone) == ZONE_MOVABLE ||
+		    zone_is_zone_extmem(zone)) {
 			/*
 			 * __GFP_HIGH and PF_MEMALLOC allocations usually don't
 			 * need highmem and movable zones pages, so cap pages_min
@@ -6120,7 +6136,7 @@ static void __setup_per_zone_wmarks(void)
 			 *
 			 * The WMARK_HIGH-WMARK_LOW and (WMARK_LOW-WMARK_MIN)
 			 * deltas control async page reclaim, and so should
-			 * not be capped for highmem and movable zones.
+			 * not be capped for highmem, movable and extmem zones.
 			 */
 			unsigned long min_pages;
 
