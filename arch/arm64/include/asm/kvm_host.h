@@ -1328,6 +1328,20 @@ extern unsigned int twedel;
 void kvm_arm_vcpu_power_off(struct kvm_vcpu *vcpu);
 bool kvm_arm_vcpu_stopped(struct kvm_vcpu *vcpu);
 
+static inline u64 *__vm_id_reg(struct kvm_arch *ka, u32 reg)
+{
+	switch (reg) {
+	case sys_reg(3, 0, 0, 1, 0) ... sys_reg(3, 0, 0, 7, 7):
+		return &ka->id_regs[IDREG_IDX(reg)];
+	default:
+		WARN_ON_ONCE(1);
+		return NULL;
+	}
+}
+
+#define kvm_read_vm_id_reg(kvm, reg)					\
+	({ u64 __val = *__vm_id_reg(&(kvm)->arch, reg); __val; })
+
 extern bool force_wfi_trap;
 extern bool kvm_ncsnp_support;
 extern bool kvm_dvmbm_support;

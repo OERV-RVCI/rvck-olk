@@ -395,7 +395,7 @@ static bool trap_loregion(struct kvm_vcpu *vcpu,
 			  struct sys_reg_params *p,
 			  const struct sys_reg_desc *r)
 {
-	u64 val = IDREG(vcpu->kvm, SYS_ID_AA64MMFR1_EL1);
+	u64 val = kvm_read_vm_id_reg(vcpu->kvm, SYS_ID_AA64MMFR1_EL1);
 	u32 sr = reg_to_encoding(r);
 
 	if (!(val & (0xfUL << ID_AA64MMFR1_EL1_LO_SHIFT))) {
@@ -1453,7 +1453,7 @@ static u64 kvm_read_sanitised_id_reg(struct kvm_vcpu *vcpu,
 
 static u64 read_id_reg(const struct kvm_vcpu *vcpu, const struct sys_reg_desc *r)
 {
-	return IDREG(vcpu->kvm, reg_to_encoding(r));
+	return kvm_read_vm_id_reg(vcpu->kvm, reg_to_encoding(r));
 }
 
 static bool is_feature_id_reg(u32 encoding)
@@ -2778,8 +2778,8 @@ static bool trap_dbgdidr(struct kvm_vcpu *vcpu,
 	if (p->is_write) {
 		return ignore_write(vcpu, p);
 	} else {
-		u64 dfr = IDREG(vcpu->kvm, SYS_ID_AA64DFR0_EL1);
-		u64 pfr = IDREG(vcpu->kvm, SYS_ID_AA64PFR0_EL1);
+		u64 dfr = kvm_read_vm_id_reg(vcpu->kvm, SYS_ID_AA64DFR0_EL1);
+		u64 pfr = kvm_read_vm_id_reg(vcpu->kvm, SYS_ID_AA64PFR0_EL1);
 		u32 el3 = !!SYS_FIELD_GET(ID_AA64PFR0_EL1, EL3, pfr);
 
 		p->regval = ((SYS_FIELD_GET(ID_AA64DFR0_EL1, WRPs, dfr) << 28) |

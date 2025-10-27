@@ -96,7 +96,7 @@ void kvm_vcpu_pmu_resync_el0(void);
  * Evaluates as true when emulating PMUv3p5, and false otherwise.
  */
 #define kvm_pmu_is_3p5(vcpu) ({						\
-	u64 val = IDREG(vcpu->kvm, SYS_ID_AA64DFR0_EL1);		\
+	u64 val = kvm_read_vm_id_reg(vcpu->kvm, SYS_ID_AA64DFR0_EL1);		\
 	u8 pmuver = SYS_FIELD_GET(ID_AA64DFR0_EL1, PMUVer, val);	\
 									\
 	pmuver >= ID_AA64DFR0_EL1_PMUVer_V3P5;				\
