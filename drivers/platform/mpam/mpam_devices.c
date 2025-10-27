@@ -114,12 +114,16 @@ static void __mpam_write_reg(struct mpam_msc *msc, u16 reg, u32 val)
 	lockdep_assert_held_once(&msc->part_sel_lock);	\
 	____ret = __mpam_read_reg(msc, MPAMF_##reg);	\
 							\
+	pr_debug("par r: msc %d reg 0x%x val 0x%x\n",	\
+		  msc->id, MPAMF_##reg, ____ret);	\
 	____ret;					\
 })
 
 #define mpam_write_partsel_reg(msc, reg, val)			\
 ({								\
 	lockdep_assert_held_once(&msc->part_sel_lock);		\
+	pr_debug("par w: msc %d reg 0x%x val 0x%lx\n",		\
+		  msc->id, MPAMCFG_##reg, (unsigned long)val);	\
 	__mpam_write_reg(msc, MPAMCFG_##reg, val);		\
 })
 
@@ -130,12 +134,16 @@ static void __mpam_write_reg(struct mpam_msc *msc, u16 reg, u32 val)
 	lockdep_assert_held_once(&msc->mon_sel_lock);	\
 	____ret = __mpam_read_reg(msc, MSMON_##reg);	\
 							\
+	pr_debug("mon r: msc %d reg 0x%x val 0x%x\n",	\
+		  msc->id, MSMON_##reg, ____ret);	\
 	____ret;					\
 })
 
 #define mpam_write_monsel_reg(msc, reg, val)			\
 ({								\
 	lockdep_assert_held_once(&msc->mon_sel_lock);		\
+	pr_debug("mon w: msc %d reg 0x%x val 0x%lx\n",		\
+		  msc->id, MSMON_##reg, (unsigned long)val);	\
 	__mpam_write_reg(msc, MSMON_##reg, val);		\
 })
 
@@ -470,6 +478,9 @@ static int mpam_ris_get_affinity(struct mpam_msc *msc, cpumask_t *affinity,
 	}
 
 	cpumask_and(affinity, affinity, &msc->accessibility);
+
+	pr_debug("comp_id %d msc->id %d affinity %*pb\n",
+		  comp->comp_id, msc->id, cpumask_pr_args(affinity));
 
 	return 0;
 }
@@ -977,6 +988,21 @@ static u64 mpam_csu_hisi_need_halved(struct mpam_msc_ris *ris, u64 now)
 	return now >> 1;
 }
 
+static bool read_msmon_mbwu_is_overflow(struct mpam_msc *msc)
+{
+	u32 ctl;
+	bool overflow;
+
+	ctl = mpam_read_monsel_reg(msc, CFG_MBWU_CTL);
+	overflow = ctl & MSMON_CFG_x_CTL_OFLOW_STATUS ? true : false;
+
+	if (overflow)
+		mpam_write_monsel_reg(msc, CFG_MBWU_CTL, ctl &
+				     ~MSMON_CFG_x_CTL_OFLOW_STATUS);
+
+	return overflow;
+}
+
 static void __ris_msmon_read(void *arg)
 {
 	bool nrdy = false;
@@ -984,6 +1010,7 @@ static void __ris_msmon_read(void *arg)
 	bool config_mismatch;
 	struct mon_read *m = arg;
 	u64 now, overflow_val = 0;
+	bool mbwu_overflow = false;
 	struct mon_cfg *ctx = m->ctx;
 	bool reset_on_next_read = false;
 	struct mpam_msc_ris *ris = m->ris;
@@ -1007,6 +1034,8 @@ static void __ris_msmon_read(void *arg)
 			reset_on_next_read = mbwu_state->reset_on_next_read;
 			mbwu_state->reset_on_next_read = false;
 		}
+
+		mbwu_overflow = read_msmon_mbwu_is_overflow(msc);
 	}
 
 	/*
@@ -1074,8 +1103,8 @@ static void __ris_msmon_read(void *arg)
 		}
 
 		/* Add any pre-overflow value to the mbwu_state->val */
-		if (mbwu_state->prev_val > now)
-			overflow_val = mpam_msmon_overflow_val(ris) - mbwu_state->prev_val;
+		if (mbwu_overflow)
+			overflow_val = mpam_msmon_overflow_val(ris);
 
 		mbwu_state->prev_val = now;
 		mbwu_state->correction += overflow_val;
