@@ -50,7 +50,7 @@
 
 #define QM_SQ_TYPE_MASK			GENMASK(3, 0)
 #define QM_SQ_TAIL_IDX(sqc)		((le16_to_cpu((sqc).w11) >> 6) & 0x1)
-#define QM_SQC_DISABLE_QP		(1UL << 6)
+#define QM_SQC_DISABLE_QP		(1U << 6)
 #define QM_XQC_RANDOM_DATA		0xaaaa
 
 /* cqc shift */
@@ -2715,24 +2715,43 @@ static void qm_uacce_api_ver_init(struct hisi_qm *qm)
 	if (uacce->flags & UACCE_DEV_IOMMU) {
 		qm->use_sva = uacce->flags & UACCE_DEV_SVA ? true : false;
 
-		if (qm->ver == QM_HW_V1)
+		switch (qm->ver) {
+		case QM_HW_V1:
 			uacce->api_ver = HISI_QM_API_VER_BASE;
-		else if (qm->ver == QM_HW_V2)
+			break;
+		case QM_HW_V2:
 			uacce->api_ver = HISI_QM_API_VER2_BASE;
-		else
+			break;
+		case QM_HW_V3:
+		case QM_HW_V4:
 			uacce->api_ver = HISI_QM_API_VER3_BASE;
+			break;
+		default:
+			uacce->api_ver = HISI_QM_API_VER5_BASE;
+			break;
+		}
 	} else {
 		qm->use_sva = false;
 
-		if (qm->ver == QM_HW_V1)
+		switch (qm->ver) {
+		case QM_HW_V1:
 			uacce->api_ver = HISI_QM_API_VER_BASE
-					 UACCE_API_VER_NOIOMMU_SUBFIX;
-		else if (qm->ver == QM_HW_V2)
+				 UACCE_API_VER_NOIOMMU_SUBFIX;
+			break;
+		case QM_HW_V2:
 			uacce->api_ver = HISI_QM_API_VER2_BASE
-					 UACCE_API_VER_NOIOMMU_SUBFIX;
-		else
+				 UACCE_API_VER_NOIOMMU_SUBFIX;
+			break;
+		case QM_HW_V3:
+		case QM_HW_V4:
 			uacce->api_ver = HISI_QM_API_VER3_BASE
-					 UACCE_API_VER_NOIOMMU_SUBFIX;
+				 UACCE_API_VER_NOIOMMU_SUBFIX;
+			break;
+		default:
+			uacce->api_ver = HISI_QM_API_VER5_BASE
+				 UACCE_API_VER_NOIOMMU_SUBFIX;
+			break;
+		}
 	}
 }
 
@@ -3357,7 +3376,7 @@ static int qm_eq_aeq_ctx_cfg(struct hisi_qm *qm)
 
 	qm_init_eq_aeq_status(qm);
 
-	/* Before starting the dev, clear previous task info in dma memory */
+	/* Before starting the dev, clear the memory and then configure to device using. */
 	memset(qm->qdma.va, 0, qm->qdma.size);
 
 	ret = qm_eq_ctx_cfg(qm);
@@ -3374,8 +3393,8 @@ static int __hisi_qm_start(struct hisi_qm *qm)
 	struct device *dev = &qm->pdev->dev;
 	int ret;
 
-	if (unlikely(!qm->qdma.va)) {
-		dev_err(dev, "dma virtual address should not be NULL\n");
+	if (!qm->qdma.va) {
+		dev_err(dev, "qm qdma is NULL!\n");
 		return -EINVAL;
 	}
 
@@ -3820,18 +3839,19 @@ static int qm_vf_q_assign(struct hisi_qm *qm, u32 num_vfs)
 	return 0;
 }
 
-static int qm_clear_vft_config(struct hisi_qm *qm)
+static void qm_clear_vft_config(struct hisi_qm *qm)
 {
-	int ret;
 	u32 i;
 
-	for (i = 1; i <= qm->vfs_num; i++) {
-		ret = hisi_qm_set_vft(qm, i, 0, 0);
-		if (ret)
-			return ret;
-	}
+	/*
+	 * When disabling SR-IOV, clear the configuration of each VF in the hardware
+	 * sequentially. Failure to clear a single VF should not affect the clearing
+	 * operation of other VFs.
+	 */
+	for (i = 1; i <= qm->vfs_num; i++)
+		(void)hisi_qm_set_vft(qm, i, 0, 0);
 
-	return 0;
+	qm->vfs_num = 0;
 }
 
 static int qm_func_shaper_enable(struct hisi_qm *qm, u32 fun_index, u32 qos)
@@ -4171,7 +4191,6 @@ int hisi_qm_sriov_enable(struct pci_dev *pdev, int max_vfs)
 	if (ret) {
 		pci_err(pdev, "Can't enable VF!\n");
 		qm_clear_vft_config(qm);
-		qm->vfs_num = 0;
 		goto err_put_sync;
 	}
 
@@ -4195,7 +4214,6 @@ EXPORT_SYMBOL_GPL(hisi_qm_sriov_enable);
 int hisi_qm_sriov_disable(struct pci_dev *pdev, bool is_frozen)
 {
 	struct hisi_qm *qm = pci_get_drvdata(pdev);
-	int ret;
 
 	if (pci_vfs_assigned(pdev)) {
 		pci_err(pdev, "Failed to disable VFs as VFs are assigned!\n");
@@ -4209,11 +4227,7 @@ int hisi_qm_sriov_disable(struct pci_dev *pdev, bool is_frozen)
 	}
 
 	pci_disable_sriov(pdev);
-	ret = qm_clear_vft_config(qm);
-	if (ret)
-		pci_err(pdev, "Failed to clear vft config!\n");
-
-	qm->vfs_num = 0;
+	qm_clear_vft_config(qm);
 	qm_pm_put_sync(qm);
 
 	return 0;
