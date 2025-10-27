@@ -290,8 +290,6 @@ struct kvm_arch {
 #define KVM_ARM_ID_REG_NUM	(IDREG_IDX(sys_reg(3, 0, 0, 7, 7)) + 1)
 	u64 id_regs[KVM_ARM_ID_REG_NUM];
 
-	u64 ctr_el0;
-
 	/*
 	 * For an untrusted host VM, 'pkvm.handle' is used to lookup
 	 * the associated pKVM instance in the hypervisor.
@@ -320,6 +318,7 @@ struct kvm_arch {
 		})
 	/* PMCR_EL0.N value for the guest */
 	KABI_EXTEND(u8 pmcr_n)
+	KABI_EXTEND(u64 ctr_el0)
 };
 
 struct kvm_vcpu_fault_info {
