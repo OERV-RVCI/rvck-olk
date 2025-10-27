@@ -4524,7 +4524,7 @@ static void rnpgbe_watchdog_update_link(struct rnpgbe_adapter *adapter)
 		hw->ops.check_link(hw, &link_speed, &link_up, &duplex, false);
 	} else {
 		/* always assume link is up, if no check link function */
-		link_speed = RNP_LINK_SPEED_10GB_FULL;
+		link_speed = RNP_LINK_SPEED_1GB_FULL;
 		link_up = true;
 	}
 
@@ -4570,7 +4570,7 @@ static void rnpgbe_watchdog_update_link(struct rnpgbe_adapter *adapter)
 			hw->ops.set_pause_mode(hw);
 
 		e_info(drv, "NIC Link is Up %s, %s Duplex, Flow Control: %s\n",
-		       (link_speed == RNP_LINK_SPEED_10GB_FULL ?
+		       (link_speed == RNP_LINK_SPEED_1GB_FULL ?
 			"1000 Mbps" :
 			(link_speed == RNP_LINK_SPEED_100_FULL ?
 			 "100 Mbps" :
