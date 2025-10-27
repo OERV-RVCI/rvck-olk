@@ -23,6 +23,7 @@
 #include <linux/sysfs.h>
 #include <linux/kobject.h>
 #include <linux/module.h>
+#include <linux/atomic.h>
 #include <asm/io.h>
 #include <asm/cacheflush.h>
 #include <asm/set_memory.h>
@@ -195,6 +196,28 @@ unsigned int csv_smr_num;
 EXPORT_SYMBOL_GPL(csv_smr_num);
 
 #ifdef CONFIG_CMA
+#ifdef CONFIG_SYSFS
+/**
+ * Global counters exposed via /sys/kernel/mm/csv3_cma/mem_info. Updated
+ * atomically during VM creation/destruction.
+ *
+ * csv3_npt_size: total size of NPT tables allocated.
+ * csv3_pri_mem: total private memory allocated for CSV guests.
+ * csv3_meta: metadata overhead for CSV memory regions.
+ * csv3_shared_mem: size of all the CSV3 VMs' shared memory.
+ */
+atomic_long_t csv3_npt_size = ATOMIC_LONG_INIT(0);
+EXPORT_SYMBOL_GPL(csv3_npt_size);
+
+atomic_long_t csv3_pri_mem = ATOMIC_LONG_INIT(0);
+EXPORT_SYMBOL_GPL(csv3_pri_mem);
+
+unsigned long csv3_meta;
+EXPORT_SYMBOL_GPL(csv3_meta);
+
+atomic_long_t csv3_shared_mem[MAX_NUMNODES];
+EXPORT_SYMBOL_GPL(csv3_shared_mem);
+#endif
 
 struct csv_cma {
 	int nid;
@@ -204,7 +227,7 @@ struct csv_cma {
 
 struct cma_array {
 	unsigned long count;
-	atomic64_t csv_free_size;
+	atomic64_t csv_used_size;
 	struct csv_cma csv_cma[];
 };
 
@@ -276,7 +299,7 @@ static void __init csv_cma_reserve_mem(void)
 		}
 
 		array->count = 0;
-		atomic64_set(&array->csv_free_size, 0);
+		atomic64_set(&array->csv_used_size, 0);
 		csv_contiguous_pernuma_area[node] = array;
 
 		for (i = 0; i < count; i++) {
@@ -292,8 +315,6 @@ static void __init csv_cma_reserve_mem(void)
 					1 << CSV_CMA_SHIFT, node);
 				break;
 			}
-
-			atomic64_add(CSV_CMA_SIZE, &array->csv_free_size);
 
 			if (start > cma_get_base(csv_cma->cma) || !start)
 				start = cma_get_base(csv_cma->cma);
@@ -424,7 +445,7 @@ retry:
 	}
 
 success:
-	atomic64_sub(PAGE_ALIGN(size), &array->csv_free_size);
+	atomic64_add(PAGE_ALIGN(size), &array->csv_used_size);
 	phys_addr = page_to_phys(page);
 	clflush_cache_range(__va(phys_addr), size);
 
@@ -447,7 +468,7 @@ void csv_release_to_contiguous(phys_addr_t pa, size_t size)
 			csv_cma->fast = 1;
 			cma_release(csv_cma->cma, page, PAGE_ALIGN(size) >> PAGE_SHIFT);
 			array = csv_contiguous_pernuma_area[csv_cma->nid];
-			atomic64_add(PAGE_ALIGN(size), &array->csv_free_size);
+			atomic64_sub(PAGE_ALIGN(size), &array->csv_used_size);
 		}
 	}
 }
@@ -456,50 +477,72 @@ EXPORT_SYMBOL_GPL(csv_release_to_contiguous);
 /*
  * The "free_size" file where the free size of csv cma is read from.
  */
-static ssize_t free_size_show(struct kobject *kobj,
+static ssize_t mem_info_show(struct kobject *kobj,
 					struct kobj_attribute *attr, char *buf)
 {
 	int node;
 	int offset = 0;
-	unsigned long free_size, total_free_size = 0;
+	unsigned long csv_used_size, total_used_size = 0;
 	unsigned long csv_size, total_csv_size = 0;
+	unsigned long shared_mem, total_shared_mem = 0;
+	unsigned long npt_size, pri_mem;
 	struct cma_array *array = NULL;
+	unsigned long bytes_per_mib = 1024 * 1024;
 
 	for_each_node_state(node, N_ONLINE) {
 		array = csv_contiguous_pernuma_area[node];
 		if (array == NULL) {
 			csv_size = 0;
-			free_size = 0;
+			csv_used_size = 0;
+			shared_mem = 0;
 
 			offset += snprintf(buf + offset, PAGE_SIZE - offset, "Node%d:\n", node);
 			offset += snprintf(buf + offset, PAGE_SIZE - offset,
-						" total: %8lu MiB\n", csv_size);
+						" csv3 shared size:%10lu MiB\n", shared_mem);
 			offset += snprintf(buf + offset, PAGE_SIZE - offset,
-						" free:  %8lu MiB\n", free_size);
+						" total cma size:%12lu MiB\n", csv_size);
+			offset += snprintf(buf + offset, PAGE_SIZE - offset,
+						" csv3 cma used:%13lu MiB\n", csv_used_size);
 			continue;
 		}
 
-		free_size = atomic64_read(&array->csv_free_size);
-		csv_size = array->count * CSV_CMA_SIZE;
+		csv_used_size = DIV_ROUND_UP(atomic64_read(&array->csv_used_size), bytes_per_mib);
+		shared_mem = DIV_ROUND_UP(atomic_long_read(&csv3_shared_mem[node]), bytes_per_mib);
+
+		csv_size = DIV_ROUND_UP(array->count * CSV_CMA_SIZE, bytes_per_mib);
 		offset += snprintf(buf + offset, PAGE_SIZE - offset, "Node%d:\n", node);
 		offset += snprintf(buf + offset, PAGE_SIZE - offset,
-					" total: %8lu MiB\n", csv_size >> 20);
+					" csv3 shared size:%10lu MiB\n", shared_mem);
 		offset += snprintf(buf + offset, PAGE_SIZE - offset,
-					" free:  %8lu MiB\n", free_size >> 20);
-		total_free_size += free_size;
+					" total cma size:%12lu MiB\n", csv_size);
+		offset += snprintf(buf + offset, PAGE_SIZE - offset,
+					" csv3 cma used:%13lu MiB\n",  csv_used_size);
+		total_used_size += csv_used_size;
 		total_csv_size += csv_size;
+		total_shared_mem += shared_mem;
 	}
+
+	npt_size = DIV_ROUND_UP(atomic_long_read(&csv3_npt_size), bytes_per_mib);
+	pri_mem = DIV_ROUND_UP(atomic_long_read(&csv3_pri_mem), bytes_per_mib);
 
 	offset += snprintf(buf + offset, PAGE_SIZE - offset, "All Nodes:\n");
 	offset += snprintf(buf + offset, PAGE_SIZE - offset,
-				" total: %8lu MiB\n", total_csv_size >> 20);
+				" csv3 shared size:%10lu MiB\n", total_shared_mem);
 	offset += snprintf(buf + offset, PAGE_SIZE - offset,
-				" free:  %8lu MiB\n", total_free_size >> 20);
+				" total cma size:%12lu MiB\n", total_csv_size);
+	offset += snprintf(buf + offset, PAGE_SIZE - offset,
+				" csv3 cma used:%13lu MiB\n", total_used_size);
+	offset += snprintf(buf + offset, PAGE_SIZE - offset,
+				"  npt table:%16lu MiB\n", npt_size);
+	offset += snprintf(buf + offset, PAGE_SIZE - offset,
+				"  csv3 private memory:%6lu MiB\n", pri_mem);
+	offset += snprintf(buf + offset, PAGE_SIZE - offset,
+				"  meta data:%16lu MiB\n", DIV_ROUND_UP(csv3_meta, bytes_per_mib));
 
 	return offset;
 }
 
-static struct kobj_attribute csv_cma_attr = __ATTR(free_size, 0444,	free_size_show, NULL);
+static struct kobj_attribute csv_cma_attr = __ATTR(mem_info, 0444,	mem_info_show, NULL);
 
 /*
  * Create a group of attributes so that we can create and destroy them all
@@ -518,7 +561,7 @@ static struct kobject *csv_cma_kobj_root;
 
 static int __init csv_cma_sysfs_init(void)
 {
-	int err;
+	int err, i;
 
 	if (!is_x86_vendor_hygon() || !boot_cpu_has(X86_FEATURE_CSV3))
 		return 0;
@@ -530,6 +573,9 @@ static int __init csv_cma_sysfs_init(void)
 	err = sysfs_create_group(csv_cma_kobj_root, &csv_cma_attr_group);
 	if (err)
 		goto out;
+
+	for (i = 0; i < MAX_NUMNODES; i++)
+		atomic_long_set(&csv3_shared_mem[i], 0);
 
 	return 0;
 
