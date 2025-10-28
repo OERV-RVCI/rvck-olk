@@ -1211,7 +1211,11 @@ static int hygon_umc_normaddr_to_sysaddr(u64 norm_addr, u16 nid, u8 umc, u64 *sy
 	case 5:	intlv_num_chan = 3; break;
 	case 7:	intlv_num_chan = 4; break;
 
-	case 8: intlv_num_chan = 1;
+	case 8:
+		if (boot_cpu_data.x86_model >= 0x6)
+			intlv_num_chan = 2;
+		else
+			intlv_num_chan = 1;
 		hash_enabled = true;
 		break;
 	default:
@@ -1326,10 +1330,16 @@ static int hygon_umc_normaddr_to_sysaddr(u64 norm_addr, u16 nid, u8 umc, u64 *sy
 				(ctx.ret_addr >> 30) ^
 				cs_id;
 
-		hashed_bit &= BIT(0);
-
-		if (hashed_bit != ((ctx.ret_addr >> intlv_addr_bit) & BIT(0)))
-			ctx.ret_addr ^= BIT(intlv_addr_bit);
+		if (boot_cpu_data.x86_model >= 0x6) {
+			hashed_bit &= 0x3;
+			if (hashed_bit != ((ctx.ret_addr >> intlv_addr_bit) & 0x3))
+				ctx.ret_addr = (ctx.ret_addr & ~((u64)3 << intlv_addr_bit)) |
+						(hashed_bit << intlv_addr_bit);
+		} else {
+			hashed_bit &= BIT(0);
+			if (hashed_bit != ((ctx.ret_addr >> intlv_addr_bit) & BIT(0)))
+				ctx.ret_addr ^= BIT(intlv_addr_bit);
+		}
 	}
 
 	/* Is calculated system address is above DRAM limit address? */
