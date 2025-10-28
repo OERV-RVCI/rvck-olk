@@ -131,8 +131,27 @@ static inline void vm_events_fold_cpu(int cpu)
 #define count_vm_vma_lock_event(x) do {} while (0)
 #endif
 
+/*
+ * FOR_ALL_ZONES macro doesn't define for ZONE_EXTMEM, thus
+ * vm_event_states doesn't contain slots of ZONE_EXTMEM, leading
+ * to count ZONE_MOVABLE and ZONE_DEVICE items to wrong slots.
+ *
+ * To fix without breaking kabi, skip counting ZONE_EXTMEM items,
+ * and offset 1 slot for zones after ZONE_EXTMEM to count in the
+ * correct slots.
+ */
+#ifndef CONFIG_ZONE_EXTMEM
 #define __count_zid_vm_events(item, zid, delta) \
 	__count_vm_events(item##_NORMAL - ZONE_NORMAL + zid, delta)
+#else
+#define __count_zid_vm_events(item, zid, delta) \
+	do {								\
+		if (zid < ZONE_EXTMEM) \
+			__count_vm_events(item##_NORMAL - ZONE_NORMAL + zid, delta); \
+		else if (zid > ZONE_EXTMEM) \
+			__count_vm_events(item##_NORMAL - ZONE_NORMAL + zid - 1, delta); \
+	} while (0)
+#endif
 
 /*
  * Zone and node-based page accounting with per cpu differentials.
