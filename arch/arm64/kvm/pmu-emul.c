@@ -56,7 +56,7 @@ static u32 __kvm_pmu_event_mask(unsigned int pmuver)
 
 static u32 kvm_pmu_event_mask(struct kvm *kvm)
 {
-	u64 dfr0 = IDREG(kvm, SYS_ID_AA64DFR0_EL1);
+	u64 dfr0 = kvm_read_vm_id_reg(kvm, SYS_ID_AA64DFR0_EL1);
 	u8 pmuver = SYS_FIELD_GET(ID_AA64DFR0_EL1, PMUVer, dfr0);
 
 	return __kvm_pmu_event_mask(pmuver);
@@ -66,7 +66,7 @@ u64 kvm_pmu_evtyper_mask(struct kvm *kvm)
 {
 	u64 mask = ARMV8_PMU_EXCLUDE_EL1 | ARMV8_PMU_EXCLUDE_EL0 |
 		   kvm_pmu_event_mask(kvm);
-	u64 pfr0 = IDREG(kvm, SYS_ID_AA64PFR0_EL1);
+	u64 pfr0 = kvm_read_vm_id_reg(kvm, SYS_ID_AA64PFR0_EL1);
 
 	if (SYS_FIELD_GET(ID_AA64PFR0_EL1, EL2, pfr0))
 		mask |= ARMV8_PMU_INCLUDE_EL2;

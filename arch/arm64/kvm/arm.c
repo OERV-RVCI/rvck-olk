@@ -526,6 +526,9 @@ int kvm_vm_ioctl_check_extension(struct kvm *kvm, long ext)
 	case KVM_CAP_ARM_SUPPORTED_BLOCK_SIZES:
 		r = kvm_supported_block_sizes();
 		break;
+	case KVM_CAP_ARM_SUPPORTED_REG_MASK_RANGES:
+		r = BIT(0);
+		break;
 #ifdef CONFIG_VIRT_PLAT_DEV
 	case KVM_CAP_ARM_VIRT_MSI_BYPASS:
 		r = sdev_enable;
@@ -872,11 +875,6 @@ unsigned long kvm_arch_vcpu_get_ip(struct kvm_vcpu *vcpu)
 	return *vcpu_pc(vcpu);
 }
 #endif
-
-static int kvm_vcpu_initialized(struct kvm_vcpu *vcpu)
-{
-	return vcpu_get_flag(vcpu, VCPU_INITIALIZED);
-}
 
 /*
  * Handle both the initialisation that is being done when the vcpu is
@@ -2096,6 +2094,13 @@ int kvm_arch_vm_ioctl(struct file *filp, unsigned int ioctl, unsigned long arg)
 		return 0;
 	}
 #endif
+	case KVM_ARM_GET_REG_WRITABLE_MASKS: {
+		struct reg_mask_range range;
+
+		if (copy_from_user(&range, argp, sizeof(range)))
+			return -EFAULT;
+		return kvm_vm_ioctl_get_reg_writable_masks(kvm, &range);
+	}
 	default:
 		return -EINVAL;
 	}

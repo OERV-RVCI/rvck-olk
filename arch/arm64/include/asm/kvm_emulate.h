@@ -92,7 +92,8 @@ static inline void vcpu_reset_hcr(struct kvm_vcpu *vcpu)
 	}
 
 	if (cpus_have_final_cap(ARM64_HAS_EVT) &&
-	    !cpus_have_final_cap(ARM64_MISMATCHED_CACHE_TYPE))
+	    !cpus_have_final_cap(ARM64_MISMATCHED_CACHE_TYPE) &&
+	    kvm_read_vm_id_reg(vcpu->kvm, SYS_CTR_EL0) == read_sanitised_ftr_reg(SYS_CTR_EL0))
 		vcpu->arch.hcr_el2 |= HCR_TID4;
 	else
 		vcpu->arch.hcr_el2 |= HCR_TID2;
