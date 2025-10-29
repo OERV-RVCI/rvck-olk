@@ -197,6 +197,7 @@ struct kvm_smccc_features {
 	unsigned long std_bmap;
 	unsigned long std_hyp_bmap;
 	unsigned long vendor_hyp_bmap;
+	KABI_EXTEND(unsigned long vendor_hyp_bmap_2)
 };
 
 typedef unsigned int pkvm_handle_t;
@@ -249,6 +250,9 @@ struct kvm_arch {
 #define KVM_ARCH_FLAG_SMCCC_FILTER_CONFIGURED		7
 	/* Initial ID reg values loaded */
 #define KVM_ARCH_FLAG_ID_REGS_INITIALIZED		8
+
+/* MIDR_EL1, REVIDR_EL1, and AIDR_EL1 are writable from userspace */
+#define KVM_ARCH_FLAG_WRITABLE_IMP_ID_REGS		10
 	unsigned long flags;
 
 	/* VM-wide vCPU feature set
@@ -319,6 +323,9 @@ struct kvm_arch {
 	/* PMCR_EL0.N value for the guest */
 	KABI_EXTEND(u8 pmcr_n)
 	KABI_EXTEND(u64 ctr_el0)
+	KABI_EXTEND(u64 midr_el1)
+	KABI_EXTEND(u64 revidr_el1)
+	KABI_EXTEND(u64 aidr_el1)
 };
 
 struct kvm_vcpu_fault_info {
@@ -1335,6 +1342,12 @@ static inline u64 *__vm_id_reg(struct kvm_arch *ka, u32 reg)
 		return &ka->id_regs[IDREG_IDX(reg)];
 	case SYS_CTR_EL0:
 		return &ka->ctr_el0;
+	case SYS_MIDR_EL1:
+		return &ka->midr_el1;
+	case SYS_REVIDR_EL1:
+		return &ka->revidr_el1;
+	case SYS_AIDR_EL1:
+		return &ka->aidr_el1;
 	default:
 		WARN_ON_ONCE(1);
 		return NULL;

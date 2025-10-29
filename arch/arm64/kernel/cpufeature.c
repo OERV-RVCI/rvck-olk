@@ -88,6 +88,7 @@
 #include <asm/mpam.h>
 #include <asm/mte.h>
 #include <asm/nmi.h>
+#include <asm/hypervisor.h>
 #include <asm/processor.h>
 #include <asm/smp.h>
 #include <asm/sysreg.h>
@@ -1688,8 +1689,7 @@ bool kaslr_requires_kpti(void)
 	if (IS_ENABLED(CONFIG_CAVIUM_ERRATUM_27456)) {
 		extern const struct midr_range cavium_erratum_27456_cpus[];
 
-		if (is_midr_in_range_list(read_cpuid_id(),
-					  cavium_erratum_27456_cpus))
+		if (is_midr_in_range_list(cavium_erratum_27456_cpus))
 			return false;
 	}
 
@@ -1724,7 +1724,7 @@ static bool unmap_kernel_at_el0(const struct arm64_cpu_capabilities *entry,
 	char const *str = "kpti command line option";
 	bool meltdown_safe;
 
-	meltdown_safe = is_midr_in_range_list(read_cpuid_id(), kpti_safe_list);
+	meltdown_safe = is_midr_in_range_list(kpti_safe_list);
 
 	/* Defer to CPU feature registers */
 	if (has_cpuid_feature(entry, scope))
@@ -1901,7 +1901,7 @@ static bool cpu_has_broken_dbm(void)
 		{},
 	};
 
-	return is_midr_in_range_list(read_cpuid_id(), cpus);
+	return is_midr_in_range_list(cpus);
 }
 
 static bool cpu_can_use_dbm(const struct arm64_cpu_capabilities *cap)
@@ -2458,7 +2458,7 @@ static bool is_arch_xcall_xint_support(void)
 		{ /* sentinel */ }
 	};
 
-	if (is_midr_in_range_list(read_cpuid_id(), hip12_cpus)) {
+	if (is_midr_in_range_list(hip12_cpus)) {
 		if (el == CurrentEL_EL2)
 			return true;
 		else
@@ -3711,6 +3711,8 @@ void check_local_cpu_capabilities(void)
 
 static void __init setup_boot_cpu_capabilities(void)
 {
+	kvm_arm_target_impl_cpu_init();
+
 	/* Detect capabilities with either SCOPE_BOOT_CPU or SCOPE_LOCAL_CPU */
 	update_cpu_capabilities(SCOPE_BOOT_CPU | SCOPE_LOCAL_CPU);
 	/* Enable the SCOPE_BOOT_CPU capabilities alone right away */
