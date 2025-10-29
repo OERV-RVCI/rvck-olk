@@ -88,6 +88,7 @@
 #include <asm/mpam.h>
 #include <asm/mte.h>
 #include <asm/nmi.h>
+#include <asm/hypervisor.h>
 #include <asm/processor.h>
 #include <asm/smp.h>
 #include <asm/sysreg.h>
@@ -3710,6 +3711,8 @@ void check_local_cpu_capabilities(void)
 
 static void __init setup_boot_cpu_capabilities(void)
 {
+	kvm_arm_target_impl_cpu_init();
+
 	/* Detect capabilities with either SCOPE_BOOT_CPU or SCOPE_LOCAL_CPU */
 	update_cpu_capabilities(SCOPE_BOOT_CPU | SCOPE_LOCAL_CPU);
 	/* Enable the SCOPE_BOOT_CPU capabilities alone right away */
