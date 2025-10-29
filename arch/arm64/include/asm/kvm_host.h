@@ -319,6 +319,9 @@ struct kvm_arch {
 	/* PMCR_EL0.N value for the guest */
 	KABI_EXTEND(u8 pmcr_n)
 	KABI_EXTEND(u64 ctr_el0)
+	u64 midr_el1;
+	u64 revidr_el1;
+	u64 aidr_el1;
 };
 
 struct kvm_vcpu_fault_info {
@@ -1335,6 +1338,12 @@ static inline u64 *__vm_id_reg(struct kvm_arch *ka, u32 reg)
 		return &ka->id_regs[IDREG_IDX(reg)];
 	case SYS_CTR_EL0:
 		return &ka->ctr_el0;
+	case SYS_MIDR_EL1:
+		return &ka->midr_el1;
+	case SYS_REVIDR_EL1:
+		return &ka->revidr_el1;
+	case SYS_AIDR_EL1:
+		return &ka->aidr_el1;
 	default:
 		WARN_ON_ONCE(1);
 		return NULL;
