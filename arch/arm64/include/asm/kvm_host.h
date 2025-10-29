@@ -197,7 +197,7 @@ struct kvm_smccc_features {
 	unsigned long std_bmap;
 	unsigned long std_hyp_bmap;
 	unsigned long vendor_hyp_bmap;
-	unsigned long vendor_hyp_bmap_2;
+	KABI_EXTEND(unsigned long vendor_hyp_bmap_2)
 };
 
 typedef unsigned int pkvm_handle_t;
@@ -323,9 +323,9 @@ struct kvm_arch {
 	/* PMCR_EL0.N value for the guest */
 	KABI_EXTEND(u8 pmcr_n)
 	KABI_EXTEND(u64 ctr_el0)
-	u64 midr_el1;
-	u64 revidr_el1;
-	u64 aidr_el1;
+	KABI_EXTEND(u64 midr_el1)
+	KABI_EXTEND(u64 revidr_el1)
+	KABI_EXTEND(u64 aidr_el1)
 };
 
 struct kvm_vcpu_fault_info {
