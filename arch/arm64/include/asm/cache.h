@@ -124,7 +124,7 @@ static inline u32 __attribute_const__ read_cpuid_effective_cachetype(void)
 		MIDR_REV(MIDR_HISI_LINXICORE9100, 1, 0),
 		{ /* sentinel */ }
 	};
-	if (is_midr_in_range_list(read_cpuid_id(), idc_support_list))
+	if (is_midr_in_range_list(idc_support_list))
 		ctr |= BIT(CTR_EL0_IDC_SHIFT);
 #endif
 

@@ -386,7 +386,7 @@ static bool armpmu_support_hisi_hw_metric(void)
 	 * which will cause kernel panic in virtual machine because of lack of
 	 * authority.  Thus, this feature is banned for virtual machines.
 	 */
-	return is_midr_in_range_list(read_cpuid_id(), hip12_cpus) &&
+	return is_midr_in_range_list(hip12_cpus) &&
 		is_kernel_in_hyp_mode();
 }
 #endif
