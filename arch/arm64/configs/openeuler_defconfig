@@ -8349,6 +8349,9 @@ CONFIG_UB_UNIC=m
 CONFIG_UB_UNIC_UBL=y
 CONFIG_UB_UNIC_DCB=y
 
+# UB CDMA driver
+CONFIG_UB_CDMA=m
+
 # end of unified bus
 
 # UMMU
