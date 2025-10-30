@@ -353,6 +353,20 @@ static void *bpf_show_partitions_start(struct seq_file *seqf, loff_t *pos)
 	return p;
 }
 
+static void bpf_show_partitions_stop(struct seq_file *seqf, void *v)
+{
+	struct block_device *entry;
+	struct partitions_seq_priv *priv = seqf->private;
+	unsigned long index;
+
+	bpf_disk_seqf_stop(seqf, v);
+
+	xa_for_each(&priv->dev_list, index, entry) {
+		xa_erase(&priv->dev_list, index);
+		kfree(entry);
+	}
+}
+
 struct bpf_iter__partitions {
 	__bpf_md_ptr(struct bpf_iter_meta *, meta);
 	__bpf_md_ptr(struct block_device *, part);
@@ -410,7 +424,7 @@ static int bpf_show_partitions(struct seq_file *seqf, void *v)
 static const struct seq_operations bpf_partitions_op = {
 	.start	= bpf_show_partitions_start,
 	.next	= bpf_disk_seqf_next,
-	.stop	= bpf_disk_seqf_stop,
+	.stop	= bpf_show_partitions_stop,
 	.show	= bpf_show_partitions
 };
 
