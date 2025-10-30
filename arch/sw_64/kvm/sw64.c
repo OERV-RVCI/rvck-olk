@@ -122,6 +122,9 @@ static int check_vcpu_requests(struct kvm_vcpu *vcpu)
 			tbivpn(0, 0, vpn);
 		}
 
+		if (kvm_check_request(KVM_REQ_RECORD_STEAL, vcpu))
+			kvm_sw64_record_steal_time(vcpu);
+
 		if (kvm_dirty_ring_check_request(vcpu))
 			return 0;
 	}
@@ -234,6 +237,8 @@ int kvm_arch_vcpu_create(struct kvm_vcpu *vcpu)
 	vcpu->arch.tsk = current;
 	vcpu->arch.pcpu_id = -1; /* force flush tlb for the first time */
 
+	kvm_sw64_pvtime_vcpu_init(&vcpu->arch);
+
 	return 0;
 }
 
@@ -281,6 +286,9 @@ int kvm_arch_vcpu_setup(struct kvm_vcpu *vcpu)
 void kvm_arch_vcpu_load(struct kvm_vcpu *vcpu, int cpu)
 {
 	vcpu->cpu = cpu;
+
+	if (kvm_sw64_is_pvtime_enabled(&vcpu->arch))
+		kvm_make_request(KVM_REQ_RECORD_STEAL, vcpu);
 }
 
 void kvm_arch_vcpu_put(struct kvm_vcpu *vcpu)
