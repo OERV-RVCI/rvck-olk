@@ -186,8 +186,6 @@ s32 txgbe_clear_hw_cntrs(struct txgbe_hw *hw)
 	rd32(hw, TXGBE_MAC_LXOFFRXC);
 
 	for (i = 0; i < 8; i++) {
-		rd32(hw, TXGBE_RDB_PXONTXC(i));
-		rd32(hw, TXGBE_RDB_PXOFFTXC(i));
 		rd32(hw, TXGBE_MAC_PXONRXC(i));
 		wr32m(hw, TXGBE_MMC_CONTROL, TXGBE_MMC_CONTROL_UP, i << 16);
 		rd32(hw, TXGBE_MAC_PXOFFRXC);
@@ -2044,8 +2042,7 @@ s32 txgbe_set_vfta(struct txgbe_hw *hw, u32 vlan, u32 vind,
 	regindex = (vlan >> 5) & 0x7F;
 	bitindex = vlan & 0x1F;
 	targetbit = (1 << bitindex);
-	/* errata 5 */
-	vfta = hw->mac.vft_shadow[regindex];
+	vfta = rd32(hw, TXGBE_PSR_VLAN_TBL(regindex));
 	if (vlan_on) {
 		if (!(vfta & targetbit)) {
 			vfta |= targetbit;
@@ -2068,8 +2065,6 @@ s32 txgbe_set_vfta(struct txgbe_hw *hw, u32 vlan, u32 vind,
 
 	if (vfta_changed)
 		wr32(hw, TXGBE_PSR_VLAN_TBL(regindex), vfta);
-	/* errata 5 */
-	hw->mac.vft_shadow[regindex] = vfta;
 	return 0;
 }
 
@@ -2193,8 +2188,6 @@ s32 txgbe_clear_vfta(struct txgbe_hw *hw)
 
 	for (offset = 0; offset < hw->mac.vft_size; offset++) {
 		wr32(hw, TXGBE_PSR_VLAN_TBL(offset), 0);
-		/* errata 5 */
-		hw->mac.vft_shadow[offset] = 0;
 	}
 
 	for (offset = 0; offset < TXGBE_PSR_VLAN_SWC_ENTRIES; offset++) {
@@ -2549,7 +2542,7 @@ s32 txgbe_host_interface_command(struct txgbe_hw *hw, u32 *buffer,
 		buf[0] = rd32(hw, TXGBE_MNG_MBOX);
 
 		if ((buf[0] & 0xff0000) >> 16 == 0x80) {
-			ERROR_REPORT1(TXGBE_ERROR_CAUTION, "It's unknown cmd.\n");
+			ERROR_REPORT1(TXGBE_ERROR_UNSUPPORTED, "It's unknown cmd.\n");
 			status = TXGBE_ERR_MNG_ACCESS_FAILED;
 			goto rel_out;
 		}

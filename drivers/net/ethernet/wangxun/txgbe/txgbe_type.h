@@ -956,6 +956,8 @@ struct txgbe_thermal_sensor_data {
 #define TXGBE_RDB_PFCMACDAH         0x19214
 #define TXGBE_RDB_TXSWERR           0x1906C
 #define TXGBE_RDB_TXSWERR_TB_FREE   0x3FF
+#define TXGBE_PFC_DIS_MASK          0x11F6c
+#define TXGBE_PFC_DIS_MASK_VAL      0xff
 /* rdb_pl_cfg reg mask */
 #define TXGBE_RDB_PL_CFG_L4HDR          0x2
 #define TXGBE_RDB_PL_CFG_L3HDR          0x4
@@ -1634,6 +1636,8 @@ enum TXGBE_MSCA_CMD_value {
 #define TXGBE_MAC_LXOFFRXC              0x11988
 #define TXGBE_MAC_PXONRXC(_i)           (0x11E30 + ((_i) * 4)) /* 8 of these */
 #define TXGBE_MAC_PXOFFRXC              0x119DC
+#define TXGBE_AML_MAC_PXONRXC(_i)       (0x11FC0 + ((_i) * 4)) /* 8 of these */
+#define TXGBE_AML_MAC_PXOFFRXC(_i)      (0x11FA0 + ((_i) * 4)) /* 8 of these */
 #define TXGBE_RX_BC_FRAMES_GOOD_LOW     0x11918
 #define TXGBE_RX_CRC_ERROR_FRAMES_LOW   0x11928
 #define TXGBE_RX_LEN_ERROR_FRAMES_LOW   0x11978
@@ -1645,7 +1649,7 @@ enum TXGBE_MSCA_CMD_value {
 #define TXGBE_TX_BC_FRAMES_GOOD_LOW     0x11824
 #define TXGBE_MMC_CONTROL               0x11800
 #define TXGBE_MMC_CONTROL_RSTONRD       0x4 /* reset on read */
-#define TXGBE_MMC_CONTROL_UP            0x700
+#define TXGBE_MMC_CONTROL_UP            0x70000
 
 /********************************* BAR registers ***************************/
 /* Interrupt Registers */
@@ -3246,7 +3250,6 @@ struct txgbe_mac_info {
 	u32 mta_shadow[TXGBE_MAX_MTA];
 	s32 mc_filter_type;
 	u32 mcft_size;
-	u32 vft_shadow[TXGBE_MAX_VFTA_ENTRIES];
 	u32 vft_size;
 	u32 num_rar_entries;
 	u32 rar_highwater;

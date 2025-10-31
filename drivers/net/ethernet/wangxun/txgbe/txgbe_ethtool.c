@@ -905,20 +905,22 @@ static int txgbe_get_fec_param(struct net_device *netdev,
 	}
 	hw->mac.ops.check_link(hw, &speed, &link_up, false);
 	fecparam->fec = 0;
-	if (speed == TXGBE_LINK_SPEED_10GB_FULL) {
+	if (supported_link == TXGBE_LINK_SPEED_10GB_FULL) {
 		fecparam->fec |= ETHTOOL_FEC_OFF;
+	} else {
+		if (adapter->fec_link_mode == TXGBE_PHY_FEC_AUTO)
+			fecparam->fec |= ETHTOOL_FEC_AUTO;
+		else if (adapter->fec_link_mode & TXGBE_PHY_FEC_BASER)
+			fecparam->fec |= ETHTOOL_FEC_BASER;
+		else if (adapter->fec_link_mode & TXGBE_PHY_FEC_RS)
+			fecparam->fec |= ETHTOOL_FEC_RS;
+		else
+			fecparam->fec |= ETHTOOL_FEC_OFF;
+	}
+	if (speed == TXGBE_LINK_SPEED_10GB_FULL) {
 		fecparam->active_fec = ETHTOOL_FEC_OFF;
 		goto done;
 	}
-	if (adapter->fec_link_mode == TXGBE_PHY_FEC_AUTO)
-		fecparam->fec |= ETHTOOL_FEC_AUTO;
-	else if (adapter->fec_link_mode & TXGBE_PHY_FEC_BASER)
-		fecparam->fec |= ETHTOOL_FEC_BASER;
-	else if (adapter->fec_link_mode & TXGBE_PHY_FEC_RS)
-		fecparam->fec |= ETHTOOL_FEC_RS;
-	else
-		fecparam->fec |= ETHTOOL_FEC_OFF;
-
 	if (!link_up) {
 		fecparam->active_fec = ETHTOOL_FEC_OFF;
 		goto done;
@@ -979,9 +981,63 @@ static int txgbe_set_fec_param(struct net_device *netdev,
 		goto done;
 	}
 	if (cur_fec_mode != adapter->fec_link_mode) {
-		/* reset link */
-		adapter->flags |= TXGBE_FLAG_NEED_LINK_CONFIG;
-		txgbe_service_event_schedule(adapter);
+		int status, i;
+		u32 link_speed = TXGBE_LINK_SPEED_UNKNOWN;
+		bool link_up = false;
+
+		if (hw->phy.multispeed_fiber &&
+		    (hw->phy.autoneg_advertised ==
+			(TXGBE_LINK_SPEED_10GB_FULL |
+				TXGBE_LINK_SPEED_25GB_FULL)) &&
+		    adapter->fec_link_mode != TXGBE_PHY_FEC_AUTO) {
+			while (test_and_set_bit(__TXGBE_IN_SFP_INIT, &adapter->state))
+				usleep_range(1000, 2000);
+			status = hw->mac.ops.setup_mac_link(hw,
+				       TXGBE_LINK_SPEED_25GB_FULL, 0);
+			if (status != 0)
+				return status;
+			for (i = 0; i < 30; i++) {
+				txgbe_e56_check_phy_link(hw, &link_speed, &link_up);
+				if (link_up)
+					goto out;
+				msleep(200);
+			}
+			msec_delay(100);
+			status = hw->mac.ops.setup_mac_link(hw,
+				TXGBE_LINK_SPEED_10GB_FULL, 0);
+			if (status != 0)
+				return status;
+			for (i = 0; i < 35; i++) {
+				u32 link_speed;
+				bool link_up = 0;
+
+				txgbe_e56_check_phy_link(hw, &link_speed, &link_up);
+				if (link_up) {
+					if (rd32(hw, 0x14404) & 0x1) {
+						adapter->flags &= ~TXGBE_FLAG_NEED_LINK_CONFIG;
+						mutex_lock(&adapter->e56_lock);
+						txgbe_wr32_ephy(hw,
+								E56PHY_INTR_1_ADDR,
+							E56PHY_INTR_1_IDLE_EXIT1);
+						mutex_unlock(&adapter->e56_lock);
+						goto out;
+					}
+				}
+				msleep(200);
+			}
+			adapter->flags |= TXGBE_FLAG_NEED_LINK_CONFIG;
+			txgbe_service_event_schedule(adapter);
+out:
+			clear_bit(__TXGBE_IN_SFP_INIT, &adapter->state);
+		} else if (hw->phy.multispeed_fiber) {
+			while (test_and_set_bit(__TXGBE_IN_SFP_INIT, &adapter->state))
+				usleep_range(1000, 2000);
+			hw->mac.ops.setup_link(hw, hw->phy.autoneg_advertised, true);
+			clear_bit(__TXGBE_IN_SFP_INIT, &adapter->state);
+		} else {
+			adapter->flags |= TXGBE_FLAG_NEED_LINK_CONFIG;
+			txgbe_service_event_schedule(adapter);
+		}
 	}
 done:
 	return err;
@@ -1576,15 +1632,22 @@ static int txgbe_set_ringparam(struct net_device *netdev,
 {
 	struct txgbe_ring *tx_ring = NULL, *rx_ring = NULL;
 	struct txgbe_adapter *adapter = netdev_priv(netdev);
+	struct txgbe_hw *hw = &adapter->hw;
 	u32 new_rx_count, new_tx_count;
 	int i, j, err = 0;
 
 	if (ring->rx_mini_pending || ring->rx_jumbo_pending)
 		return -EINVAL;
 
-	new_tx_count = clamp_t(u32, ring->tx_pending,
-			       TXGBE_MIN_TXD, TXGBE_MAX_TXD);
-	new_tx_count = ALIGN(new_tx_count, TXGBE_REQ_TX_DESCRIPTOR_MULTIPLE);
+	if (hw->mac.type == txgbe_mac_aml || hw->mac.type == txgbe_mac_aml40) {
+		new_tx_count = clamp_t(u32, ring->tx_pending,
+				       TXGBE_MIN_TXD_AML, TXGBE_MAX_TXD);
+		new_tx_count = ALIGN(new_tx_count, TXGBE_REQ_TX_DESCRIPTOR_MULTIPLE);
+	} else {
+		new_tx_count = clamp_t(u32, ring->tx_pending,
+				       TXGBE_MIN_TXD, TXGBE_MAX_TXD);
+		new_tx_count = ALIGN(new_tx_count, TXGBE_REQ_TX_DESCRIPTOR_MULTIPLE);
+	}
 
 	new_rx_count = clamp_t(u32, ring->rx_pending,
 			       TXGBE_MIN_RXD, TXGBE_MAX_RXD);
@@ -2948,14 +3011,15 @@ static void txgbe_get_wol(struct net_device *netdev,
 	struct txgbe_adapter *adapter = netdev_priv(netdev);
 	struct txgbe_hw *hw = &adapter->hw;
 
-	wol->supported = WAKE_UCAST | WAKE_MCAST |
-			 WAKE_BCAST | WAKE_MAGIC;
+	wol->supported = 0;
 	wol->wolopts = 0;
 
-	if (!device_can_wakeup(pci_dev_to_dev(adapter->pdev)))
+	if ((hw->subsystem_device_id & TXGBE_WOL_MASK) != TXGBE_WOL_SUP)
 		return;
 
-	if ((hw->subsystem_device_id & TXGBE_WOL_MASK) != TXGBE_WOL_SUP)
+	wol->supported = WAKE_MAGIC;
+
+	if (!device_can_wakeup(pci_dev_to_dev(adapter->pdev)))
 		return;
 
 	if (adapter->wol & TXGBE_PSR_WKUP_CTL_EX)
@@ -2981,12 +3045,6 @@ static int txgbe_set_wol(struct net_device *netdev, struct ethtool_wolinfo *wol)
 
 	adapter->wol = 0;
 
-	if (wol->wolopts & WAKE_UCAST)
-		adapter->wol |= TXGBE_PSR_WKUP_CTL_EX;
-	if (wol->wolopts & WAKE_MCAST)
-		adapter->wol |= TXGBE_PSR_WKUP_CTL_MC;
-	if (wol->wolopts & WAKE_BCAST)
-		adapter->wol |= TXGBE_PSR_WKUP_CTL_BC;
 	if (wol->wolopts & WAKE_MAGIC)
 		adapter->wol |= TXGBE_PSR_WKUP_CTL_MAG;
 
