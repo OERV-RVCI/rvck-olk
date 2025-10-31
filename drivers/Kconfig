@@ -256,4 +256,5 @@ source "drivers/coda/Kconfig"
 
 source "drivers/arm/Kconfig"
 
+source "drivers/ubios_uvb/Kconfig"
 endmenu
