@@ -135,6 +135,7 @@ unsigned long gm_vm_mmap_pgoff(struct file *file, unsigned long addr,
 				unsigned long len, unsigned long prot,
 				unsigned long flag, unsigned long pgoff);
 
+vm_fault_t gm_host_fault_locked(struct vm_fault *vmf, unsigned int order);
 #else
 static inline
 unsigned long gm_vm_mmap_pgoff(struct file *file, unsigned long addr,

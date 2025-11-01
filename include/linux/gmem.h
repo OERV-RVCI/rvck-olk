@@ -182,6 +182,8 @@ struct gm_as {
 int gm_dev_create(struct gm_mmu *mmu, void *dev_data,
 				struct gm_dev **new_dev);
 int gm_dev_register_hnode(struct gm_dev *dev);
+enum gm_ret gm_dev_fault_locked(struct mm_struct *mm, unsigned long addr,
+				struct gm_dev *dev, int behavior);
 
 /* GMEM address space KPI */
 int gm_as_create(unsigned long begin, unsigned long end, enum gm_as_alloc policy,
