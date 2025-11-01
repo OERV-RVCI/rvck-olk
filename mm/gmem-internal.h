@@ -107,7 +107,8 @@ void gm_page_cachep_destroy(void);
 void hnode_freelist_add(struct hnode *hnode, struct gm_page *gm_page);
 void hnode_activelist_add(struct hnode *hnode, struct gm_page *gm_page);
 void hnode_activelist_del(struct hnode *hnode, struct gm_page *gm_page);
-void hnode_activelist_del_and_add(struct hnode *hnode, struct gm_page *gm_page);
+void hnode_activelist_del_and_add(struct hnode *hnode,
+				struct gm_page *gm_page);
 
 void gm_page_add_rmap(struct gm_page *gm_page,
 				struct mm_struct *mm, unsigned long va);
@@ -129,6 +130,19 @@ static inline void put_gm_page(struct gm_page *gm_page)
 int hnode_init_sysfs(unsigned int hnid);
 int __init gm_init_sysfs(void);
 void gm_deinit_sysfs(void);
+
+unsigned long gm_vm_mmap_pgoff(struct file *file, unsigned long addr,
+				unsigned long len, unsigned long prot,
+				unsigned long flag, unsigned long pgoff);
+
+#else
+static inline
+unsigned long gm_vm_mmap_pgoff(struct file *file, unsigned long addr,
+				unsigned long len, unsigned long prot,
+				unsigned long flag, unsigned long pgoff)
+{
+	return 0;
+}
 
 #endif /* CONFIG_GMEM */
 
