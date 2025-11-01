@@ -459,6 +459,7 @@ void unmap_single_peer_shared_vma(struct mm_struct *mm, struct vm_area_struct *v
 	unsigned long start, end, addr;
 	struct vm_object *obj = vma->vm_obj;
 	struct gm_mapping *gm_mapping;
+	struct hnode *hnode;
 
 	start = max(vma->vm_start, start_addr);
 	if (start >= vma->vm_end)
@@ -489,6 +490,17 @@ void unmap_single_peer_shared_vma(struct mm_struct *mm, struct vm_area_struct *v
 			continue;
 		}
 
+		/*
+		 * Regardless of whether the gm_page is unmapped, we should release it.
+		 */
+		hnode = get_hnode(gm_mapping->gm_page->hnid);
+		if (!hnode) {
+			mutex_unlock(&gm_mapping->lock);
+			continue;
+		}
+		gm_page_remove_rmap(gm_mapping->gm_page);
+		hnode_activelist_del(hnode, gm_mapping->gm_page);
+		hnode_active_pages_dec(hnode);
 		put_gm_page(gm_mapping->gm_page);
 		gm_mapping->gm_page = NULL;
 		mutex_unlock(&gm_mapping->lock);

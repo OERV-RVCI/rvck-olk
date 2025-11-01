@@ -6,27 +6,62 @@
 
 #ifdef CONFIG_GMEM
 
-void gm_free_page(struct gm_page *gm_page);
+/* h-NUMA topology */
+struct hnode {
+	unsigned int id;
+	struct gm_dev *dev;
 
-static inline void get_gm_page(struct gm_page *gm_page)
+	struct task_struct *swapd_task;
+
+	struct list_head freelist;
+	struct list_head activelist;
+	spinlock_t freelist_lock;
+	spinlock_t activelist_lock;
+	atomic_t nr_free_pages;
+	atomic_t nr_active_pages;
+
+	unsigned long max_memsize;
+
+	bool import_failed;
+};
+
+static inline void hnode_active_pages_inc(struct hnode *hnode)
 {
-	atomic_inc(&gm_page->refcount);
+	atomic_inc(&hnode->nr_active_pages);
 }
 
-static inline void put_gm_page(struct gm_page *gm_page)
+static inline void hnode_active_pages_dec(struct hnode *hnode)
 {
-	if (atomic_dec_and_test(&gm_page->refcount))
-		gm_free_page(gm_page);
+	atomic_dec(&hnode->nr_active_pages);
 }
 
-int __init gm_page_cachep_init(void);
-void gm_page_cachep_destroy(void);
+static inline void hnode_free_pages_inc(struct hnode *hnode)
+{
+	atomic_inc(&hnode->nr_free_pages);
+}
 
-#define GM_MAPPING_CPU		0x10 /* peer-shared page in gm_mapping is on host side */
-#define GM_MAPPING_DEVICE	0x20 /* peer-shared page in gm_mapping is on device side */
-#define GM_MAPPING_NOMAP	0x40 /* no peer-shared page in gm_mapping */
+static inline void hnode_free_pages_dec(struct hnode *hnode)
+{
+	atomic_dec(&hnode->nr_free_pages);
+}
 
-#define GM_MAPPING_TYPE_MASK	(GM_MAPPING_CPU | GM_MAPPING_DEVICE | GM_MAPPING_NOMAP)
+static inline int get_hnuma_id(struct gm_dev *gm_dev)
+{
+	return first_node(gm_dev->registered_hnodes);
+}
+
+/*
+ * @GM_MAPPING_CPU: peer-shared page in gm_mapping is on host side
+ * @GM_MAPPING_DEVICE：peer-shared page in gm_mapping is on device side
+ * @GM_MAPPING_NOMAP：no peer-shared page in gm_mapping
+ */
+#define GM_MAPPING_CPU		0x10
+#define GM_MAPPING_DEVICE	0x20
+#define GM_MAPPING_NOMAP	0x40
+
+#define GM_MAPPING_TYPE_MASK	(GM_MAPPING_CPU \
+				|GM_MAPPING_DEVICE \
+				| GM_MAPPING_NOMAP)
 
 
 static inline void gm_mapping_flags_set(struct gm_mapping *gm_mapping, int flags)
@@ -56,6 +91,44 @@ static inline bool gm_mapping_nomap(struct gm_mapping *gm_mapping)
 {
 	return !!(gm_mapping->flag & GM_MAPPING_NOMAP);
 }
+
+void __init hnuma_init(void);
+bool is_hnode(int nid);
+unsigned int alloc_hnode_id(void);
+void free_hnode_id(unsigned int nid);
+struct hnode *get_hnode(unsigned int hnid);
+struct gm_dev *get_gm_dev(unsigned int nid);
+void hnode_init(struct hnode *hnode, unsigned int hnid, struct gm_dev *dev);
+void hnode_deinit(unsigned int hnid, struct gm_dev *dev);
+
+int __init gm_page_cachep_init(void);
+void gm_page_cachep_destroy(void);
+
+void hnode_freelist_add(struct hnode *hnode, struct gm_page *gm_page);
+void hnode_activelist_add(struct hnode *hnode, struct gm_page *gm_page);
+void hnode_activelist_del(struct hnode *hnode, struct gm_page *gm_page);
+void hnode_activelist_del_and_add(struct hnode *hnode, struct gm_page *gm_page);
+
+void gm_page_add_rmap(struct gm_page *gm_page,
+				struct mm_struct *mm, unsigned long va);
+void gm_page_remove_rmap(struct gm_page *gm_page);
+void gm_free_page(struct gm_page *gm_page);
+struct gm_page *gm_alloc_page(struct mm_struct *mm, struct hnode *hnode);
+
+static inline void get_gm_page(struct gm_page *gm_page)
+{
+	atomic_inc(&gm_page->refcount);
+}
+
+static inline void put_gm_page(struct gm_page *gm_page)
+{
+	if (atomic_dec_and_test(&gm_page->refcount))
+		gm_free_page(gm_page);
+}
+
+int hnode_init_sysfs(unsigned int hnid);
+int __init gm_init_sysfs(void);
+void gm_deinit_sysfs(void);
 
 #endif /* CONFIG_GMEM */
 

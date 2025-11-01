@@ -181,6 +181,7 @@ struct gm_as {
 /* GMEM Device KPI */
 int gm_dev_create(struct gm_mmu *mmu, void *dev_data,
 				struct gm_dev **new_dev);
+int gm_dev_register_hnode(struct gm_dev *dev);
 
 /* GMEM address space KPI */
 int gm_as_create(unsigned long begin, unsigned long end, enum gm_as_alloc policy,

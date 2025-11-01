@@ -31,6 +31,8 @@ static int __init gmem_init(void)
 	if (!enable_gmem)
 		return 0;
 
+	hnuma_init();
+
 	gm_as_cache = KMEM_CACHE(gm_as, 0);
 	if (!gm_as_cache)
 		goto out;
