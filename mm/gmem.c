@@ -12,6 +12,8 @@
 #include <linux/gmem.h>
 #include <linux/mman.h>
 #include <linux/mm.h>
+#include <linux/proc_fs.h>
+#include <linux/seq_file.h>
 #include <linux/vm_object.h>
 #include <linux/xarray.h>
 
@@ -37,6 +39,55 @@ static inline unsigned long pe_mask(unsigned int order)
 		return HPAGE_PUD_MASK;
 	return 0;
 }
+
+static struct percpu_counter g_gmem_stats[NR_GMEM_STAT_ITEMS];
+
+void gmem_stats_counter(enum gmem_stats_item item, int val)
+{
+	if (!gmem_is_enabled())
+		return;
+
+	if (WARN_ON_ONCE(unlikely(item >= NR_GMEM_STAT_ITEMS)))
+		return;
+
+	percpu_counter_add(&g_gmem_stats[item], val);
+}
+
+static int gmem_stats_init(void)
+{
+	int i, rc;
+
+	for (i = 0; i < NR_GMEM_STAT_ITEMS; i++) {
+		rc = percpu_counter_init(&g_gmem_stats[i], 0, GFP_KERNEL);
+		if (rc) {
+			int j;
+
+			for (j = i-1; j >= 0; j--)
+				percpu_counter_destroy(&g_gmem_stats[j]);
+
+			break;	/* break the initialization process */
+		}
+	}
+
+	return rc;
+}
+
+#ifdef CONFIG_PROC_FS
+static int gmem_stats_show(struct seq_file *m, void *arg)
+{
+	if (!gmem_is_enabled())
+		return 0;
+
+	seq_printf(
+		m, "migrating H2D     : %lld\n",
+		percpu_counter_read_positive(&g_gmem_stats[NR_PAGE_MIGRATING_H2D]));
+	seq_printf(
+		m, "migrating D2H     : %lld\n",
+		percpu_counter_read_positive(&g_gmem_stats[NR_PAGE_MIGRATING_D2H]));
+
+	return 0;
+}
+#endif /* CONFIG_PROC_FS */
 
 static int __init gmem_init(void)
 {
@@ -67,10 +118,26 @@ static int __init gmem_init(void)
 	if (err)
 		goto free_gm_page;
 
+	err = gm_init_sysfs();
+	if (err)
+		goto free_vm_object;
+
+	err = gmem_stats_init();
+	if (err)
+		goto free_gm_sysfs;
+
+#ifdef CONFIG_PROC_FS
+	proc_create_single("gmemstats", 0444, NULL, gmem_stats_show);
+#endif
+
 	static_branch_enable(&gmem_status);
 
 	return 0;
 
+free_gm_sysfs:
+	gm_deinit_sysfs();
+free_vm_object:
+	vm_object_destroy();
 free_gm_page:
 	gm_page_cachep_destroy();
 free_ctx:

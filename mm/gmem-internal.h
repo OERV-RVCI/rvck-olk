@@ -94,6 +94,15 @@ static inline bool gm_mapping_nomap(struct gm_mapping *gm_mapping)
 	return !!(gm_mapping->flag & GM_MAPPING_NOMAP);
 }
 
+enum gmem_stats_item {
+	NR_PAGE_MIGRATING_H2D,
+	NR_PAGE_MIGRATING_D2H,
+	NR_GMEM_STAT_ITEMS
+};
+
+extern void gmem_stats_counter(enum gmem_stats_item item, int val);
+extern void gmem_stats_counter_show(void);
+
 void __init hnuma_init(void);
 bool is_hnode(int nid);
 unsigned int alloc_hnode_id(void);
