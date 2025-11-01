@@ -38,6 +38,7 @@
 #include <asm/tlb.h>
 
 #include "internal.h"
+#include "gmem-internal.h"
 
 bool can_change_pte_writable(struct vm_area_struct *vma, unsigned long addr,
 			     pte_t pte)
@@ -736,6 +737,20 @@ static int do_mprotect_pkey(unsigned long start, size_t len,
 	error = -ENOMEM;
 	if (!vma)
 		goto out;
+
+	if (vma_is_peer_shared(vma)) {
+		struct vm_area_struct *vma_end;
+
+		start = gm_align_vma_range(start, true /* align down */);
+		vma_end = find_vma(current->mm, end);
+		if (vma_end && vma_end->vm_start < end && vma_is_peer_shared(vma_end))
+			end = gm_align_vma_range(end, false);
+		if (end <= start) {
+			error = -ENOMEM;
+			goto out;
+		}
+		len = end - start;
+	}
 
 	if (unlikely(grows & PROT_GROWSDOWN)) {
 		if (vma->vm_start >= end)

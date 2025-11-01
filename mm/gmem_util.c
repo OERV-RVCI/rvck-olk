@@ -7,13 +7,159 @@
  *
  */
 
-#include <linux/vm_object.h>
+#include <linux/err.h>
+#include <linux/khugepaged.h>
+#include <linux/mman.h>
+#include <linux/mm.h>
+#include <linux/oom.h>
+#include <linux/pgalloc.h>
 #include <linux/security.h>
+#include <linux/vm_object.h>
 
 #include "internal.h"
 #include "gmem-internal.h"
 
 #define GMEM_MMAP_RETRY_TIMES 10 /* gmem retry times before OOM */
+
+static struct folio *__vma_alloc_anon_folio_pmd(struct vm_area_struct *vma,
+		unsigned long addr, gfp_t gfp)
+{
+	const int order = HPAGE_PMD_ORDER;
+	struct folio *folio;
+
+	folio = vma_alloc_folio(gfp, order, vma, addr & HPAGE_PMD_MASK, true);
+
+	if (unlikely(!folio)) {
+		count_vm_event(THP_FAULT_FALLBACK);
+		count_mthp_stat(order, MTHP_STAT_ANON_FAULT_FALLBACK);
+		return NULL;
+	}
+
+	VM_BUG_ON_FOLIO(!folio_test_large(folio), folio);
+	if (mem_cgroup_charge(folio, vma->vm_mm, gfp)) {
+		folio_put(folio);
+		count_vm_event(THP_FAULT_FALLBACK);
+		count_vm_event(THP_FAULT_FALLBACK_CHARGE);
+		count_mthp_stat(order, MTHP_STAT_ANON_FAULT_FALLBACK);
+		count_mthp_stat(order, MTHP_STAT_ANON_FAULT_FALLBACK_CHARGE);
+		return NULL;
+	}
+	folio_throttle_swaprate(folio, gfp);
+
+	clear_huge_page(&folio->page, addr, HPAGE_PMD_NR);
+	/*
+	 * The memory barrier inside __folio_mark_uptodate makes sure that
+	 * clear_huge_page writes become visible before the set_pmd_at()
+	 * write.
+	 */
+	__folio_mark_uptodate(folio);
+	return folio;
+}
+
+static void map_anon_folio_pmd(struct folio *folio, pmd_t *pmd,
+		struct vm_area_struct *vma, unsigned long haddr)
+{
+	pmd_t entry;
+
+	entry = mk_huge_pmd(&folio->page, vma->vm_page_prot);
+	entry = maybe_pmd_mkwrite(pmd_mkdirty(entry), vma);
+	folio_add_new_anon_rmap(folio, vma, haddr, RMAP_EXCLUSIVE);
+	folio_add_lru_vma(folio, vma);
+	set_pmd_at(vma->vm_mm, haddr, pmd, entry);
+	update_mmu_cache_pmd(vma, haddr, pmd);
+	add_mm_counter(vma->vm_mm, MM_ANONPAGES, HPAGE_PMD_NR);
+	add_reliable_folio_counter(folio, vma->vm_mm, HPAGE_PMD_NR);
+	count_vm_event(THP_FAULT_ALLOC);
+	count_mthp_stat(HPAGE_PMD_ORDER, MTHP_STAT_ANON_FAULT_ALLOC);
+	count_memcg_event_mm(vma->vm_mm, THP_FAULT_ALLOC);
+}
+
+vm_fault_t do_peer_shared_anonymous_page(struct vm_fault *vmf)
+{
+	unsigned long haddr = vmf->address & HPAGE_PMD_MASK;
+	struct vm_area_struct *vma = vmf->vma;
+	struct folio *folio = NULL;
+	bool is_new_folio = false;
+	pgtable_t pgtable = NULL;
+	struct gm_mapping *gm_mapping;
+	vm_fault_t ret = 0;
+
+	if (!thp_vma_suitable_order(vma, haddr, PMD_ORDER))
+		return VM_FAULT_FALLBACK;
+
+	ret = vmf_anon_prepare(vmf);
+	if (ret)
+		return ret;
+
+	gm_mapping = vma_prepare_gm_mapping(vma, haddr);
+	if (!gm_mapping)
+		return VM_FAULT_OOM;
+
+	mutex_lock(&gm_mapping->lock);
+
+	if (gm_mapping_device(gm_mapping) && gm_page_pinned(gm_mapping->gm_page)) {
+		pr_err("page is pinned! addr is %lx\n", gm_mapping->gm_page->va);
+		ret = VM_FAULT_SIGBUS;
+		goto release;
+	}
+
+	if (gm_mapping_cpu(gm_mapping))
+		folio = page_folio(gm_mapping->page);
+	if (!folio) {
+		folio = __vma_alloc_anon_folio_pmd(vma, haddr, GFP_TRANSHUGE);
+		is_new_folio = true;
+	}
+
+	if (unlikely(!folio)) {
+		ret = VM_FAULT_FALLBACK;
+		goto release;
+	}
+
+	pgtable = pte_alloc_one(vma->vm_mm);
+	if (unlikely(!pgtable)) {
+		ret = VM_FAULT_OOM;
+		goto release;
+	}
+
+	/**
+	 * if page is mapped in device, release device mapping and
+	 * deliver the page content to host.
+	 */
+	if (gm_mapping_device(gm_mapping)) {
+		vmf->page = &folio->page;
+		ret = gm_host_fault_locked(vmf, PMD_ORDER);
+		if (ret)
+			goto release;
+	}
+
+	/* map page in pgtable */
+	vmf->ptl = pmd_lock(vma->vm_mm, vmf->pmd);
+
+	BUG_ON(!pmd_none(*vmf->pmd));
+	ret = check_stable_address_space(vma->vm_mm);
+	if (ret)
+		goto unlock_release;
+	pgtable_trans_huge_deposit(vma->vm_mm, vmf->pmd, pgtable);
+	map_anon_folio_pmd(folio, vmf->pmd, vma, haddr);
+	mm_inc_nr_ptes(vma->vm_mm);
+	spin_unlock(vmf->ptl);
+
+	/* finally setup cpu mapping */
+	gm_mapping_flags_set(gm_mapping, GM_MAPPING_CPU);
+	gm_mapping->page = &folio->page;
+	mutex_unlock(&gm_mapping->lock);
+
+	return 0;
+unlock_release:
+	spin_unlock(vmf->ptl);
+release:
+	if (pgtable)
+		pte_free(vma->vm_mm, pgtable);
+	if (is_new_folio)
+		folio_put(folio);
+	mutex_unlock(&gm_mapping->lock);
+	return ret;
+}
 
 static int alloc_va_in_peer_devices(unsigned long addr, unsigned long len,
 						unsigned long flag)
@@ -290,4 +436,50 @@ void gmem_unmap_region(struct mm_struct *mm, unsigned long start, size_t len)
 
 	end = start + ret;
 	munmap_in_peer_devices(mm, start, end);
+}
+
+bool gm_mmap_check_flags(unsigned long flags)
+{
+	if (gmem_is_enabled()) {
+		if ((flags & MAP_SHARED) && (flags & MAP_PEER_SHARED)) {
+			gmem_err(" MAP_PEER_SHARED and MAP_SHARE cannot be used together.\n");
+			return false;
+		} else if ((flags & MAP_HUGETLB) && (flags & MAP_PEER_SHARED)) {
+			gmem_err(" MAP_PEER_SHARED and MAP_HUGETLB cannot be used together.\n");
+			return false;
+		} else if (!(flags & MAP_ANONYMOUS) && (flags & MAP_PEER_SHARED)) {
+			gmem_err(" MAP_PEER_SHARED cannot map file page.\n");
+			return false;
+		}
+	}
+	return true;
+}
+
+unsigned long
+gm_get_unmapped_area_aligned(struct file *file, unsigned long addr, unsigned long len,
+			  unsigned long pgoff, unsigned long flags)
+{
+	unsigned long align = HPAGE_SIZE;
+
+	len = round_up(len, align);
+	if (len > TASK_SIZE)
+		return -ENOMEM;
+
+	addr = current->mm->get_unmapped_area(file, addr, len + align, pgoff, flags);
+	if (IS_ERR_VALUE(addr))
+		return addr;
+
+	addr = round_up(addr, align);
+	if (addr > TASK_SIZE - len)
+		return -ENOMEM;
+	if (!IS_ALIGNED(addr, align))
+		return -EINVAL;
+
+	return addr;
+}
+
+void destroy_gm_as(struct mm_struct *mm)
+{
+	if (mm->gm_as)
+		gm_as_destroy(mm->gm_as);
 }

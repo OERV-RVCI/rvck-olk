@@ -169,12 +169,44 @@ int hnode_init_sysfs(unsigned int hnid);
 int __init gm_init_sysfs(void);
 void gm_deinit_sysfs(void);
 
+
+vm_fault_t do_peer_shared_anonymous_page(struct vm_fault *vmf);
 unsigned long gm_vm_mmap_pgoff(struct file *file, unsigned long addr,
 				unsigned long len, unsigned long prot,
 				unsigned long flag, unsigned long pgoff);
 
 vm_fault_t gm_host_fault_locked(struct vm_fault *vmf, unsigned int order);
+unsigned long gmem_unmap_align(struct mm_struct *mm,
+				unsigned long start, size_t len);
+void gmem_unmap_region(struct mm_struct *mm, unsigned long start, size_t len);
+bool gm_mmap_check_flags(unsigned long flags);
+static inline bool check_peer_shared_vma_thp_disabled(struct vm_area_struct *vma)
+{
+	return vma_is_peer_shared(vma) && vma_thp_disabled(vma, vma->vm_flags);
+}
+
+static inline unsigned long gm_align_vma_range(unsigned long addr, bool align_down)
+{
+	return align_down ? ALIGN_DOWN(addr, HPAGE_SIZE) : ALIGN(addr, HPAGE_SIZE);
+}
+
+static inline unsigned long gm_round_up(unsigned long length)
+{
+	return round_up(length, HPAGE_SIZE);
+}
+
+unsigned long
+gm_get_unmapped_area_aligned(struct file *file, unsigned long addr, unsigned long len,
+				unsigned long pgoff, unsigned long flags);
+void destroy_gm_as(struct mm_struct *mm);
+
 #else
+static inline
+vm_fault_t do_peer_shared_anonymous_page(struct vm_fault *vmf) { return 0; }
+static inline unsigned long gmem_unmap_align(struct mm_struct *mm,
+				unsigned long start, size_t len) { return 0; }
+static inline void gmem_unmap_region(struct mm_struct *mm,
+				unsigned long start, size_t len) {}
 static inline
 unsigned long gm_vm_mmap_pgoff(struct file *file, unsigned long addr,
 				unsigned long len, unsigned long prot,
@@ -182,7 +214,14 @@ unsigned long gm_vm_mmap_pgoff(struct file *file, unsigned long addr,
 {
 	return 0;
 }
-
+static inline unsigned long gm_round_up(unsigned long length) { return length; }
+static inline bool check_peer_shared_vma_thp_disabled(struct vm_area_struct *vma) { return false; }
+static inline unsigned long gm_align_vma_range(unsigned long addr, bool dummy) { return addr; }
+static inline bool gm_mmap_check_flags(unsigned long flags) { return true; }
+static inline unsigned long
+gm_get_unmapped_area_aligned(struct file *file, unsigned long addr, unsigned long len,
+				unsigned long pgoff, unsigned long flags) { return 0; }
+static inline void destroy_gm_as(struct mm_struct *mm) {}
 #endif /* CONFIG_GMEM */
 
 #endif /* _GMEM_INTERNAL_H */

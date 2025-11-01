@@ -55,7 +55,8 @@
 		| MAP_32BIT \
 		| MAP_ABOVE4G \
 		| MAP_HUGE_2MB \
-		| MAP_HUGE_1GB)
+		| MAP_HUGE_1GB \
+		| MAP_PEER_SHARED)
 
 extern int sysctl_overcommit_memory;
 extern int sysctl_overcommit_ratio;

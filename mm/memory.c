@@ -89,6 +89,9 @@
 #include <asm/tlb.h>
 #include <asm/tlbflush.h>
 
+#include <linux/vm_object.h>
+#include "gmem-internal.h"
+
 #include "pgalloc-track.h"
 #include "internal.h"
 #include "swap.h"
@@ -1740,6 +1743,15 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 			 */
 			spin_unlock(ptl);
 		}
+		/*
+		 * Here there can be other concurrent MADV_DONTNEED or
+		 * trans huge page faults running, and if the pmd is
+		 * none or trans huge it can change under us. This is
+		 * because MADV_DONTNEED holds the same lock in read
+		 * mode.
+		 */
+		zap_logic_pmd_range(vma, addr, next, true, pmd);
+
 		if (pmd_none(*pmd)) {
 			addr = next;
 			continue;
@@ -1771,8 +1783,10 @@ static inline unsigned long zap_pud_range(struct mmu_gather *tlb,
 				goto next;
 			/* fall through */
 		}
-		if (pud_none_or_clear_bad(pud))
+		if (pud_none_or_clear_bad(pud)) {
+			zap_logic_pud_range(vma, addr, next);
 			continue;
+		}
 		next = zap_pmd_range(tlb, vma, pud, addr, next, details);
 next:
 		cond_resched();
@@ -1792,8 +1806,10 @@ static inline unsigned long zap_p4d_range(struct mmu_gather *tlb,
 	p4d = p4d_offset(pgd, addr);
 	do {
 		next = p4d_addr_end(addr, end);
-		if (p4d_none_or_clear_bad(p4d))
+		if (p4d_none_or_clear_bad(p4d)) {
+			zap_logic_pud_range(vma, addr, next);
 			continue;
+		}
 		next = zap_pud_range(tlb, vma, p4d, addr, next, details);
 	} while (p4d++, addr = next, addr != end);
 
@@ -1813,13 +1829,14 @@ void unmap_page_range(struct mmu_gather *tlb,
 	pgd = pgd_offset(vma->vm_mm, addr);
 	do {
 		next = pgd_addr_end(addr, end);
-		if (pgd_none_or_clear_bad(pgd))
+		if (pgd_none_or_clear_bad(pgd)) {
+			zap_logic_pud_range(vma, addr, next);
 			continue;
+		}
 		next = zap_p4d_range(tlb, vma, pgd, addr, next, details);
 	} while (pgd++, addr = next, addr != end);
 	tlb_end_vma(tlb, vma);
 }
-
 
 static void unmap_single_vma(struct mmu_gather *tlb,
 		struct vm_area_struct *vma, unsigned long start_addr,
@@ -1865,6 +1882,7 @@ static void unmap_single_vma(struct mmu_gather *tlb,
 	}
 }
 
+
 /**
  * unmap_vmas - unmap a range of memory covered by a list of vma's
  * @tlb: address of the caller's struct mmu_gather
@@ -1908,6 +1926,9 @@ void unmap_vmas(struct mmu_gather *tlb, struct ma_state *mas,
 		unmap_single_vma(tlb, vma, start, end, &details,
 				 mm_wr_locked);
 		hugetlb_zap_end(vma, &details);
+
+		unmap_single_peer_shared_vma(vma->vm_mm, vma, start, end);
+
 		vma = mas_find(mas, tree_end - 1);
 	} while (vma && likely(!xa_is_zero(vma)));
 	mmu_notifier_invalidate_range_end(&range);
@@ -5614,6 +5635,9 @@ out_map:
 static inline vm_fault_t create_huge_pmd(struct vm_fault *vmf)
 {
 	struct vm_area_struct *vma = vmf->vma;
+
+	if (vma_is_peer_shared(vma))
+		return do_peer_shared_anonymous_page(vmf);
 	if (vma_is_anonymous(vma))
 		return do_huge_pmd_anonymous_page(vmf);
 	if (vma->vm_ops->huge_fault)
@@ -5855,8 +5879,16 @@ retry_pud:
 		ret = create_huge_pmd(&vmf);
 		if (!(ret & VM_FAULT_FALLBACK))
 			return ret;
+		if (vma_is_peer_shared(vma))
+			return VM_FAULT_OOM;
 	} else {
 		vmf.orig_pmd = pmdp_get_lockless(vmf.pmd);
+
+		if (check_peer_shared_vma_thp_disabled(vma) && pmd_none(vmf.orig_pmd)) {
+			/* if transparent hugepage is not enabled, return pagefault failed */
+			gmem_err("transparent hugepage is not enabled\n");
+			return VM_FAULT_SIGBUS;
+		}
 
 		if (unlikely(is_swap_pmd(vmf.orig_pmd))) {
 			VM_BUG_ON(thp_migration_supported() &&

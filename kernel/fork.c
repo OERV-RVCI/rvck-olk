@@ -99,6 +99,8 @@
 #include <linux/stackprotector.h>
 #include <linux/user_events.h>
 #include <linux/iommu.h>
+#include <linux/vm_object.h>
+
 #ifdef CONFIG_QOS_SCHED_SMART_GRID
 #include <linux/sched/grid_qos.h>
 #endif
@@ -526,6 +528,8 @@ struct vm_area_struct *vm_area_dup(struct vm_area_struct *orig)
 	vma_numab_state_init(new);
 	dup_anon_vma_name(orig, new);
 
+	dup_peer_shared_vma(new);
+
 	return new;
 }
 
@@ -551,6 +555,8 @@ static void vm_area_free_rcu_cb(struct rcu_head *head)
 
 void vm_area_free(struct vm_area_struct *vma)
 {
+	if (vma_is_peer_shared(vma))
+		vm_object_drop_locked(vma);
 #ifdef CONFIG_PER_VMA_LOCK
 	call_rcu(&vma->vm_rcu, vm_area_free_rcu_cb);
 #else
@@ -1767,6 +1773,9 @@ static struct mm_struct *dup_mm(struct task_struct *tsk,
 	if (err)
 		goto free_pt;
 
+#ifdef CONFIG_GMEM
+	mm->gm_as = NULL;
+#endif
 	mm->hiwater_rss = get_mm_rss(mm);
 	mm->hiwater_vm = mm->total_vm;
 
