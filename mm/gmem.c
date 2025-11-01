@@ -89,6 +89,10 @@ static int gmem_stats_show(struct seq_file *m, void *arg)
 }
 #endif /* CONFIG_PROC_FS */
 
+static struct workqueue_struct *prefetch_wq;
+
+#define GM_WORK_CONCURRENCY 4
+
 static int __init gmem_init(void)
 {
 	int err = -ENOMEM;
@@ -129,6 +133,14 @@ static int __init gmem_init(void)
 #ifdef CONFIG_PROC_FS
 	proc_create_single("gmemstats", 0444, NULL, gmem_stats_show);
 #endif
+
+	prefetch_wq = alloc_workqueue("prefetch",
+		__WQ_LEGACY | WQ_UNBOUND | WQ_HIGHPRI | WQ_CPU_INTENSIVE, GM_WORK_CONCURRENCY);
+	if (!prefetch_wq) {
+		gmem_err("fail to alloc workqueue prefetch_wq\n");
+		err = -EFAULT;
+		goto free_ctx;
+	}
 
 	static_branch_enable(&gmem_status);
 
@@ -470,3 +482,278 @@ int gm_as_attach(struct gm_as *as, struct gm_dev *dev,
 	return 0;
 }
 EXPORT_SYMBOL_GPL(gm_as_attach);
+
+struct prefetch_data {
+	struct mm_struct *mm;
+	struct gm_dev *dev;
+	unsigned long addr;
+	size_t size;
+	struct work_struct work;
+	int behavior;
+	int *res;
+};
+
+static void prefetch_work_cb(struct work_struct *work)
+{
+	struct prefetch_data *d =
+		container_of(work, struct prefetch_data, work);
+	unsigned long addr = d->addr, end = d->addr + d->size;
+	int page_size = HPAGE_SIZE;
+	int ret;
+
+	do {
+		/* MADV_WILLNEED: dev will soon access this addr. */
+		mmap_read_lock(d->mm);
+		ret = gm_dev_fault_locked(d->mm, addr, d->dev, d->behavior);
+		mmap_read_unlock(d->mm);
+		if (ret == GM_RET_PAGE_EXIST) {
+			gmem_err("%s: device has done page fault, ignore prefetch\n",
+				__func__);
+		} else if (ret != GM_RET_SUCCESS) {
+			*d->res = -EFAULT;
+			gmem_err("%s: call dev fault error %d\n", __func__, ret);
+		}
+	} while (addr += page_size, addr != end);
+
+	kfree(d);
+}
+
+static int hmadvise_do_prefetch(struct gm_dev *dev, unsigned long addr, size_t size, int behavior)
+{
+	unsigned long start, end, per_size;
+	int page_size = HPAGE_SIZE;
+	struct prefetch_data *data;
+	struct vm_area_struct *vma;
+	int res = GM_RET_SUCCESS;
+	unsigned long old_start;
+
+	/* overflow */
+	if (check_add_overflow(addr, size, &end)) {
+		gmem_err("addr plus size will cause overflow!\n");
+		return -EINVAL;
+	}
+
+	old_start = end;
+
+	/* Align addr by rounding outward to make page cover addr. */
+	end = round_up(end, page_size);
+	start = round_down(addr, page_size);
+	size = end - start;
+
+	if (!end && old_start) {
+		gmem_err("end addr align up 2M causes invalid addr\n");
+		return -EINVAL;
+	}
+
+	if (size == 0)
+		return 0;
+
+	mmap_read_lock(current->mm);
+	vma = find_vma(current->mm, start);
+	if (!vma || start < vma->vm_start || end > vma->vm_end) {
+		mmap_read_unlock(current->mm);
+		gmem_err("failed to find vma by invalid start or size.\n");
+		return GM_RET_FAILURE_UNKNOWN;
+	}  else if (!vma_is_peer_shared(vma)) {
+		mmap_read_unlock(current->mm);
+		gmem_err("%s the vma does not use VM_PEER_SHARED\n", __func__);
+		return GM_RET_FAILURE_UNKNOWN;
+	}
+	mmap_read_unlock(current->mm);
+
+	per_size = (size / GM_WORK_CONCURRENCY) & ~(page_size - 1);
+
+	while (start < end) {
+		data = kzalloc(sizeof(struct prefetch_data), GFP_KERNEL);
+		if (!data) {
+			flush_workqueue(prefetch_wq);
+			return GM_RET_NOMEM;
+		}
+
+		INIT_WORK(&data->work, prefetch_work_cb);
+		data->mm = current->mm;
+		data->dev = dev;
+		data->addr = start;
+		data->behavior = behavior;
+		data->res = &res;
+		if (per_size == 0)
+			data->size = size;
+		else
+			/* Process (1.x * per_size) for the last time */
+			data->size = (end - start < 2 * per_size) ?
+					     (end - start) :
+					     per_size;
+		queue_work(prefetch_wq, &data->work);
+		start += data->size;
+	}
+
+	flush_workqueue(prefetch_wq);
+	return res;
+}
+
+static int gmem_unmap_vma_pages(struct vm_area_struct *vma, unsigned long start,
+				unsigned long end, int page_size)
+{
+	struct gm_fault_t gmf = {
+		.mm = current->mm,
+		.size = page_size,
+		.copy = false,
+	};
+	struct gm_mapping *gm_mapping;
+	struct vm_object *obj;
+	struct hnode *hnode;
+	enum gm_ret gm_ret;
+
+	obj = vma->vm_obj;
+	if (!obj) {
+		gmem_err("peer-shared vma should have vm_object\n");
+		return -EINVAL;
+	}
+
+	for (; start < end; start += page_size) {
+		xa_lock(obj->logical_page_table);
+		gm_mapping = vm_object_lookup(obj, start);
+		if (!gm_mapping) {
+			xa_unlock(obj->logical_page_table);
+			continue;
+		}
+		xa_unlock(obj->logical_page_table);
+		mutex_lock(&gm_mapping->lock);
+		if (gm_mapping_nomap(gm_mapping)) {
+			mutex_unlock(&gm_mapping->lock);
+			continue;
+		} else if (gm_mapping_cpu(gm_mapping)) {
+			zap_page_range_single(vma, start, page_size, NULL);
+		} else {
+			gmf.va = start;
+			gmf.dev = gm_mapping->dev;
+			gm_ret = gm_mapping->dev->mmu->peer_unmap(&gmf);
+			if (gm_ret) {
+				gmem_err("peer_unmap failed. ret %d\n", gm_ret);
+				mutex_unlock(&gm_mapping->lock);
+				continue;
+			}
+			hnode = get_hnode(gm_mapping->gm_page->hnid);
+			gm_page_remove_rmap(gm_mapping->gm_page);
+			hnode_activelist_del(hnode, gm_mapping->gm_page);
+			hnode_active_pages_dec(hnode);
+			put_gm_page(gm_mapping->gm_page);
+		}
+		gm_mapping_flags_set(gm_mapping, GM_MAPPING_NOMAP);
+		mutex_unlock(&gm_mapping->lock);
+	}
+
+	return 0;
+}
+
+static int hmadvise_do_eagerfree(unsigned long addr, size_t size)
+{
+	unsigned long start, end, i_start, i_end;
+	int page_size = HPAGE_SIZE;
+	struct vm_area_struct *vma;
+	int ret = GM_RET_SUCCESS;
+	unsigned long old_start;
+
+	/* overflow */
+	if (check_add_overflow(addr, size, &end)) {
+		gmem_err("addr plus size will cause overflow!\n");
+		return -EINVAL;
+	}
+
+	old_start = addr;
+
+	/* Align addr by rounding inward to avoid excessive page release. */
+	end = round_down(end, page_size);
+	start = round_up(addr, page_size);
+	if (start >= end) {
+		pr_debug("gmem:start align up 2M >= end align down 2M.\n");
+		return ret;
+	}
+
+	/* Check to see whether len was rounded up from small -ve to zero */
+	if (old_start && !start) {
+		gmem_err("start addr align up 2M causes invalid addr");
+		return -EINVAL;
+	}
+
+	mmap_read_lock(current->mm);
+	do {
+		vma = find_vma_intersection(current->mm, start, end);
+		if (!vma) {
+			gmem_err("gmem: there is no valid vma\n");
+			break;
+		}
+
+		if (!vma_is_peer_shared(vma)) {
+			pr_debug("gmem:not peer-shared vma, skip dontneed\n");
+			start = vma->vm_end;
+			continue;
+		}
+
+		i_start = start > vma->vm_start ? start : vma->vm_start;
+		i_end = end < vma->vm_end ? end : vma->vm_end;
+		ret = gmem_unmap_vma_pages(vma, i_start, i_end, page_size);
+		if (ret)
+			break;
+
+		start = vma->vm_end;
+	} while (start < end);
+
+	mmap_read_unlock(current->mm);
+	return ret;
+}
+
+static bool check_hmadvise_behavior(int behavior)
+{
+	return behavior == MADV_DONTNEED;
+}
+
+int hmadvise_inner(int hnid, unsigned long start, size_t len_in, int behavior)
+{
+	int error = -EINVAL;
+	struct gm_dev *dev = NULL;
+
+	if (hnid == -1) {
+		if (check_hmadvise_behavior(behavior)) {
+			goto no_hnid;
+		} else {
+			gmem_err("hmadvise: behavior %d need hnid or is invalid\n",
+				behavior);
+			return error;
+		}
+	}
+
+	if (hnid < 0) {
+		gmem_err("hmadvise: invalid hnid %d < 0\n", hnid);
+		return error;
+	}
+
+	if (!is_hnode(hnid)) {
+		gmem_err("hmadvise: can't find hnode by hnid:%d or hnode is not allowed\n", hnid);
+		return error;
+	}
+
+	dev = get_gm_dev(hnid);
+	if (!dev) {
+		gmem_err("hmadvise: hnode id %d is invalid\n", hnid);
+		return error;
+	}
+
+no_hnid:
+	switch (behavior) {
+	case MADV_PREFETCH:
+		behavior = MADV_WILLNEED;
+		fallthrough;
+	case MADV_UNPINNED:
+		fallthrough;
+	case MADV_PINNED:
+		return hmadvise_do_prefetch(dev, start, len_in, behavior);
+	case MADV_DONTNEED:
+		return hmadvise_do_eagerfree(start, len_in);
+	default:
+		gmem_err("hmadvise: unsupported behavior %d\n", behavior);
+	}
+
+	return error;
+}
+EXPORT_SYMBOL_GPL(hmadvise_inner);
