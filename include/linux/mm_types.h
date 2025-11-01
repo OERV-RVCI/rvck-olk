@@ -1016,7 +1016,11 @@ struct mm_struct {
 #else
 	KABI_RESERVE(1)
 #endif
+#ifdef CONFIG_GMEM
+	KABI_USE(2, struct gm_as *gm_as)
+#else
 	KABI_RESERVE(2)
+#endif
 	KABI_RESERVE(3)
 	KABI_RESERVE(4)
 	KABI_RESERVE(5)

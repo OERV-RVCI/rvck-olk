@@ -826,7 +826,11 @@ struct device {
 	KABI_RESERVE(2)
 	KABI_RESERVE(3)
 #endif
+#ifdef CONFIG_GMEM
+	KABI_USE(4, void *gm_dev)
+#else
 	KABI_RESERVE(4)
+#endif
 	KABI_RESERVE(5)
 	KABI_RESERVE(6)
 	KABI_RESERVE(7)
