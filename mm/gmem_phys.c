@@ -7,8 +7,12 @@
  *
  */
 
-#include <linux/dma-direct.h>
+#include <linux/list.h>
+#include <linux/slab.h>
 #include <linux/kthread.h>
+#include <linux/dma-mapping.h>
+#include <linux/dma-direct.h>
+
 #include <linux/vm_object.h>
 
 #include "gmem-internal.h"
@@ -189,6 +193,53 @@ void hnode_activelist_del_and_add(struct hnode *hnode, struct gm_page *gm_page)
 	spin_unlock(&hnode->activelist_lock);
 }
 
+void mark_gm_page_active(struct gm_page *gm_page)
+{
+	struct hnode *hnode = get_hnode(gm_page->hnid);
+
+	if (!hnode)
+		return;
+
+	hnode_activelist_del_and_add(hnode, gm_page);
+}
+
+void mark_gm_page_pinned(struct gm_page *gm_page)
+{
+	struct hnode *hnode = get_hnode(gm_page->hnid);
+
+	if (!hnode)
+		return;
+
+	spin_lock(&hnode->activelist_lock);
+	if (gm_page_evicting(gm_page)) {
+		gmem_err("%s: maybe page has been evicted!", __func__);
+		goto unlock;
+	} else if (gm_page_pinned(gm_page)) {
+		goto unlock;
+	}
+	gm_page_flags_set(gm_page, GM_PAGE_PINNED);
+
+unlock:
+	spin_unlock(&hnode->activelist_lock);
+}
+
+void mark_gm_page_unpinned(struct gm_page *gm_page)
+{
+	struct hnode *hnode = get_hnode(gm_page->hnid);
+
+	if (!hnode)
+		return;
+
+	spin_lock(&hnode->activelist_lock);
+	if (!gm_page_pinned(gm_page) || gm_page_evicting(gm_page))
+		goto unlock;
+
+	gm_page_flags_clear(gm_page, GM_PAGE_PINNED);
+
+unlock:
+	spin_unlock(&hnode->activelist_lock);
+}
+
 int gm_add_pages(unsigned int hnid, struct list_head *pages)
 {
 	struct hnode *hnode;
@@ -202,6 +253,7 @@ int gm_add_pages(unsigned int hnid, struct list_head *pages)
 		list_del(&gm_page->gm_page_list);
 		hnode_freelist_add(hnode, gm_page);
 		hnode_free_pages_inc(hnode);
+		gm_page_flags_clear(gm_page, GM_PAGE_PINNED);
 	}
 
 	return 0;
@@ -364,6 +416,10 @@ static void gm_do_swap(struct hnode *hnode)
 
 	spin_lock(&hnode->activelist_lock);
 	list_for_each_entry_safe(gm_page, n, &hnode->activelist, gm_page_list) {
+		if (gm_page_pinned(gm_page)) {
+			gmem_err("%s: va %lx is pinned!", __func__, gm_page->va);
+			continue;
+		}
 		/* Move gm_page to temporary list. */
 		get_gm_page(gm_page);
 		gm_page_flags_set(gm_page, GM_PAGE_EVICTING);
@@ -456,6 +512,11 @@ static struct gm_page *get_gm_page_from_freelist(struct hnode *hnode)
 	gm_page = list_first_entry_or_null(&hnode->freelist, struct gm_page, gm_page_list);
 	/* Delete from freelist. */
 	if (gm_page) {
+		if (gm_page_pinned(gm_page)) {
+			gmem_err("%s: gm_page %lx from freelist has pinned flag, clear it!",
+				__func__, (unsigned long)gm_page);
+			gm_page_flags_clear(gm_page, GM_PAGE_PINNED);
+		}
 		list_del_init(&gm_page->gm_page_list);
 		hnode_free_pages_dec(hnode);
 		get_gm_page(gm_page);

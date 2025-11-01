@@ -178,8 +178,14 @@ enum gm_ret gm_dev_fault_locked(struct mm_struct *mm, unsigned long  addr, struc
 		goto peer_map;
 	} else if (gm_mapping_device(gm_mapping)) {
 		switch (behavior) {
+		case MADV_PINNED:
+			mark_gm_page_pinned(gm_mapping->gm_page);
+			fallthrough;
 		case MADV_WILLNEED:
 			mark_gm_page_active(gm_mapping->gm_page);
+			goto unlock;
+		case MADV_UNPINNED:
+			mark_gm_page_unpinned(gm_mapping->gm_page);
 			goto unlock;
 		default:
 			ret = 0;
@@ -231,6 +237,11 @@ peer_map:
 	gm_mapping->dev = dev;
 	gm_page_add_rmap(gm_page, mm, addr);
 	gm_mapping->gm_page = gm_page;
+
+	if (behavior == MADV_PINNED)
+		mark_gm_page_pinned(gm_page);
+	else if (behavior == MADV_UNPINNED)
+		mark_gm_page_unpinned(gm_page);
 
 	hnode_activelist_add(hnode, gm_page);
 	hnode_active_pages_inc(hnode);

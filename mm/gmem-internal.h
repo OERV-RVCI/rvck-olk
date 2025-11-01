@@ -104,6 +104,7 @@ void hnode_init(struct hnode *hnode, unsigned int hnid, struct gm_dev *dev);
 void hnode_deinit(unsigned int hnid, struct gm_dev *dev);
 
 #define GM_PAGE_EVICTING	0x1
+#define GM_PAGE_PINNED		0x2
 
 static inline void gm_page_flags_set(struct gm_page *gm_page, int flags)
 {
@@ -119,6 +120,15 @@ static inline bool gm_page_evicting(struct gm_page *gm_page)
 {
 	return !!(gm_page->flag & GM_PAGE_EVICTING);
 }
+
+static inline bool gm_page_pinned(struct gm_page *gm_page)
+{
+	return !!(gm_page->flag & GM_PAGE_PINNED);
+}
+
+void mark_gm_page_pinned(struct gm_page *gm_page);
+void mark_gm_page_active(struct gm_page *gm_page);
+void mark_gm_page_unpinned(struct gm_page *gm_page);
 
 int __init gm_page_cachep_init(void);
 void gm_page_cachep_destroy(void);
