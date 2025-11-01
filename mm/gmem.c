@@ -9,6 +9,7 @@
 
 #include <linux/gmem.h>
 #include <linux/mm.h>
+#include <linux/vm_object.h>
 #include <linux/xarray.h>
 
 #include "gmem-internal.h"
@@ -46,10 +47,16 @@ static int __init gmem_init(void)
 	if (err)
 		goto free_ctx;
 
+	err = vm_object_init();
+	if (err)
+		goto free_gm_page;
+
 	static_branch_enable(&gmem_status);
 
 	return 0;
 
+free_gm_page:
+	gm_page_cachep_destroy();
 free_ctx:
 	kmem_cache_destroy(gm_ctx_cache);
 free_dev:
