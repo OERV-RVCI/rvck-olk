@@ -757,3 +757,211 @@ no_hnid:
 	return error;
 }
 EXPORT_SYMBOL_GPL(hmadvise_inner);
+
+static bool hnid_match_dest(int hnid, struct gm_mapping *dest)
+{
+	return (hnid < 0) ? gm_mapping_cpu(dest) : gm_mapping_device(dest);
+}
+
+static void do_hmemcpy(struct mm_struct *mm, int hnid, unsigned long dest,
+		unsigned long src, size_t size)
+{
+	enum gm_ret ret;
+	int page_size = HPAGE_SIZE;
+	struct vm_area_struct *vma_dest, *vma_src;
+	struct gm_mapping *gm_mapping_dest, *gm_mapping_src;
+	struct gm_dev *dev = NULL;
+	struct gm_memcpy_t gmc = {0};
+
+	if (size == 0)
+		return;
+
+	mmap_read_lock(mm);
+	vma_dest = find_vma(mm, dest);
+	vma_src = find_vma(mm, src);
+
+	if (!vma_src || vma_src->vm_start > src || !vma_dest || vma_dest->vm_start > dest) {
+		gmem_err("hmemcpy: the vma find by src/dest is NULL!");
+		goto unlock_mm;
+	}
+
+	gm_mapping_dest = vm_object_lookup(vma_dest->vm_obj, dest & ~(page_size - 1));
+	gm_mapping_src = vm_object_lookup(vma_src->vm_obj, src & ~(page_size - 1));
+
+	if (!gm_mapping_src) {
+		gmem_err("hmemcpy: gm_mapping_src is NULL");
+		goto unlock_mm;
+	}
+
+	if (gm_mapping_nomap(gm_mapping_src)) {
+		gmem_err("hmemcpy: src address is not mapping to CPU or device");
+		goto unlock_mm;
+	}
+
+	if (hnid != -1) {
+		dev = get_gm_dev(hnid);
+		if (!dev) {
+			gmem_err("hmemcpy: hnode's dev is NULL");
+			goto unlock_mm;
+		}
+	}
+
+	// Trigger dest page fault on host or device
+	if (!gm_mapping_dest || gm_mapping_nomap(gm_mapping_dest)
+		|| !hnid_match_dest(hnid, gm_mapping_dest)) {
+		if (hnid == -1) {
+			ret = handle_mm_fault(vma_dest, dest & ~(page_size - 1), FAULT_FLAG_USER |
+						FAULT_FLAG_INSTRUCTION | FAULT_FLAG_WRITE, NULL);
+			if (ret) {
+				gmem_err("%s: failed to execute host page fault, ret:%d",
+					__func__, ret);
+				goto unlock_mm;
+			}
+		} else {
+			ret = gm_dev_fault_locked(mm, dest & ~(page_size - 1), dev, MADV_WILLNEED);
+			if (ret != GM_RET_SUCCESS) {
+				gmem_err("%s: failed to excecute dev page fault.", __func__);
+				goto unlock_mm;
+			}
+		}
+	}
+	if (!gm_mapping_dest)
+		gm_mapping_dest = vm_object_lookup(vma_dest->vm_obj, round_down(dest, page_size));
+
+	if (gm_mapping_dest && gm_mapping_dest != gm_mapping_src)
+		mutex_lock(&gm_mapping_dest->lock);
+
+	mutex_lock(&gm_mapping_src->lock);
+	// Use memcpy when there is no device address, otherwise use peer_memcpy
+	if (hnid == -1) {
+		if (gm_mapping_cpu(gm_mapping_src)) { // host to host
+			gmem_err("hmemcpy: host to host is unimplemented\n");
+			goto unlock_gm_mapping;
+		} else if (gm_mapping_device(gm_mapping_src)) { // device to host
+			dev = gm_mapping_src->dev;
+			gmc.dest = phys_to_dma(dev->dma_dev,
+				page_to_phys(gm_mapping_dest->page) + (dest & (page_size - 1)));
+			gmc.src = gm_mapping_src->gm_page->dev_dma_addr + (src & (page_size - 1));
+			gmc.kind = GM_MEMCPY_D2H;
+		} else {
+			gmem_err("hmemcpy: src address is not mapping to CPU or device");
+			goto unlock_gm_mapping;
+		}
+	} else {
+		if (gm_mapping_cpu(gm_mapping_src)) { // host to device
+			gmc.dest = gm_mapping_dest->gm_page->dev_dma_addr +
+						(dest & (page_size - 1));
+			gmc.src = phys_to_dma(dev->dma_dev,
+				page_to_phys(gm_mapping_src->page) + (src & (page_size - 1)));
+			gmc.kind = GM_MEMCPY_H2D;
+		} else if (gm_mapping_device(gm_mapping_src)) { // device to device
+			gmem_err("hmemcpy: device to device is unimplemented\n");
+			goto unlock_gm_mapping;
+		} else {
+			gmem_err("hmemcpy: src address is not mapping to CPU or device");
+			goto unlock_gm_mapping;
+		}
+	}
+	gmc.mm = mm;
+	gmc.dev = dev;
+	gmc.size = size;
+	dev->mmu->peer_hmemcpy(&gmc);
+
+unlock_gm_mapping:
+	mutex_unlock(&gm_mapping_src->lock);
+	if (gm_mapping_dest && gm_mapping_dest != gm_mapping_src)
+		mutex_unlock(&gm_mapping_dest->lock);
+unlock_mm:
+	mmap_read_unlock(mm);
+}
+
+/*
+ * Each page needs to be copied in three parts when the address is not aligned.
+ * |      ml <--0-->|<1><--2->       |
+ * |         -------|---------       |
+ * |        /      /|  /     /       |
+ * |       /      / | /     /        |
+ * |      /      /  |/     /         |
+ * |      ----------|------          |
+ * |                |                |
+ * |<----page x---->|<----page y---->|
+ */
+
+static void __hmemcpy(int hnid, unsigned long dest, unsigned long src, size_t size)
+{
+	int i = 0;
+	// offsets within the huge page for the source and destination addresses
+	int src_offset = src & (HPAGE_SIZE - 1);
+	int dst_offset = dest & (HPAGE_SIZE - 1);
+	// Divide each page into three parts according to the align
+	int ml[3] = {
+		HPAGE_SIZE - (src_offset < dst_offset ? dst_offset : src_offset),
+		src_offset < dst_offset ? (dst_offset - src_offset) : (src_offset - dst_offset),
+		src_offset < dst_offset ? src_offset : dst_offset
+	};
+	struct mm_struct *mm = current->mm;
+
+	if (size == 0)
+		return;
+
+	while (size >= ml[i]) {
+		if (ml[i] > 0) {
+			do_hmemcpy(mm, hnid, dest, src, ml[i]);
+			src += ml[i];
+			dest += ml[i];
+			size -= ml[i];
+		}
+		i = (i + 1) % 3;
+	}
+
+	if (size > 0)
+		do_hmemcpy(mm, hnid, dest, src, size);
+}
+
+int hmemcpy(int hnid, unsigned long dest, unsigned long src, size_t size)
+{
+	struct vm_area_struct *vma_dest, *vma_src;
+	struct mm_struct *mm = current->mm;
+
+	if (hnid < 0) {
+		if (hnid != -1) {
+			gmem_err("%s: invalid hnid %d < 0\n", __func__, hnid);
+			return -EINVAL;
+		}
+	} else if (!is_hnode(hnid)) {
+		gmem_err("%s: can't find hnode by hnid:%d or hnode is not allowed\n",
+			__func__, hnid);
+		return -EINVAL;
+	}
+
+	mmap_read_lock(mm);
+	vma_dest = find_vma(mm, dest);
+	vma_src = find_vma(mm, src);
+
+	if ((ULONG_MAX - size < src) || !vma_src || vma_src->vm_start > src ||
+		!vma_is_peer_shared(vma_src) || vma_src->vm_end < (src + size)) {
+		gmem_err("failed to find peer_shared vma by invalid src or size\n");
+		goto unlock;
+	}
+
+	if ((ULONG_MAX - size < dest) || !vma_dest || vma_dest->vm_start > dest ||
+		!vma_is_peer_shared(vma_dest) || vma_dest->vm_end < (dest + size)) {
+		gmem_err("failed to find peer_shared vma by invalid dest or size\n");
+		goto unlock;
+	}
+
+	if (!(vma_dest->vm_flags & VM_WRITE)) {
+		gmem_err("dest is not writable.\n");
+		goto unlock;
+	}
+	mmap_read_unlock(mm);
+
+	__hmemcpy(hnid, dest, src, size);
+
+	return 0;
+
+unlock:
+	mmap_read_unlock(mm);
+	return -EINVAL;
+}
+EXPORT_SYMBOL_GPL(hmemcpy);

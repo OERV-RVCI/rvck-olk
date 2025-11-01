@@ -192,6 +192,7 @@ int gm_as_destroy(struct gm_as *as);
 int gm_as_attach(struct gm_as *as, struct gm_dev *dev,
 				bool activate, struct gm_context **out_ctx);
 int hmadvise_inner(int hnid, unsigned long start, size_t len_in, int behavior);
+int hmemcpy(int hnid, unsigned long dest, unsigned long src, size_t size);
 
 struct gm_page {
 	struct list_head gm_page_list;
