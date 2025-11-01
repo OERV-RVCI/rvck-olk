@@ -64,7 +64,8 @@ static inline int get_hnuma_id(struct gm_dev *gm_dev)
 				| GM_MAPPING_NOMAP)
 
 
-static inline void gm_mapping_flags_set(struct gm_mapping *gm_mapping, int flags)
+static inline void gm_mapping_flags_set(struct gm_mapping *gm_mapping,
+				int flags)
 {
 	if (flags & GM_MAPPING_TYPE_MASK)
 		gm_mapping->flag &= ~GM_MAPPING_TYPE_MASK;
@@ -72,7 +73,8 @@ static inline void gm_mapping_flags_set(struct gm_mapping *gm_mapping, int flags
 	gm_mapping->flag |= flags;
 }
 
-static inline void gm_mapping_flags_clear(struct gm_mapping *gm_mapping, int flags)
+static inline void gm_mapping_flags_clear(struct gm_mapping *gm_mapping,
+				int flags)
 {
 	gm_mapping->flag &= ~flags;
 }
@@ -100,6 +102,23 @@ struct hnode *get_hnode(unsigned int hnid);
 struct gm_dev *get_gm_dev(unsigned int nid);
 void hnode_init(struct hnode *hnode, unsigned int hnid, struct gm_dev *dev);
 void hnode_deinit(unsigned int hnid, struct gm_dev *dev);
+
+#define GM_PAGE_EVICTING	0x1
+
+static inline void gm_page_flags_set(struct gm_page *gm_page, int flags)
+{
+	gm_page->flag |= flags;
+}
+
+static inline void gm_page_flags_clear(struct gm_page *gm_page, int flags)
+{
+	gm_page->flag &= ~flags;
+}
+
+static inline bool gm_page_evicting(struct gm_page *gm_page)
+{
+	return !!(gm_page->flag & GM_PAGE_EVICTING);
+}
 
 int __init gm_page_cachep_init(void);
 void gm_page_cachep_destroy(void);

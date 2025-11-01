@@ -7,13 +7,16 @@
  *
  */
 
-#include <linux/pgtable.h>
-#include <linux/slab.h>
+#include <linux/dma-direct.h>
+#include <linux/kthread.h>
+#include <linux/vm_object.h>
 
 #include "gmem-internal.h"
 
-static struct kmem_cache *gm_page_cachep;
+#define NUM_SWAP_PAGES		16
+#define MAX_SWAP_RETRY_TIMES	10
 
+static struct kmem_cache *gm_page_cachep;
 
 DEFINE_SPINLOCK(hnode_lock);
 static nodemask_t hnode_map;
@@ -96,6 +99,8 @@ struct gm_dev *get_gm_dev(unsigned int nid)
 	return dev;
 }
 
+static void init_swapd(struct hnode *hnode);
+
 int gm_dev_register_hnode(struct gm_dev *dev)
 {
 	unsigned int hnid;
@@ -117,6 +122,7 @@ int gm_dev_register_hnode(struct gm_dev *dev)
 		goto free_hnode;
 
 	hnode_init(hnode, hnid, dev);
+	init_swapd(hnode);
 
 	return GM_RET_SUCCESS;
 
@@ -170,14 +176,16 @@ void hnode_activelist_del(struct hnode *hnode, struct gm_page *gm_page)
 	spin_lock(&hnode->activelist_lock);
 	/* If a gm_page is being evicted, it is currently located in the
 	 * temporary linked list. */
-	list_del_init(&gm_page->gm_page_list);
+	if (!gm_page_evicting(gm_page))
+		list_del_init(&gm_page->gm_page_list);
 	spin_unlock(&hnode->activelist_lock);
 }
 
 void hnode_activelist_del_and_add(struct hnode *hnode, struct gm_page *gm_page)
 {
 	spin_lock(&hnode->activelist_lock);
-	list_move_tail(&gm_page->gm_page_list, &hnode->activelist);
+	if (!gm_page_evicting(gm_page))
+		list_move_tail(&gm_page->gm_page_list, &hnode->activelist);
 	spin_unlock(&hnode->activelist_lock);
 }
 
@@ -227,6 +235,205 @@ void gm_page_remove_rmap(struct gm_page *gm_page)
 	spin_unlock(&gm_page->rmap_lock);
 }
 
+enum gm_evict_ret {
+	GM_EVICT_SUCCESS = 0,
+	GM_EVICT_UNMAP,
+	GM_EVICT_FALLBACK,
+	GM_EVICT_DEVERR,
+};
+
+enum gm_evict_ret gm_evict_page_locked(struct gm_page *gm_page)
+{
+	struct gm_dev *gm_dev;
+	struct gm_mapping *gm_mapping;
+	struct vm_area_struct *vma;
+	struct mm_struct *mm;
+	struct page *page;
+	struct device *dma_dev;
+	unsigned long va;
+	struct folio *folio = NULL;
+	struct gm_fault_t gmf = {
+		.size = HPAGE_SIZE,
+		.copy = true
+	};
+	enum gm_evict_ret ret = GM_EVICT_SUCCESS;
+	enum gm_ret gm_ret;
+
+	gm_dev = get_gm_dev(gm_page->hnid);
+	if (!gm_dev)
+		return GM_EVICT_DEVERR;
+
+	spin_lock(&gm_page->rmap_lock);
+	if (!gm_page->mm) {
+		/* Evicting gm_page conflicts with unmap.*/
+		ret = GM_EVICT_UNMAP;
+		goto rmap_unlock;
+	}
+
+	mm = gm_page->mm;
+	va = gm_page->va;
+	vma = find_vma(mm, va);
+	if (!vma || !vma->vm_obj) {
+		gmem_err("%s: cannot find vma or vma->vm_obj is null for va %lx", __func__, va);
+		ret = GM_EVICT_UNMAP;
+		goto rmap_unlock;
+	}
+
+	gm_mapping = vm_object_lookup(vma->vm_obj, va);
+	if (!gm_mapping) {
+		gmem_err("%s: no gm_mapping for va %lx", __func__, va);
+		ret = GM_EVICT_UNMAP;
+		goto rmap_unlock;
+	}
+
+	spin_unlock(&gm_page->rmap_lock);
+
+	mutex_lock(&gm_mapping->lock);
+	if (!gm_mapping_device(gm_mapping)) {
+		/* Evicting gm_page conflicts with unmap.*/
+		ret = GM_EVICT_UNMAP;
+		goto gm_mapping_unlock;
+	}
+
+	if (gm_mapping->gm_page != gm_page) {
+		/* gm_mapping maps to another gm_page. */
+		ret = GM_EVICT_UNMAP;
+		goto gm_mapping_unlock;
+	}
+
+	folio = vma_alloc_folio(GFP_TRANSHUGE, HPAGE_PMD_ORDER, vma, va, true);
+	if (!folio) {
+		gmem_err("%s: allocate host page failed.", __func__);
+		ret = GM_EVICT_FALLBACK;
+		goto gm_mapping_unlock;
+	}
+	page = &folio->page;
+
+	gmf.mm = mm;
+	gmf.va = va;
+	gmf.dev = gm_dev;
+	gmf.pfn = gm_page->dev_pfn;
+	dma_dev = gm_dev->dma_dev;
+	gmf.dma_addr = dma_map_page(dma_dev, page, 0, HPAGE_SIZE, DMA_BIDIRECTIONAL);
+	if (dma_mapping_error(dma_dev, gmf.dma_addr)) {
+		gmem_err("%s: dma map failed.", __func__);
+		ret = GM_EVICT_FALLBACK;
+		goto gm_mapping_unlock;
+	}
+
+	gm_ret = gm_dev->mmu->peer_unmap(&gmf);
+	if (gm_ret != GM_RET_SUCCESS) {
+		gmem_err("%s: peer_unmap failed.", __func__);
+		ret = GM_EVICT_DEVERR;
+		goto dma_unmap;
+	}
+
+	gm_mapping_flags_set(gm_mapping, GM_MAPPING_CPU);
+	gm_page_remove_rmap(gm_page);
+	gm_mapping->page = page;
+	put_gm_page(gm_page);
+dma_unmap:
+	dma_unmap_page(dma_dev, gmf.dma_addr, HPAGE_SIZE, DMA_BIDIRECTIONAL);
+gm_mapping_unlock:
+	mutex_unlock(&gm_mapping->lock);
+	return ret;
+rmap_unlock:
+	spin_unlock(&gm_page->rmap_lock);
+	return ret;
+}
+
+enum gm_evict_ret gm_evict_page(struct gm_page *gm_page)
+{
+	struct mm_struct *mm = gm_page->mm;
+	enum gm_evict_ret ret;
+
+	mmap_read_lock(mm);
+	ret = gm_evict_page_locked(gm_page);
+	mmap_read_unlock(mm);
+	return ret;
+}
+
+static void gm_do_swap(struct hnode *hnode)
+{
+	struct list_head swap_list;
+	struct gm_page *gm_page, *n;
+	unsigned int nr_swap_pages = 0;
+	int ret;
+
+	INIT_LIST_HEAD(&swap_list);
+
+	spin_lock(&hnode->activelist_lock);
+	list_for_each_entry_safe(gm_page, n, &hnode->activelist, gm_page_list) {
+		/* Move gm_page to temporary list. */
+		get_gm_page(gm_page);
+		gm_page_flags_set(gm_page, GM_PAGE_EVICTING);
+		list_move(&gm_page->gm_page_list, &swap_list);
+		nr_swap_pages++;
+		if (nr_swap_pages >= NUM_SWAP_PAGES)
+			break;
+	}
+	spin_unlock(&hnode->activelist_lock);
+
+	list_for_each_entry_safe(gm_page, n, &swap_list, gm_page_list) {
+		list_del_init(&gm_page->gm_page_list);
+		ret = gm_evict_page_locked(gm_page);
+		gm_page_flags_clear(gm_page, GM_PAGE_EVICTING);
+		if (ret == GM_EVICT_UNMAP) {
+			/* Evicting gm_page conflicts with unmap.*/
+			put_gm_page(gm_page);
+		} else if (ret == GM_EVICT_FALLBACK) {
+			/* An error occurred with the host, and gm_page needs
+			 * to be added back to the activelist. */
+			hnode_activelist_add(hnode, gm_page);
+			put_gm_page(gm_page);
+		} else if (ret == GM_EVICT_DEVERR) {
+			/* It generally occurs when the process has already
+			 * exited, at which point gm_page needs to be returned
+			 * to the freelist. */
+			put_gm_page(gm_page);
+		} else {
+			hnode_active_pages_dec(hnode);
+			put_gm_page(gm_page);
+		}
+	}
+};
+
+static inline bool need_wake_up_swapd(struct hnode *hnode)
+{
+	return false;
+}
+
+static int swapd_func(void *data)
+{
+	struct hnode *hnode = (struct hnode *)data;
+
+	while (!kthread_should_stop()) {
+		if (!need_wake_up_swapd(hnode)) {
+			set_current_state(TASK_INTERRUPTIBLE);
+			schedule();
+		}
+
+		gm_do_swap(hnode);
+	}
+
+	return 0;
+};
+
+static void init_swapd(struct hnode *hnode)
+{
+	hnode->swapd_task = kthread_run(swapd_func, NULL, "gm_swapd/%u", hnode->id);
+	if (IS_ERR(hnode->swapd_task)) {
+		gmem_err("%s: create swapd task failed", __func__);
+		hnode->swapd_task = NULL;
+	}
+}
+
+static void wake_up_swapd(struct hnode *hnode)
+{
+	if (likely(hnode->swapd_task))
+		wake_up_process(hnode->swapd_task);
+}
+
 static bool can_import(struct hnode *hnode)
 {
 	unsigned long nr_pages;
@@ -252,6 +459,9 @@ static struct gm_page *get_gm_page_from_freelist(struct hnode *hnode)
 		list_del_init(&gm_page->gm_page_list);
 		hnode_free_pages_dec(hnode);
 		get_gm_page(gm_page);
+		/* TODO: wakeup swapd if needed. */
+		if (need_wake_up_swapd(hnode))
+			wake_up_swapd(hnode);
 	}
 	spin_unlock(&hnode->freelist_lock);
 
@@ -269,6 +479,7 @@ struct gm_page *gm_alloc_page(struct mm_struct *mm, struct hnode *hnode)
 {
 	struct gm_page *gm_page;
 	struct gm_dev *gm_dev;
+	int retry_times = 0;
 	int ret = 0;
 
 	if (hnode->dev)
@@ -284,6 +495,15 @@ retry:
 		if (!ret)
 			goto retry;
 		hnode->import_failed = true;
+	}
+
+	/* Try to swap pages. */
+	if (!gm_page) {
+		if (retry_times > MAX_SWAP_RETRY_TIMES)
+			return NULL;
+		gm_do_swap(hnode);
+		retry_times++;
+		goto retry;
 	}
 
 	return gm_page;

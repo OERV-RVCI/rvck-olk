@@ -10,6 +10,7 @@
 #include <linux/dma-mapping.h>
 #include <linux/dma-direct.h>
 #include <linux/gmem.h>
+#include <linux/mman.h>
 #include <linux/mm.h>
 #include <linux/vm_object.h>
 #include <linux/xarray.h>
@@ -176,7 +177,14 @@ enum gm_ret gm_dev_fault_locked(struct mm_struct *mm, unsigned long  addr, struc
 	if (gm_mapping_nomap(gm_mapping)) {
 		goto peer_map;
 	} else if (gm_mapping_device(gm_mapping)) {
-		goto unlock;
+		switch (behavior) {
+		case MADV_WILLNEED:
+			mark_gm_page_active(gm_mapping->gm_page);
+			goto unlock;
+		default:
+			ret = 0;
+			goto unlock;
+		}
 	} else if (gm_mapping_cpu(gm_mapping)) {
 		page = gm_mapping->page;
 		if (!page) {
