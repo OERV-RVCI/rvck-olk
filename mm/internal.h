@@ -716,8 +716,6 @@ void memmap_init_range(unsigned long, int, unsigned long, unsigned long,
 
 #if defined CONFIG_COMPACTION || defined CONFIG_CMA
 
-#define MAX_PAGE_ORDER	MAX_ORDER
-
 /*
  * in mm/compaction.c
  */
