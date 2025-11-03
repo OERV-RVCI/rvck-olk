@@ -38,6 +38,7 @@ struct device;
 struct iommu_domain;
 struct iommu_domain_ops;
 struct iommu_dirty_ops;
+struct iommu_perm_ops;
 struct notifier_block;
 struct iommu_sva;
 struct iommu_dma_cookie;
@@ -269,6 +270,9 @@ struct iommu_domain {
 		struct {	/* IOMMU_DOMAIN_SVA */
 			struct mm_struct *mm;
 			int users;
+#ifdef CONFIG_IOMMU_KSVA
+			KABI_FILL_HOLE(u32 isolated_pasid)
+#endif
 			/*
 			 * Next iommu_domain in mm->iommu_mm->sva-domains list
 			 * protected by iommu_sva_lock.
@@ -283,8 +287,13 @@ struct iommu_domain {
 #else
 	KABI_RESERVE(1)
 #endif
+#ifdef CONFIG_IOMMU_KSVA
+	KABI_USE(2, void *sva_data)
+	KABI_USE(3, const struct iommu_perm_ops *perm_ops)
+#else
 	KABI_RESERVE(2)
 	KABI_RESERVE(3)
+#endif
 	KABI_RESERVE(4)
 	KABI_RESERVE(5)
 	KABI_RESERVE(6)
@@ -410,6 +419,22 @@ struct iommu_iotlb_gather {
 	bool			queued;
 
 	KABI_RESERVE(1)
+};
+
+/**
+ * struct iommu_plb_gather - Range information for a pending plb flush
+ *
+ * @va: IOVA representing the start of the range to be flushed
+ * @size: representing the size of the range to be flushed
+ *
+ * This structure is intended to be updated by invoking the ->grant()
+ * or ->ungrant() function in struct iommu_ops before eventually being passed
+ * into iommu_plb_sync(). In the ->grant() and ->ungrant() function,
+ * drivers can adjust the range to be flushed.
+ */
+struct iommu_plb_gather {
+	void *va;
+	size_t size;
 };
 
 /**
@@ -610,6 +635,28 @@ iommu_copy_struct_from_full_user_array(void *kdst, size_t kdst_entry_size,
 	}
 	return 0;
 }
+
+/** struct iommu_perm_ops - iommu permission related ops.
+ * @grant: Grant a range of memory by specific permission
+ * @ungrant: Ungrant priviously granted memory
+ * @plb_sync_all: Synchronize permission related buffer for the entire range
+ * @plb_sync: Synchronize permission related buffer for a specific range
+ */
+struct iommu_perm_ops {
+	int (*grant)(struct iommu_domain *domain, void *va, size_t size,
+		     int perm, void *cookie,
+		     struct iommu_plb_gather *plb_gather);
+	int (*ungrant)(struct iommu_domain *domain, void *va, size_t size,
+		       void *cookie, struct iommu_plb_gather *plb_gather);
+	void (*plb_sync)(struct iommu_domain *domain,
+			struct iommu_plb_gather *plb_gather);
+	void (*plb_sync_all)(struct iommu_domain *domain);
+
+	KABI_RESERVE(1)
+	KABI_RESERVE(2)
+	KABI_RESERVE(3)
+	KABI_RESERVE(4)
+};
 
 /**
  * struct iommu_ops - iommu ops and capabilities
@@ -851,6 +898,7 @@ struct iommu_device {
 	struct fwnode_handle *fwnode;
 	struct device *dev;
 	struct iommu_group *singleton_group;
+	KABI_FILL_HOLE(u32 min_pasids)
 	u32 max_pasids;
 
 	KABI_RESERVE(1)
@@ -917,7 +965,7 @@ struct dev_iommu {
 	u32				require_direct:1;
 	u32				shadow_on_flush:1;
 
-	KABI_RESERVE(1)
+	KABI_USE(1, u32 min_pasids)
 	KABI_RESERVE(2)
 };
 
@@ -1903,4 +1951,69 @@ static inline void iopf_group_response(struct iopf_group *group,
 {
 }
 #endif /* CONFIG_IOMMU_IOPF */
+
+#ifdef CONFIG_IOMMU_KSVA
+struct iommu_sva *iommu_sva_bind_device_isolated(struct device *dev,
+					    struct mm_struct *mm, void *data);
+void iommu_sva_unbind_device_isolated(struct iommu_sva *handle);
+u32 iommu_sva_get_isolated_pasid(struct iommu_sva *handle);
+int iommu_sva_grant(struct iommu_sva *sva, void *va, size_t size, int perm,
+		    void *cookie);
+int iommu_sva_ungrant(struct iommu_sva *sva, void *va, size_t size,
+		      void *cookie);
+struct iommu_sva *iommu_ksva_bind_device(struct device *dev, void *data);
+void iommu_ksva_unbind_device(struct iommu_sva *handle);
+bool iommu_is_ksva_domain(struct iommu_domain *domain);
+
+static inline void iommu_plb_sync_all(struct iommu_domain *domain)
+{
+	if (domain->perm_ops && domain->perm_ops->plb_sync_all)
+		domain->perm_ops->plb_sync_all(domain);
+}
+
+static inline void iommu_plb_sync(struct iommu_domain *domain,
+				struct iommu_plb_gather *plb_gather)
+{
+	if (domain->perm_ops && domain->perm_ops->plb_sync)
+		domain->perm_ops->plb_sync(domain, plb_gather);
+}
+#else
+static inline struct iommu_sva *
+iommu_sva_bind_device_isolated(struct device *dev, struct mm_struct *mm, void *data)
+{
+	return ERR_PTR(-ENODEV);
+}
+static inline void iommu_sva_unbind_device_isolated(struct iommu_sva *handle) {}
+static inline u32 iommu_sva_get_isolated_pasid(struct iommu_sva *handle)
+{
+	return IOMMU_PASID_INVALID;
+}
+
+static inline int iommu_sva_grant(struct iommu_sva *sva, void *va, size_t size,
+				  int perm, void *cookie)
+{
+	return -EOPNOTSUPP;
+}
+
+static inline int iommu_sva_ungrant(struct iommu_sva *sva, void *va,
+				    size_t size, void *cookie)
+{
+	return -EOPNOTSUPP;
+}
+static inline void iommu_plb_sync_all(struct iommu_domain *domain) {}
+static inline void iommu_plb_sync(struct iommu_domain *domain,
+				struct iommu_plb_gather *plb_gather) {}
+
+static inline struct iommu_sva *iommu_ksva_bind_device(struct device *dev,
+						       void *data)
+{
+	return ERR_PTR(-ENODEV);
+}
+
+static inline void iommu_ksva_unbind_device(struct iommu_sva *handle) {}
+static inline bool iommu_is_ksva_domain(struct iommu_domain *domain)
+{
+	return false;
+}
+#endif /* CONFIG_IOMMU_KSVA */
 #endif /* __LINUX_IOMMU_H */
