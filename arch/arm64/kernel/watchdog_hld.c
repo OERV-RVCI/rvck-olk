@@ -38,7 +38,7 @@ bool __init arch_perf_nmi_is_available(void)
 
 static int watchdog_perf_update_period(void *data)
 {
-	int cpu = raw_smp_processor_id();
+	int cpu = smp_processor_id();
 	u64 max_cpu_freq, new_period;
 
 	max_cpu_freq = cpufreq_get_hw_max_freq(cpu) * 1000UL;
@@ -46,7 +46,7 @@ static int watchdog_perf_update_period(void *data)
 		return 0;
 
 	new_period = watchdog_thresh * max_cpu_freq;
-	hardlockup_detector_perf_adjust_period(cpu, new_period);
+	hardlockup_detector_perf_adjust_period(new_period);
 
 	return 0;
 }

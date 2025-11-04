@@ -200,13 +200,12 @@ void hardlockup_detector_perf_cleanup(void)
 
 /**
  * hardlockup_detector_perf_adjust_period - Adjust the event period due
- *                                          to cpu frequency change
- * @cpu: The CPU whose event period will be adjusted
+ *                                          to current cpu frequency change
  * @period: The target period to be set
  */
-void hardlockup_detector_perf_adjust_period(int cpu, u64 period)
+void hardlockup_detector_perf_adjust_period(u64 period)
 {
-	struct perf_event *event = per_cpu(watchdog_ev, cpu);
+       struct perf_event *event = this_cpu_read(watchdog_ev);
 
 	if (!(watchdog_enabled & WATCHDOG_HARDLOCKUP_ENABLED))
 		return;
