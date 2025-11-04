@@ -5,9 +5,13 @@
 #include "hclge_mbx.h"
 #include "hnae3.h"
 #include "hclge_comm_rss.h"
+#include "hclge_dcb.h"
+#include "hclge_tm.h"
 
 #define CREATE_TRACE_POINTS
 #include "hclge_trace.h"
+
+#define HCLGE_MBX_TC_ETS_INVALID 255
 
 static u16 hclge_errno_to_resp(int errno)
 {
@@ -492,6 +496,7 @@ static void hclge_get_basic_info(struct hclge_vport *vport,
 {
 	struct hnae3_knic_private_info *kinfo = &vport->nic.kinfo;
 	struct hnae3_ae_dev *ae_dev = vport->back->ae_dev;
+	struct hclge_dev *hdev = vport->back;
 	struct hclge_basic_info *basic_info;
 	unsigned int i;
 	u32 pf_caps;
@@ -503,6 +508,14 @@ static void hclge_get_basic_info(struct hclge_vport *vport,
 	pf_caps = le32_to_cpu(basic_info->pf_caps);
 	if (test_bit(HNAE3_DEV_SUPPORT_VLAN_FLTR_MDF_B, ae_dev->caps))
 		hnae3_set_bit(pf_caps, HNAE3_PF_SUPPORT_VLAN_FLTR_MDF_B, 1);
+	if (test_bit(HNAE3_DEV_SUPPORT_VF_MULTI_TCS_B, ae_dev->caps)) {
+		hnae3_set_bit(pf_caps, HNAE3_PF_SUPPORT_VF_MULTI_TCS_B, 1);
+		basic_info->tc_max = hdev->tc_max;
+		clear_bit(vport->vport_id, hdev->vf_multi_tcs_en);
+		hclge_tm_vport_tc_info_update(vport);
+	} else {
+		basic_info->tc_max = 1;
+	}
 
 	basic_info->pf_caps = cpu_to_le32(pf_caps);
 	resp_msg->len = HCLGE_MBX_MAX_RESP_DATA_SIZE;
@@ -596,6 +609,24 @@ int hclge_push_vf_link_status(struct hclge_vport *vport)
 				  HCLGE_MBX_LINK_STAT_CHANGE, vport->vport_id);
 }
 
+int hclge_mbx_event_notify(struct hclge_vport *vport, u64 event_bits)
+{
+	__le64 msg_data = cpu_to_le64(event_bits);
+	struct hclge_dev *hdev = vport->back;
+	u8 dest_vfid = (u8)vport->vport_id;
+	int ret;
+
+	/* send this requested info to VF */
+	ret = hclge_send_mbx_msg(vport, (u8 *)&msg_data, sizeof(__le64),
+				 HCLGE_MBX_EVENT_NOTIFY, dest_vfid);
+	if (ret)
+		dev_err(&hdev->pdev->dev,
+			"failed to notify vf %u event %#llx, ret = %d\n",
+			vport->vport_id - HCLGE_VF_VPORT_START_NUM, event_bits,
+			ret);
+	return ret;
+}
+
 static void hclge_get_link_mode(struct hclge_vport *vport,
 				struct hclge_mbx_vf_to_pf_cmd *mbx_req)
 {
@@ -663,6 +694,9 @@ static void hclge_notify_vf_config(struct hclge_vport *vport)
 	struct hnae3_ae_dev *ae_dev = pci_get_drvdata(hdev->pdev);
 	struct hclge_port_base_vlan_config *vlan_cfg;
 	int ret;
+
+	if (hnae3_ae_dev_vf_multi_tcs_supported(hdev))
+		hclge_mbx_event_notify(vport, BIT(HCLGE_MBX_DSCP_CHANGE));
 
 	hclge_push_vf_link_status(vport);
 	if (test_bit(HCLGE_VPORT_NEED_NOTIFY_RESET, &vport->need_notify)) {
@@ -1022,22 +1056,29 @@ static int hclge_mbx_get_link_mode_handler(struct hclge_mbx_ops_param *param)
 static int
 hclge_mbx_get_vf_flr_status_handler(struct hclge_mbx_ops_param *param)
 {
+	struct hclge_vport *vport = param->vport;
+
 	hclge_rm_vport_all_mac_table(param->vport, false,
 				     HCLGE_MAC_ADDR_UC);
 	hclge_rm_vport_all_mac_table(param->vport, false,
 				     HCLGE_MAC_ADDR_MC);
 	hclge_rm_vport_all_vlan_table(param->vport, false);
+	clear_bit(vport->vport_id, vport->back->vf_multi_tcs_en);
 	return 0;
 }
 
 static int hclge_mbx_vf_uninit_handler(struct hclge_mbx_ops_param *param)
 {
+	struct hclge_dev *hdev = param->vport->back;
+
 	hclge_rm_vport_all_mac_table(param->vport, true,
 				     HCLGE_MAC_ADDR_UC);
 	hclge_rm_vport_all_mac_table(param->vport, true,
 				     HCLGE_MAC_ADDR_MC);
 	hclge_rm_vport_all_vlan_table(param->vport, true);
 	param->vport->mps = 0;
+	clear_bit(param->vport->vport_id, hdev->vf_multi_tcs_en);
+	hclge_tm_vport_tc_info_update(param->vport);
 	return 0;
 }
 
@@ -1077,6 +1118,65 @@ static int hclge_mbx_handle_vf_qb_handler(struct hclge_mbx_ops_param *param)
 	return 0;
 }
 
+static void
+hclge_vf_get_tc_ets_info(struct hclge_vport *vport,
+			 struct hclge_respond_to_vf_msg *resp_msg)
+{
+	struct hclge_dev *hdev = vport->back;
+	struct hclge_pg_info *pg_info;
+	int i;
+
+	for (i = 0; i < HNAE3_MAX_TC; i++) {
+		pg_info = &hdev->tm_info.pg_info[hdev->tm_info.tc_info[i].pgid];
+		if (i >= hdev->tm_info.num_tc) {
+			resp_msg->data[i] = HCLGE_MBX_TC_ETS_INVALID;
+			continue;
+		}
+
+		resp_msg->data[i] = pg_info->tc_dwrr[i];
+	}
+	resp_msg->len = HNAE3_MAX_TC;
+}
+
+static int
+hclge_mbx_get_vf_multi_tc_handler(struct hclge_mbx_ops_param *param)
+{
+	struct hclge_vport *vport = param->vport;
+	struct hclge_dev *hdev = vport->back;
+	__le32 prio_tc_map = 0;
+
+	switch (param->req->msg.subcode) {
+	case HCLGE_MBX_MULTI_VF_TC_PRI_MAP:
+		prio_tc_map = cpu_to_le32(hclge_tm_get_prio_tc_map(hdev));
+		memcpy(param->resp_msg->data, &prio_tc_map,
+		       sizeof(prio_tc_map));
+		param->resp_msg->len = sizeof(prio_tc_map);
+		break;
+	case HCLGE_MBX_MULTI_VF_TC_ETS_INFO:
+		hclge_vf_get_tc_ets_info(vport, param->resp_msg);
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int hclge_mbx_set_vf_multi_tc_handler(struct hclge_mbx_ops_param *param)
+{
+	struct hclge_mbx_tc_info *tc_info;
+	int ret;
+
+	tc_info = (struct hclge_mbx_tc_info *)param->req->msg.data;
+
+	ret = hclge_mbx_set_vf_multi_tc(param->vport, tc_info);
+	if (ret)
+		dev_err(&param->vport->back->pdev->dev,
+			"failed to set VF multi TCs, ret = %d\n", ret);
+
+	return ret;
+}
+
 static const hclge_mbx_ops_fn hclge_mbx_ops_list[HCLGE_MBX_OPCODE_MAX] = {
 	[HCLGE_MBX_RESET]   = hclge_mbx_reset_handler,
 	[HCLGE_MBX_SET_UNICAST] = hclge_mbx_set_unicast_handler,
@@ -1105,6 +1205,8 @@ static const hclge_mbx_ops_fn hclge_mbx_ops_list[HCLGE_MBX_OPCODE_MAX] = {
 	[HCLGE_MBX_GET_VF_FLR_STATUS] = hclge_mbx_get_vf_flr_status_handler,
 	[HCLGE_MBX_PUSH_LINK_STATUS] = hclge_mbx_push_link_status_handler,
 	[HCLGE_MBX_NCSI_ERROR] = hclge_mbx_ncsi_error_handler,
+	[HCLGE_MBX_SET_TC] = hclge_mbx_set_vf_multi_tc_handler,
+	[HCLGE_MBX_GET_TC] = hclge_mbx_get_vf_multi_tc_handler,
 };
 
 static void hclge_mbx_request_handling(struct hclge_mbx_ops_param *param)

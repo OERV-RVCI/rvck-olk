@@ -4,6 +4,7 @@
 #include "hclge_main.h"
 #include "hclge_dcb.h"
 #include "hclge_tm.h"
+#include "hclge_mbx.h"
 #include "hnae3.h"
 
 #define BW_PERCENT	100
@@ -80,6 +81,14 @@ static int hclge_dcb_common_validate(struct hclge_dev *hdev, u8 num_tc,
 				     u8 *prio_tc)
 {
 	int i;
+
+	/* Based on hardware limitation, VFs share the configuration of PF. */
+	if (hnae3_ae_dev_vf_multi_tcs_supported(hdev) &&
+	    !bitmap_empty(hdev->vf_multi_tcs_en, HCLGE_VPORT_NUM)) {
+		dev_err(&hdev->pdev->dev,
+			"the tc resource is still being used by VF\n");
+		return -EOPNOTSUPP;
+	}
 
 	if (num_tc > hdev->tc_max) {
 		dev_err(&hdev->pdev->dev,
@@ -198,6 +207,24 @@ static int hclge_ets_validate(struct hclge_dev *hdev, struct ieee_ets *ets,
 	return 0;
 }
 
+static bool hclge_ets_not_need_config(struct hclge_dev *hdev,
+				      struct ieee_ets *ets)
+{
+	struct ieee_ets current_ets, request_ets;
+
+	/* following parameters are not supported, so ignore to compare */
+	request_ets = *ets;
+	request_ets.cbs = 0;
+	memset(&request_ets.tc_rx_bw, 0, IEEE_8021QAZ_MAX_TCS);
+	memset(&request_ets.tc_reco_bw, 0, IEEE_8021QAZ_MAX_TCS);
+	memset(&request_ets.tc_reco_tsa, 0, IEEE_8021QAZ_MAX_TCS);
+	memset(&request_ets.reco_prio_tc, 0, IEEE_8021QAZ_MAX_TCS);
+
+	hclge_tm_info_to_ieee_ets(hdev, &current_ets);
+
+	return memcmp(&current_ets, &request_ets, sizeof(struct ieee_ets)) == 0;
+}
+
 static int hclge_map_update(struct hclge_dev *hdev)
 {
 	int ret;
@@ -262,6 +289,9 @@ static int hclge_ieee_setets(struct hnae3_handle *h, struct ieee_ets *ets)
 	    h->kinfo.tc_info.mqprio_active)
 		return -EINVAL;
 
+	if (hclge_ets_not_need_config(hdev, ets))
+		return 0;
+
 	ret = hclge_ets_validate(hdev, ets, &num_tc, &map_changed);
 	if (ret)
 		return ret;
@@ -274,6 +304,7 @@ static int hclge_ieee_setets(struct hnae3_handle *h, struct ieee_ets *ets)
 			return ret;
 	}
 
+	mutex_lock(&hdev->vport_lock);
 	hclge_tm_schd_info_update(hdev, num_tc);
 	h->kinfo.tc_info.dcb_ets_active = num_tc > 1;
 
@@ -286,12 +317,15 @@ static int hclge_ieee_setets(struct hnae3_handle *h, struct ieee_ets *ets)
 		if (ret)
 			goto err_out;
 
+		mutex_unlock(&hdev->vport_lock);
 		return hclge_notify_init_up(hdev);
 	}
 
+	mutex_unlock(&hdev->vport_lock);
 	return hclge_tm_dwrr_cfg(hdev);
 
 err_out:
+	mutex_unlock(&hdev->vport_lock);
 	if (!map_changed)
 		return ret;
 
@@ -391,12 +425,34 @@ static int hclge_ieee_setpfc(struct hnae3_handle *h, struct ieee_pfc *pfc)
 	return last_bad_ret;
 }
 
+static void hclge_notify_dscp_change(struct hclge_dev *hdev)
+{
+	struct hclge_vport *vport;
+	int ret;
+	int i;
+
+	if (!hnae3_ae_dev_vf_multi_tcs_supported(hdev))
+		return;
+
+	for (i = 0; i < pci_num_vf(hdev->pdev); i++) {
+		vport = &hdev->vport[i + HCLGE_VF_VPORT_START_NUM];
+
+		if (!test_bit(HCLGE_VPORT_STATE_ALIVE, &vport->state))
+			continue;
+
+		ret = hclge_mbx_event_notify(vport, BIT(HCLGE_MBX_DSCP_CHANGE));
+		if (ret)
+			break;
+	}
+}
+
 static int hclge_ieee_setapp(struct hnae3_handle *h, struct dcb_app *app)
 {
 	struct hclge_vport *vport = hclge_get_vport(h);
 	struct net_device *netdev = h->kinfo.netdev;
 	struct hclge_dev *hdev = vport->back;
 	struct dcb_app old_app;
+	int ret1;
 	int ret;
 
 	if (app->selector != IEEE_8021QAZ_APP_SEL_DSCP ||
@@ -433,6 +489,11 @@ static int hclge_ieee_setapp(struct hnae3_handle *h, struct dcb_app *app)
 		h->kinfo.dscp_app_cnt++;
 	else
 		ret = dcb_ieee_delapp(netdev, &old_app);
+
+	ret1 = hclge_dscp_to_pri_map(hdev);
+	if (ret1)
+		return ret1;
+	hclge_notify_dscp_change(hdev);
 
 	return ret;
 }
@@ -474,6 +535,11 @@ static int hclge_ieee_delapp(struct hnae3_handle *h, struct dcb_app *app)
 		vport->nic.kinfo.tc_map_mode = HNAE3_TC_MAP_MODE_PRIO;
 		ret = hclge_up_to_tc_map(hdev);
 	}
+
+	ret = hclge_dscp_to_pri_map(hdev);
+	if (ret)
+		return ret;
+	hclge_notify_dscp_change(hdev);
 
 	return ret;
 }
