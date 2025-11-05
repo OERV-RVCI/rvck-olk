@@ -366,10 +366,8 @@ static int hisi_ddrc_pmu_dev_probe(struct platform_device *pdev,
 	ddrc_pmu->pmu_events.attr_groups = ddrc_pmu->dev_info->attr_groups;
 	ddrc_pmu->counter_bits = ddrc_pmu->dev_info->counter_bits;
 	ddrc_pmu->check_event = ddrc_pmu->dev_info->check_event;
-	ddrc_pmu->ops = &hisi_uncore_ddrc_ops;
-
-	ddrc_pmu->pmu_events.attr_groups = ddrc_pmu->dev_info->attr_groups;
 	ddrc_pmu->num_counters = DDRC_NR_COUNTERS;
+	ddrc_pmu->ops = &hisi_uncore_ddrc_ops;
 	ddrc_pmu->dev = &pdev->dev;
 	ddrc_pmu->on_cpu = -1;
 
