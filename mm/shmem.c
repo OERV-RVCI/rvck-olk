@@ -1684,38 +1684,20 @@ static inline struct mempolicy *shmem_get_sbmpol(struct shmem_sb_info *sbinfo)
 	return NULL;
 }
 #endif /* CONFIG_NUMA && CONFIG_TMPFS */
-#ifndef CONFIG_NUMA
-#define vm_policy vm_private_data
-#endif
 
-static void shmem_pseudo_vma_init(struct vm_area_struct *vma,
-		struct shmem_inode_info *info, pgoff_t index)
-{
-	/* Create a pseudo vma that just contains the policy */
-	vma_init(vma, NULL);
-	/* Bias interleave by inode number to distribute better across nodes */
-	vma->vm_pgoff = index + info->vfs_inode.i_ino;
-	vma->vm_policy = mpol_shared_policy_lookup(&info->policy, index);
-}
+static struct mempolicy *shmem_get_pgoff_policy(struct shmem_inode_info *info,
+			pgoff_t index, unsigned int order, pgoff_t *ilx);
 
-static void shmem_pseudo_vma_destroy(struct vm_area_struct *vma)
-{
-	/* Drop reference taken by mpol_shared_policy_lookup() */
-	mpol_cond_put(vma->vm_policy);
-}
-
-static struct folio *shmem_swapin(swp_entry_t swap, gfp_t gfp,
+static struct folio *shmem_swapin_cluster(swp_entry_t swap, gfp_t gfp,
 			struct shmem_inode_info *info, pgoff_t index)
 {
-	struct vm_area_struct pvma;
+	struct mempolicy *mpol;
+	pgoff_t ilx;
 	struct folio *folio;
-	struct vm_fault vmf = {
-		.vma = &pvma,
-	};
 
-	shmem_pseudo_vma_init(&pvma, info, index);
-	folio = swap_cluster_readahead(swap, gfp, &vmf);
-	shmem_pseudo_vma_destroy(&pvma);
+	mpol = shmem_get_pgoff_policy(info, index, 0, &ilx);
+	folio = swap_cluster_readahead(swap, gfp, mpol, ilx);
+	mpol_cond_put(mpol);
 
 	return folio;
 }
@@ -1837,14 +1819,15 @@ static unsigned long shmem_suitable_orders(struct inode *inode, struct vm_fault 
 static struct folio *shmem_alloc_folio(gfp_t gfp, int order,
 		struct shmem_inode_info *info, pgoff_t index)
 {
-	struct vm_area_struct pvma;
-	struct folio *folio;
+	struct mempolicy *mpol;
+	pgoff_t ilx;
+	struct page *page;
 
-	shmem_pseudo_vma_init(&pvma, info, index);
-	folio = vma_alloc_folio(gfp, order, &pvma, 0, order == PMD_ORDER);
-	shmem_pseudo_vma_destroy(&pvma);
+	mpol = shmem_get_pgoff_policy(info, index, 0, &ilx);
+	page = alloc_pages_mpol(gfp, 0, mpol, ilx, numa_node_id());
+	mpol_cond_put(mpol);
 
-	return folio;
+	return page_rmappable_folio(page);
 }
 
 static struct folio *shmem_alloc_and_add_folio(struct vm_fault *vmf,
@@ -2310,7 +2293,7 @@ static int shmem_swapin_folio(struct inode *inode, pgoff_t index,
 			skip_swapcache = true;
 		} else {
 			/* Cached swapin only supports order 0 folio */
-			folio = shmem_swapin(swap, gfp, info, index);
+			folio = shmem_swapin_cluster(swap, gfp, info, index);
 			if (!folio) {
 				error = -ENOMEM;
 				goto failed;
@@ -2848,10 +2831,36 @@ static struct mempolicy *shmem_get_policy(struct vm_area_struct *vma,
 	struct inode *inode = file_inode(vma->vm_file);
 	pgoff_t index;
 
+	/*
+	 * Bias interleave by inode number to distribute better across nodes;
+	 * but this interface is independent of which page order is used, so
+	 * supplies only that bias, letting caller apply the offset (adjusted
+	 * by page order, as in shmem_get_pgoff_policy() and get_vma_policy()).
+	 */
+	*ilx = inode->i_ino;
 	index = ((addr - vma->vm_start) >> PAGE_SHIFT) + vma->vm_pgoff;
 	return mpol_shared_policy_lookup(&SHMEM_I(inode)->policy, index);
 }
-#endif
+
+static struct mempolicy *shmem_get_pgoff_policy(struct shmem_inode_info *info,
+			pgoff_t index, unsigned int order, pgoff_t *ilx)
+{
+	struct mempolicy *mpol;
+
+	/* Bias interleave by inode number to distribute better across nodes */
+	*ilx = info->vfs_inode.i_ino + (index >> order);
+
+	mpol = mpol_shared_policy_lookup(&info->policy, index);
+	return mpol ? mpol : get_task_policy(current);
+}
+#else
+static struct mempolicy *shmem_get_pgoff_policy(struct shmem_inode_info *info,
+			pgoff_t index, unsigned int order, pgoff_t *ilx)
+{
+	*ilx = 0;
+	return NULL;
+}
+#endif /* CONFIG_NUMA */
 
 int shmem_lock(struct file *file, int lock, struct ucounts *ucounts)
 {
