@@ -33,7 +33,7 @@
 #define MAP_UNINITIALIZED 0x4000000	/* For anonymous mmap, memory could be
 					 * uninitialized */
 
-#define MAP_PEER_SHARED		0x1000000 /* GMEM scene, for heterogeneous memory */
+#define MAP_PEER_SHARED		0x10000000 /* GMEM scene, for heterogeneous memory */
 
 /*
  * Flags for mlock
