@@ -213,8 +213,10 @@ struct nbl_dev_net_ops {
 				struct nbl_init_param *param);
 	int (*setup_ethtool_ops)(void *priv, struct net_device *netdev,
 				 struct nbl_init_param *param);
+#ifdef CONFIG_DCB
 	int (*setup_dcbnl_ops)(void *priv, struct net_device *netdev,
 			       struct nbl_init_param *param);
+#endif
 };
 
 struct nbl_dev_attr_info {

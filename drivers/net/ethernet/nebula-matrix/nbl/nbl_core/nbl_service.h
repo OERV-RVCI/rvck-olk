@@ -282,9 +282,11 @@ struct nbl_serv_qos_info {
 	u32 rdma_rate;
 	u32 net_rate;
 	DECLARE_BITMAP(dscp_mapped, NBL_DSCP_MAX);
+	#ifdef CONFIG_DCB
 	struct dcb_app app[NBL_DSCP_MAX];
-	int buffer_sizes[NBL_MAX_PFC_PRIORITIES][2];
 	struct ieee_ets ets;
+	#endif
+	int buffer_sizes[NBL_MAX_PFC_PRIORITIES][2];
 };
 
 struct nbl_serv_net_resource_mgt {
