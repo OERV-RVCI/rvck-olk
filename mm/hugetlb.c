@@ -7640,6 +7640,12 @@ void folio_putback_active_hugetlb(struct folio *folio)
 	folio_put(folio);
 }
 
+void putback_hugetlb_folio(struct folio *folio)
+{
+	folio_putback_active_hugetlb(folio);
+}
+EXPORT_SYMBOL(putback_hugetlb_folio);
+
 void move_hugetlb_state(struct folio *old_folio, struct folio *new_folio, int reason)
 {
 	struct hstate *h = folio_hstate(old_folio);

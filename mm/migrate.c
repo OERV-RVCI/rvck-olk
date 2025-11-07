@@ -2135,14 +2135,14 @@ struct folio *alloc_migration_target(struct folio *src, unsigned long private)
  *
  * @folios:		The array stores the folios to be migrated.
  * @nr_folios:		The number of folios to be migrated.
- * @get_new_folio:		The function used to allocate free folios to be used
- *						as the target of the folio migration.
- * @put_new_folio:		The function used to free target folios if migration
- *						fails, or NULL if no special handing is necessary.
- * @private:			Private data to be passed on to get_new_folio()
- * @mode:				The migration mode that specifies the constraints for
- *						folio migration, if any.
- * @nr_succeeded:		Set to the number of folios migrated successfully if
+ * @get_new_folio:	The function used to allocate free folios to be used
+ *			as the target of the folio migration.
+ * @put_new_folio:	The function used to free target folios if migration
+ *			fails, or NULL if no special handing is necessary.
+ * @private:		Private data to be passed on to get_new_folio()
+ * @mode:		The migration mode that specifies the constraints for
+ *			folio migration, if any.
+ * @nr_succeeded:	Set to the number of folios migrated successfully if
  *			the caller passes a non-NULL pointer.
  *
  * This function is mainly used to isolate and migrate folios based on hotness
@@ -2150,7 +2150,7 @@ struct folio *alloc_migration_target(struct folio *src, unsigned long private)
  * to remote NUMA and hot folios to local NUMA.
  *
  * Context: The folio_get must be called on all folios before because folio_put
- *			is called after isolation.
+ *	    is called after isolation.
  *
  * Returns the number of folios that were isolated but not migrated,
  * or an error code.
