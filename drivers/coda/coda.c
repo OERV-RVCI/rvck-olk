@@ -240,7 +240,7 @@ static void delete_coda_dev_obj(u32 sid)
  * %true if the root bd is secure
  * %false if the root bd is non-secure
  */
-static bool is_cc_root_bd(u32 root_bd)
+bool is_cc_root_bd(u32 root_bd)
 {
 	int bkt;
 	struct coda_dev_hash_node *obj;

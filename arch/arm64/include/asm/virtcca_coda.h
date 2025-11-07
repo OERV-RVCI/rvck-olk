@@ -84,6 +84,7 @@ struct iommu_group *cvm_vfio_file_iommu_group(struct file *file);
 struct iommu_group *virtcca_vfio_file_iommu_group(struct file *file);
 
 bool is_cc_vmid(u32 vmid, u64 s_smmu_id);
+bool is_cc_root_bd(u32 root_bd);
 
 u64 get_g_cc_dev_msi_addr(u32 sid);
 
