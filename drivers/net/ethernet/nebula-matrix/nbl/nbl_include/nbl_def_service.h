@@ -271,13 +271,13 @@ struct nbl_service_ops {
 	u16 (*covert_vfid_to_vsi_id)(void *priv, u16 vfid);
 	void (*recovery_abnormal)(void *priv);
 	void (*keep_alive)(void *priv);
-
+#ifdef CONFIG_NET_DEVLINK
 	int (*get_devlink_info)(struct devlink *devlink, struct devlink_info_req *req,
 				struct netlink_ext_ack *extack);
 	int (*update_devlink_flash)(struct devlink *devlink,
 				    struct devlink_flash_update_params *params,
 				    struct netlink_ext_ack *extack);
-
+#endif
 	u32 (*get_adminq_tx_buf_size)(void *priv);
 	int (*emp_console_write)(void *priv, char *buf, size_t count);
 	bool (*check_fw_heartbeat)(void *priv);
@@ -345,6 +345,7 @@ struct nbl_service_ops {
 	ssize_t (*pfc_buffer_size_show)(void *priv, u8 eth_id, char *buf);
 
 	/* dcb nl ops */
+	#ifdef CONFIG_DCB
 	int (*ieee_setets)(struct net_device *netdev, struct ieee_ets *ets);
 	int (*ieee_getets)(struct net_device *netdev, struct ieee_ets *ets);
 	int (*ieee_setpfc)(struct net_device *netdev, struct ieee_pfc *pfc);
@@ -360,6 +361,7 @@ struct nbl_service_ops {
 	u8 (*dcbnl_setstate)(struct net_device *netdev, u8 state);
 	u8 (*dcbnl_getpfcstate)(struct net_device *netdev);
 	u8 (*dcbnl_getcap)(struct net_device *netdev, int capid, u8 *cap);
+	#endif
 	u16 (*get_vf_function_id)(void *priv, int vf_id);
 	void (*cfg_mirror_outputport_event)(void *priv, bool enable);
 };

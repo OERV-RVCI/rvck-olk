@@ -4628,7 +4628,9 @@ static void nbl_init_qos_config(struct nbl_serv_net_resource_mgt *net_resource_m
 	qos_info->rdma_bw = NBL_MAX_BW >> 1;
 	qos_info->rdma_rate = NBL_COMMON_TO_ETH_MAX_SPEED(common);
 	qos_info->net_rate = NBL_COMMON_TO_ETH_MAX_SPEED(common);
+#ifdef CONFIG_DCB
 	qos_info->dcbx_mode = DCB_CAP_DCBX_HOST | DCB_CAP_DCBX_VER_IEEE | DCB_CAP_DCBX_VER_CEE;
+#endif
 	for (i = 0; i < NBL_DSCP_MAX; i++)
 		qos_info->dscp2prio_map[i] = i / NBL_MAX_PFC_PRIORITIES;
 
@@ -4886,6 +4888,7 @@ static void nbl_serv_get_real_bdf(void *priv, u16 vsi_id, u8 *bus, u8 *dev, u8 *
 				      bus, dev, function);
 }
 
+#ifdef CONFIG_NET_DEVLINK
 static int nbl_serv_get_devlink_info(struct devlink *devlink, struct devlink_info_req *req,
 				     struct netlink_ext_ack *extack)
 {
@@ -4906,6 +4909,7 @@ static int nbl_serv_get_devlink_info(struct devlink *devlink, struct devlink_inf
 
 	return ret;
 }
+#endif
 
 /* Why do we need this?
  * Because the original function in kernel cannot handle when we set subvendor and subdevice
@@ -5063,6 +5067,7 @@ static const struct pldmfw_ops nbl_update_fw_ops = {
 int nbl_serv_update_firmware(struct nbl_service_mgt *serv_mgt, const struct firmware *fw,
 			     struct netlink_ext_ack *extack)
 {
+#ifdef CONFIG_FW_PLDM
 	struct nbl_serv_update_fw_priv priv = {{0}};
 	int ret = 0;
 
@@ -5074,8 +5079,12 @@ int nbl_serv_update_firmware(struct nbl_service_mgt *serv_mgt, const struct firm
 	ret = pldmfw_flash_image(&priv.context, fw);
 
 	return ret;
+#else
+	return 0;
+#endif
 }
 
+#ifdef CONFIG_NET_DEVLINK
 static int nbl_serv_update_devlink_flash(struct devlink *devlink,
 					 struct devlink_flash_update_params *params,
 					 struct netlink_ext_ack *extack)
@@ -5096,6 +5105,7 @@ static int nbl_serv_update_devlink_flash(struct devlink *devlink,
 						   NULL, 0, 0);
 	return ret;
 }
+#endif
 
 static u32 nbl_serv_get_adminq_tx_buf_size(void *priv)
 {
@@ -6964,6 +6974,7 @@ static ssize_t nbl_serv_pfc_buffer_size_show(void *priv, u8 eth_id, char *buf)
 	return count;
 }
 
+#ifdef CONFIG_DCB
 static u8 nbl_serv_dcb_get_num_tc(struct net_device *netdev, struct ieee_ets *ets)
 {
 	bool tc_unused = false;
@@ -7310,6 +7321,7 @@ static u8 nbl_serv_dcnbl_getpfcstate(struct net_device *netdev)
 
 	return 0;
 }
+#endif
 
 static void nbl_serv_get_board_info(void *priv, struct nbl_board_port_info *board_info)
 {
@@ -7591,8 +7603,10 @@ static struct nbl_service_ops serv_ops = {
 	.configure_mirror = nbl_serv_configure_mirror,
 	.configure_mirror_table = nbl_serv_configure_mirror_table,
 	.clear_mirror_cfg = nbl_serv_clear_mirror_cfg,
+#ifdef CONFIG_NET_DEVLINK
 	.get_devlink_info = nbl_serv_get_devlink_info,
 	.update_devlink_flash = nbl_serv_update_devlink_flash,
+#endif
 	.get_adminq_tx_buf_size = nbl_serv_get_adminq_tx_buf_size,
 	.emp_console_write = nbl_serv_emp_console_write,
 
@@ -7631,7 +7645,7 @@ static struct nbl_service_ops serv_ops = {
 	.pfc_buffer_size_show = nbl_serv_pfc_buffer_size_show,
 	.set_pfc_buffer_size = nbl_serv_set_pfc_buffer_size,
 	.set_rate_limit = nbl_serv_set_rate_limit,
-
+	#ifdef CONFIG_DCB
 	.ieee_setets = nbl_serv_ieee_setets,
 	.ieee_getets = nbl_serv_ieee_getets,
 	.ieee_setpfc = nbl_serv_ieee_setpfc,
@@ -7647,6 +7661,7 @@ static struct nbl_service_ops serv_ops = {
 	.dcbnl_getstate = nbl_serv_dcnbl_getstate,
 	.dcbnl_setstate = nbl_serv_dcnbl_setstate,
 	.dcbnl_getpfcstate = nbl_serv_dcnbl_getpfcstate,
+	#endif
 	.get_vf_function_id = nbl_serv_get_vf_function_id,
 	.cfg_mirror_outputport_event = nbl_serv_cfg_mirror_outputport_event,
 };

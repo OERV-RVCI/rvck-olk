@@ -1387,13 +1387,11 @@ static int nbl_bus_probe(struct device *dev)
 		return PTR_ERR(vdev);
 	user->vdev = &vdev->vdev;
 	vdev->user = user;
-
 	ret = vfio_register_emulated_iommu_dev(NBL_USERDEV_TO_VFIO_DEV(user));
 	if (ret) {
 		dev_err(dev, "vfio register iommu failed, ret %d\n", ret);
 		vfio_put_device(NBL_USERDEV_TO_VFIO_DEV(user));
 	}
-
 	return ret;
 }
 

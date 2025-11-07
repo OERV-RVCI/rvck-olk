@@ -679,6 +679,7 @@ static void nbl_dev_clear_interrupt_scheme(struct nbl_dev_mgt *dev_mgt)
 	nbl_dev_free_msix_intr(dev_mgt);
 }
 
+#ifdef CONFIG_NET_DEVLINK
 static void nbl_fw_tracer_clean_saved_traces_array(struct nbl_health_reporters *reps)
 {
 	mutex_destroy(&reps->temp_st_arr.lock);
@@ -735,9 +736,11 @@ static void nbl_fw_reboot_save_trace(struct nbl_health_reporters *reps)
 		(reps->reboot_st_arr.saved_traces_index + 1) & (NBL_SAVED_TRACES_NUM - 1);
 	mutex_unlock(&reps->reboot_st_arr.lock);
 }
+#endif
 
 static void nbl_dev_health_report_temp_task(struct work_struct *work)
 {
+#ifdef CONFIG_NET_DEVLINK
 	struct nbl_fw_reporter_ctx fw_reporter_cxt;
 	struct nbl_task_info *task_info = container_of(work, struct nbl_task_info,
 						       report_temp_task);
@@ -754,10 +757,12 @@ static void nbl_dev_health_report_temp_task(struct work_struct *work)
 	err = devlink_health_report(reps->fw_temp_reporter, "nbl_fw_temp", &fw_reporter_cxt);
 	if (err)
 		dev_err(dev, "failed to report nbl_fw_temp health\n");
+#endif
 }
 
 static void nbl_dev_health_report_reboot_task(struct work_struct *work)
 {
+#ifdef CONFIG_NET_DEVLINK
 	struct nbl_task_info *task_info = container_of(work, struct nbl_task_info,
 						       report_reboot_task);
 	struct nbl_dev_mgt *dev_mgt = task_info->dev_mgt;
@@ -772,6 +777,7 @@ static void nbl_dev_health_report_reboot_task(struct work_struct *work)
 	if (err) {
 		dev_err(dev, "failed to report nbl_fw_reboot health\n");
 	}
+#endif
 }
 
 /* ----------  Channel config  ---------- */
@@ -972,7 +978,9 @@ static void nbl_dev_fw_reset_task(struct work_struct *work)
 	struct nbl_channel_ops *chan_ops = NBL_DEV_MGT_TO_CHAN_OPS(dev_mgt);
 	struct nbl_service_ops *serv_ops = NBL_DEV_MGT_TO_SERV_OPS(dev_mgt);
 	struct nbl_common_info *common = NBL_DEV_MGT_TO_COMMON(dev_mgt);
+#ifdef CONFIG_NET_DEVLINK
 	struct nbl_dev_ctrl *ctrl_dev = NBL_DEV_MGT_TO_CTRL_DEV(dev_mgt);
+#endif
 
 	if (serv_ops->check_fw_reset(NBL_DEV_MGT_TO_SERV_PRIV(dev_mgt))) {
 		dev_notice(NBL_COMMON_TO_DEV(common), "FW recovered");
@@ -994,7 +1002,9 @@ static void nbl_dev_fw_reset_task(struct work_struct *work)
 			nbl_dev_enable_port(dev_mgt, true);
 		}
 		task_info->fw_resetting = false;
+#ifdef CONFIG_NET_DEVLINK
 		nbl_fw_reboot_save_trace(&ctrl_dev->health_reporters);
+#endif
 		nbl_common_queue_work(&task_info->report_reboot_task, true, false);
 		return;
 	}
@@ -1174,7 +1184,9 @@ static void nbl_dev_handle_temp_ext(struct nbl_dev_mgt *dev_mgt, u8 *data, u16 d
 		uptime = *(u64 *)(data + sizeof(u16));
 	if (new_temp_status != NBL_TEMP_STATUS_NORMAL) {
 		ctrl_dev->health_reporters.reporter_ctx.temp_num = temp;
+#ifdef CONFIG_NET_DEVLINK
 		nbl_fw_temp_save_trace(&ctrl_dev->health_reporters, temp, uptime);
+#endif
 		nbl_common_queue_work(&ctrl_dev->task_info.report_temp_task, false, false);
 	}
 	nbl_log(common, temp_alarm_info[new_temp_status].logvel,
@@ -1469,6 +1481,7 @@ static void nbl_dev_remove_common_dev(struct nbl_adapter *adapter)
 	NBL_DEV_MGT_TO_COMMON_DEV(dev_mgt) = NULL;
 }
 
+#ifdef CONFIG_NET_DEVLINK
 static void nbl_devlink_fmsg_fill_temp_trace(struct devlink_fmsg *fmsg,
 					     struct nbl_fw_temp_trace_data *trace_data)
 {
@@ -1653,6 +1666,7 @@ static int nbl_dev_health_init(struct nbl_dev_mgt *dev)
 	nbl_setup_devlink_reporter(dev);
 	return 0;
 }
+#endif
 
 static int nbl_dev_setup_ctrl_dev(struct nbl_adapter *adapter, struct nbl_init_param *param)
 {
@@ -2960,9 +2974,9 @@ static void nbl_dev_remove_ktls_ops(struct net_device *netdev)
 }
 
 #else
-static ivoidnt nbl_dev_setup_ktls_ops(struct nbl_dev_mgt *dev_mgt, struct net_device *netdev
-				      struct nbl_init_param *param)
+static int nbl_dev_setup_ktls_ops(struct nbl_dev_mgt *dev_mgt, struct net_device *netdev)
 {
+	return 0;
 }
 
 static void nbl_dev_remove_ktls_ops(struct net_device *netdev) {}
@@ -3081,6 +3095,7 @@ static void nbl_dev_remove_xfrm_ops(struct net_device *netdev)
 }
 #endif
 
+#ifdef CONFIG_DCB
 static int nbl_dev_ieee_setets(struct net_device *netdev, struct ieee_ets *ets)
 {
 	struct nbl_adapter *adapter = NBL_NETDEV_TO_ADAPTER(netdev);
@@ -3248,6 +3263,7 @@ static void nbl_dev_remove_dcbnl_ops(struct net_device *netdev)
 {
 	netdev->dcbnl_ops = NULL;
 }
+#endif
 
 static void nbl_dev_set_eth_mac_addr(struct nbl_dev_mgt *dev_mgt, struct net_device *netdev)
 {
@@ -3307,10 +3323,11 @@ static int nbl_dev_cfg_netdev(struct net_device *netdev, struct nbl_dev_mgt *dev
 	ret = net_dev_ops->setup_ethtool_ops(dev_mgt, netdev, param);
 	if (ret)
 		goto set_ethtool_fail;
-
+#ifdef CONFIG_DCB
 	ret = net_dev_ops->setup_dcbnl_ops(dev_mgt, netdev, param);
 	if (ret)
 		goto set_dcbnl_fail;
+#endif
 
 	if (!param->is_rep) {
 		ret = nbl_dev_setup_ktls_ops(dev_mgt, netdev);
@@ -3328,8 +3345,10 @@ static int nbl_dev_cfg_netdev(struct net_device *netdev, struct nbl_dev_mgt *dev
 set_xfrm_fail:
 	nbl_dev_remove_ktls_ops(netdev);
 set_ktls_fail:
+#ifdef CONFIG_DCB
 	nbl_dev_remove_dcbnl_ops(netdev);
 set_dcbnl_fail:
+#endif
 	nbl_dev_remove_ethtool_ops(netdev);
 set_ethtool_fail:
 	nbl_dev_remove_netops(netdev);
@@ -3341,7 +3360,9 @@ static void nbl_dev_reset_netdev(struct net_device *netdev)
 {
 	nbl_dev_remove_ktls_ops(netdev);
 	nbl_dev_remove_xfrm_ops(netdev);
+#ifdef CONFIG_DCB
 	nbl_dev_remove_dcbnl_ops(netdev);
+#endif
 	nbl_dev_remove_ethtool_ops(netdev);
 	nbl_dev_remove_netops(netdev);
 }
@@ -4028,7 +4049,9 @@ static struct nbl_dev_net_ops netdev_ops[NBL_PRODUCT_MAX] = {
 	{
 		.setup_netdev_ops	= nbl_dev_setup_netops_leonis,
 		.setup_ethtool_ops	= nbl_dev_setup_ethtool_ops_leonis,
+		#ifdef CONFIG_DCB
 		.setup_dcbnl_ops	= nbl_dev_setup_dcbnl_ops_leonis,
+		#endif
 	},
 };
 
@@ -4382,9 +4405,9 @@ static int nbl_dev_start_ctrl_dev(struct nbl_adapter *adapter, struct nbl_init_p
 	err = nbl_dev_enable_adminq_irq(dev_mgt);
 	if (err)
 		goto enable_adminq_irq_err;
-
+#ifdef CONFIG_NET_DEVLINK
 	nbl_dev_health_init(dev_mgt);
-
+#endif
 	nbl_dev_get_port_attributes(dev_mgt);
 	nbl_dev_init_port(dev_mgt);
 	nbl_dev_enable_port(dev_mgt, true);
@@ -4412,7 +4435,9 @@ static void nbl_dev_stop_ctrl_dev(struct nbl_adapter *adapter)
 	nbl_dev_ctrl_task_stop(dev_mgt);
 	nbl_dev_enable_port(dev_mgt, false);
 	nbl_dev_disable_adminq_irq(dev_mgt);
+#ifdef CONFIG_NET_DEVLINK
 	nbl_dev_destroy_health(dev_mgt);
+#endif
 	nbl_dev_free_adminq_irq(dev_mgt, &NBL_DEV_MGT_TO_CTRL_DEV(dev_mgt)->task_info);
 	nbl_dev_disable_abnormal_irq(dev_mgt);
 	nbl_dev_free_abnormal_irq(dev_mgt);
@@ -4624,6 +4649,7 @@ static int nbl_dev_eswitch_unload_rep(struct nbl_dev_mgt *dev_mgt)
 	return 0;
 }
 
+#ifdef CONFIG_NET_DEVLINK
 static int nbl_dev_eswitch_mode_to_devlink(u16 cur_eswitch_mode, u16 *devlink_eswitch_mode)
 {
 	switch (cur_eswitch_mode) {
@@ -4653,6 +4679,7 @@ static int nbl_dev_eswitch_mode_from_devlink(u16 devlink_eswitch_mode, u16 *cfg_
 	}
 	return 0;
 }
+#endif
 
 int nbl_dev_destroy_rep(void *p)
 {
@@ -4739,6 +4766,7 @@ void nbl_dev_remove_vf_config(void *p)
 	return serv_ops->remove_vf_config(NBL_DEV_MGT_TO_SERV_PRIV(dev_mgt));
 }
 
+#ifdef CONFIG_NET_DEVLINK
 static int nbl_dev_init_offload_mode(struct nbl_dev_mgt *dev_mgt, u16 vsi_id)
 {
 	struct nbl_service_ops *serv_ops = NBL_DEV_MGT_TO_SERV_OPS(dev_mgt);
@@ -4801,6 +4829,13 @@ fail_unset_upcall_rule:
 	serv_ops->disable_phy_flow(NBL_DEV_MGT_TO_SERV_PRIV(dev_mgt), common->eth_id);
 	return ret;
 }
+#else
+
+static int nbl_dev_uninit_offload_mode(struct nbl_dev_mgt *dev_mgt)
+{
+	return 0;
+}
+#endif
 
 static void nbl_dev_destroy_flow_res(struct nbl_dev_mgt *dev_mgt)
 {
@@ -5133,6 +5168,8 @@ static void nbl_dev_suspend_net_dev(struct nbl_adapter *adapter)
 	nbl_dev_free_net_irq(dev_mgt);
 }
 
+/* ----------  Devlink config  ---------- */
+#ifdef CONFIG_NET_DEVLINK
 static int nbl_dev_get_devlink_eswitch_mode(struct devlink *devlink, u16 *mode)
 {
 	struct nbl_devlink_priv *priv = devlink_priv(devlink);
@@ -5241,7 +5278,7 @@ fail_cfg_rep:
 	}
 	return -EBUSY;
 }
-/* ----------  Devlink config  ---------- */
+
 static void nbl_dev_devlink_free(void *devlink_ptr)
 {
 	devlink_free((struct devlink *)devlink_ptr);
@@ -5304,6 +5341,16 @@ static void nbl_dev_remove_devlink(struct nbl_dev_mgt *dev_mgt)
 	}
 }
 
+#else
+static int nbl_dev_setup_devlink(struct nbl_dev_mgt *dev_mgt, struct nbl_init_param *param)
+{
+	return 0;
+}
+
+static void nbl_dev_remove_devlink(struct nbl_dev_mgt *dev_mgt)
+{
+}
+#endif
 static int nbl_dev_start_common_dev(struct nbl_adapter *adapter, struct nbl_init_param *param)
 {
 	struct nbl_dev_mgt *dev_mgt = (struct nbl_dev_mgt *)NBL_ADAPTER_TO_DEV_MGT(adapter);
@@ -5325,11 +5372,9 @@ static int nbl_dev_start_common_dev(struct nbl_adapter *adapter, struct nbl_init
 	ret = nbl_dev_enable_mailbox_irq(dev_mgt);
 	if (ret)
 		goto enable_mailbox_irq_err;
-
 	ret = nbl_dev_setup_devlink(dev_mgt, param);
 	if (ret)
 		goto setup_devlink_err;
-
 	if (!param->caps.is_vf &&
 	    serv_ops->get_product_fix_cap(NBL_DEV_MGT_TO_SERV_PRIV(dev_mgt),
 	    NBL_HWMON_TEMP_CAP)) {

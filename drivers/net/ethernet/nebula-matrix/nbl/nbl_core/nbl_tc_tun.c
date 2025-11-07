@@ -94,7 +94,7 @@ static int nbl_route_lookup_ipv4(const struct nbl_common_info *common,
 
 	out_dev = rt->dst.dev;
 	if (is_vlan_dev(out_dev)) {
-		parent_dev = vlan_dev_priv(out_dev)->real_dev;
+		parent_dev = vlan_dev_real_dev(out_dev);
 		if (is_vlan_dev(parent_dev)) {
 			nbl_debug(common, NBL_DEBUG_FLOW, "encap o_dev is %s p_dev:%s\n",
 				  out_dev->name, parent_dev ? parent_dev->name : "NULL");
@@ -318,7 +318,7 @@ static int nbl_route_lookup_ipv6(const struct nbl_common_info *common,
 
 	out_dev = dst->dev;
 	if (is_vlan_dev(out_dev)) {
-		parent_dev = vlan_dev_priv(out_dev)->real_dev;
+		parent_dev = vlan_dev_real_dev(out_dev);
 		real_out_dev = vlan_dev_real_dev(out_dev);
 		if (is_vlan_dev(parent_dev)) {
 			nbl_debug(common, NBL_DEBUG_FLOW, "ipv6 encap o_dev is %s, p_dev:%s\n",
