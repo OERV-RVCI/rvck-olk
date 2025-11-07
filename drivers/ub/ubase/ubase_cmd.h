@@ -49,6 +49,209 @@ struct ubase_query_version_cmd {
 	__le32 caps[UBASE_CAP_LEN];
 };
 
+enum ubase_ue2ue_sub_cmd {
+	UBASE_UE2UE_CTRLQ_MSG = 3,
+};
+
+struct ubase_ue2ue_common_head {
+	__le16 bus_ue_id;
+	__le16 mbx_ue_id;
+	u16 sub_cmd;
+	u16 status;
+};
+
+struct ubase_ue2ue_ctrlq_head {
+	struct ubase_ue2ue_common_head head;
+	u16 seq;
+	u16 in_size;
+	u16 out_size;
+	u8 need_resp : 1;
+	u8 is_resp : 1;
+	u8 rsv : 6;
+};
+
+struct ubase_start_perf_stats_cmd {
+	__le32	period;
+	__le32	logic_port_bitmap[2];
+	u8	rsv[12];
+};
+
+struct ubase_stop_perf_stats_cmd {
+	__le32	period; /* ms */
+	__le16	port_id;
+	u8	rsv[2];
+
+	__le32	tx_port_bw; /* kbps */
+	__le32	rx_port_bw;
+	__le32	tx_vl_bw[UBASE_STATS_MAX_VL_NUM];
+	__le32	rx_vl_bw[UBASE_STATS_MAX_VL_NUM];
+	u8	rsv1[8];
+};
+
+struct ubase_cfg_ets_vl_sch_cmd {
+	__le16 vl_bitmap;
+	u8 rsvd[2];
+	u8 vl_bw[UBASE_MAX_VL_NUM];
+	__le32 port_bitmap;
+};
+
+struct ubase_cfg_tm_vl_sch_cmd {
+	__le16 bus_ue_id;
+	__le16 vl_bitmap;
+	__le16 vl_tsa;
+	u8 rsvd[2];
+	u8 vl_bw[UBASE_MAX_VL_NUM];
+};
+
+struct ubase_ets_shaping_info {
+	u8 ir_b;
+	u8 ir_u;
+	u8 ir_s;
+	u8 bs_b;
+	u8 bs_s;
+	u8 rsvd[3];
+	__le32 rate;
+};
+
+struct ubase_query_ets_tcg_cmd {
+	u8 tcg_weight[UBASE_MAX_TCG_NUM];
+	__le16 tcg_tc_map[UBASE_MAX_TCG_NUM];
+	struct ubase_ets_shaping_info tcg_info[UBASE_MAX_TCG_NUM];
+};
+
+struct ubase_query_ets_port_cmd {
+	struct ubase_ets_shaping_info port_info;
+};
+
+struct ubase_fst_revert_tbl {
+	__le16 fst_idx;
+	u8 queue_ue_num;
+	u8 queue_que_num;
+	__le16 queue_vl_num;
+	u8 resv[2];
+};
+
+struct ubase_rqmt_tbl {
+	__le16 fst_idx;
+	__le16 start_queue_idx;
+	__le16 queue_quantity_shift;
+	u8 resv[2];
+};
+
+struct ubase_query_fst_fvt_rqmt_cmd {
+	__le16 bus_ue_id;
+	u8 rsv[2];
+	__le16 sl_queue_vl_num;
+	__le16 sl_queue_start_qid;
+	__le16 fvt_vl_size;
+	__le16 fvt_rqmt_offset;
+	struct ubase_fst_revert_tbl fstr_info[UBASE_MAX_VL_NUM];
+	struct ubase_rqmt_tbl rqmt_info[UBASE_MAX_VL_NUM];
+};
+
+struct ubase_query_tm_queue_cmd {
+	__le16 bus_ue_id;
+	u8 queue_num;
+	u8 resv0;
+	u8 queue_vl[UBASE_MAX_VL_NUM];
+	u8 queue_id[UBASE_MAX_VL_NUM];
+	u8 qset_id[UBASE_MAX_VL_NUM];
+	__le16 link_vld_bitmap;
+	u8 resv1[2];
+};
+
+struct ubase_query_tm_qset_cmd {
+	__le16 bus_ue_id;
+	u8 qset_num;
+	u8 rate_limit_bypass;
+	u8 ir_b[UBASE_MAX_VL_NUM];
+	u8 ir_u[UBASE_MAX_VL_NUM];
+	u8 ir_s[UBASE_MAX_VL_NUM];
+	u8 bs_b[UBASE_MAX_VL_NUM];
+	u8 bs_s[UBASE_MAX_VL_NUM];
+	__le32 rate[UBASE_MAX_VL_NUM];
+	u8 qset_id[UBASE_MAX_VL_NUM];
+	u8 pri_id[UBASE_MAX_VL_NUM];
+	__le16 qset_pri_link_vld;
+	__le16 qset_sch_mode;
+	u8 qset_weight[UBASE_MAX_VL_NUM];
+	u8 resv1[16];
+};
+
+struct ubase_query_tm_pri_cmd {
+	__le16 bus_ue_id;
+	u8 pri_id;
+	u8 pg_id;
+	u8 pri_sch_mode;
+	u8 pri_weight;
+	u8 c_ir_b;
+	u8 c_ir_u;
+	u8 c_ir_s;
+	u8 c_bs_b;
+	u8 c_bs_s;
+	u8 p_ir_b;
+	u8 p_ir_u;
+	u8 p_ir_s;
+	u8 p_bs_b;
+	u8 p_bs_s;
+	__le32 c_rate;
+	__le32 p_rate;
+
+	u8 c_rate_limit_bypass;
+	u8 p_rate_limit_bypass;
+	u8 resv1[30];
+};
+
+struct ubase_query_tm_pg_cmd {
+	__le16 bus_ue_id;
+	u8 pg_id;
+	u8 pg_sch_mode;
+	u8 pg_weight;
+	u8 c_ir_b;
+	u8 c_ir_u;
+	u8 c_ir_s;
+	u8 c_bs_b;
+	u8 c_bs_s;
+	u8 p_ir_b;
+	u8 p_ir_u;
+	u8 p_ir_s;
+	u8 p_bs_b;
+	u8 p_bs_s;
+	u8 resv0;
+	__le32 c_rate;
+	__le32 p_rate;
+
+	u8 c_rate_limit_bypass;
+	u8 p_rate_limit_bypass;
+	u8 resv1[30];
+};
+
+struct ubase_query_tm_port_cmd {
+	u8 ir_b;
+	u8 ir_u;
+	u8 ir_s;
+	u8 bs_b;
+	u8 bs_s;
+	u8 rate_limit_bypass;
+	u8 resv0[2];
+	__le32 rate;
+	u8 resv1[12];
+};
+
+struct ubase_activate_req {
+	__le16	bus_ue_id;
+	__le16	msn;
+	u8	activate;
+	u8	resv[19];
+};
+
+struct ubase_activate_resp {
+	__le16	bus_ue_id;
+	__le16	msn;
+	u8	result;
+	u8	resv[19];
+};
+
 struct ubase_query_ueid_cmd {
 	__le32 ueid[UBASE_BUS_EID_LEN];
 	u32 rsv[2];
@@ -99,5 +302,7 @@ int __ubase_register_crq_event(struct ubase_dev *udev,
 void __ubase_unregister_crq_event(struct ubase_dev *udev, u16 opcode);
 
 void ubase_crq_service_task(struct ubase_delay_work *ubase_work);
+
+void ubase_mask_key_words(struct ubase_cmdq_desc *desc, u16 opc, int idx);
 
 #endif

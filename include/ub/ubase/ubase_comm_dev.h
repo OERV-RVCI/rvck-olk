@@ -192,6 +192,11 @@ struct ubase_adev_qos {
 	u8	ue_sl_vl[UBASE_MAX_SL_NUM];
 };
 
+struct ubase_ue_node {
+	struct list_head	list;
+	u16			bus_ue_id;
+};
+
 struct ubase_ue_caps {
 	u8	ceq_vector_num;
 	u8	aeq_vector_num;
@@ -214,7 +219,9 @@ struct ubase_bus_eid {
 };
 
 bool ubase_adev_ubl_supported(struct auxiliary_device *adev);
+bool ubase_adev_ctrlq_supported(struct auxiliary_device *adev);
 bool ubase_adev_eth_mac_supported(struct auxiliary_device *adev);
+bool ubase_adev_prealloc_supported(struct auxiliary_device *aux_dev);
 
 struct ubase_resource_space *ubase_get_io_base(struct auxiliary_device *adev);
 struct ubase_resource_space *ubase_get_mem_base(struct auxiliary_device *adev);
@@ -222,6 +229,34 @@ struct ubase_caps *ubase_get_dev_caps(struct auxiliary_device *adev);
 struct ubase_adev_caps *ubase_get_unic_caps(struct auxiliary_device *adev);
 struct ubase_adev_caps *ubase_get_udma_caps(struct auxiliary_device *adev);
 struct ubase_adev_caps *ubase_get_cdma_caps(struct auxiliary_device *adev);
+struct ubase_adev_qos *ubase_get_adev_qos(struct auxiliary_device *adev);
+
+void ubase_reset_event(struct auxiliary_device *adev,
+		       enum ubase_reset_type reset_type);
+enum ubase_reset_stage ubase_get_reset_stage(struct auxiliary_device *adev);
+
+void ubase_virt_register(struct auxiliary_device *adev,
+			 void (*virt_handler)(struct auxiliary_device *adev,
+					      u16 bus_ue_id, bool is_en));
+void ubase_virt_unregister(struct auxiliary_device *adev);
+
+void ubase_port_register(struct auxiliary_device *adev,
+			 void (*port_handler)(struct auxiliary_device *adev,
+					      bool link_up));
+void ubase_port_unregister(struct auxiliary_device *adev);
+
+void ubase_reset_register(struct auxiliary_device *adev,
+			  void (*reset_handler)(struct auxiliary_device *adev,
+						enum ubase_reset_stage stage));
+void ubase_reset_unregister(struct auxiliary_device *adev);
+
+void ubase_activate_register(struct auxiliary_device *adev,
+			     void (*activate_handler)(struct auxiliary_device *adev,
+						      bool activate));
+void ubase_activate_unregister(struct auxiliary_device *adev);
+
+int ubase_activate_dev(struct auxiliary_device *adev);
+int ubase_deactivate_dev(struct auxiliary_device *adev);
 
 int ubase_get_bus_eid(struct auxiliary_device *adev, struct ubase_bus_eid *eid);
 

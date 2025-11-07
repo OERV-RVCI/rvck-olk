@@ -9,6 +9,8 @@
 
 #include <ub/ubase/ubase_comm_hw.h>
 
+#include "ubase_cmd.h"
+
 #define UBASE_CTX_REMOVE_ALL		(-2)
 
 #define UBASE_DEF_CEQ_VECTOR_NUM	1
@@ -113,12 +115,41 @@ struct ubase_res_cmd_resp {
 	__le32	ccc_max_cnt;
 };
 
+struct ubase_query_oor_resp {
+	u8	oor_en;
+	u8	reorder_cq_buffer_en;
+	u8	reorder_cap;
+	u8	reorder_cq_shift;
+	__le32	on_flight_size;
+	u8	dynamic_ack_timeout;
+	u8	rsvd0[15];
+};
+
+struct ubase_query_port_bitmap_resp {
+	__le32 logic_port_bitmap;
+	__le32 chip_id;
+	__le32 die_id;
+	__le32 resv[3];
+};
+
 struct ubase_query_controller_info_resp {
 	__le32	rsvd0[2];
 	u8	packet_pattern_mode : 1;
 	u8	ack_queue_num : 4;
 	u8	rsvd1 : 3;
 	u8	rsvd2[15];
+};
+
+struct ubase_cfg_dma_buf_req {
+	__le32 addr_l;
+	__le32 addr_h;
+	__le32 tp_num; /* only used when cfg TP extdb buf */
+	__le32 resv[3];
+};
+
+struct ubase_config_sl_vl_cmd {
+	u8	sl_num;
+	u8	sl_vl[23];
 };
 
 struct ubase_query_chip_die_cmd {
@@ -137,10 +168,47 @@ struct ubase_ctx_buf_map {
 	u16 mb_cmd;
 };
 
+struct ubase_query_vl_ageing_cmd {
+	__le16	vl_ageing_en;
+	u8	rsv[22];
+};
+
+struct ubase_query_ctp_vl_offset_cmd {
+	u8	ctp_vl_offset;
+	u8	rsv[23];
+};
+
 int ubase_hw_init(struct ubase_dev *udev);
 void ubase_hw_uninit(struct ubase_dev *udev);
+int ubase_query_sl_vl_map(struct ubase_dev *udev, u8 *sl_vl);
+int ubase_qos_init(struct ubase_dev *udev);
+int ubase_query_ets_tc(struct ubase_dev *udev, u32 port_bitmap,
+		       u16 vl_bitmap, struct ubase_cfg_ets_vl_sch_cmd *resp);
+int ubase_query_ets_tcg(struct ubase_dev *udev,
+			struct ubase_query_ets_tcg_cmd *resp);
+int ubase_query_ets_port(struct ubase_dev *udev,
+			 struct ubase_query_ets_port_cmd *resp);
 int ubase_query_dev_res(struct ubase_dev *udev);
 int ubase_query_chip_info(struct ubase_dev *udev);
 int ubase_query_controller_info(struct ubase_dev *udev);
+int ubase_query_hw_oor_caps(struct ubase_dev *udev);
+int ubase_query_tm_queue(struct ubase_dev *udev, u16 bus_ue_id,
+			 struct ubase_query_tm_queue_cmd *resp);
+int ubase_query_tm_qset(struct ubase_dev *udev, u16 bus_ue_id,
+			struct ubase_query_tm_qset_cmd *resp);
+int ubase_query_tm_pri(struct ubase_dev *udev, u16 bus_ue_id,
+		       struct ubase_query_tm_pri_cmd *resp);
+int ubase_query_tm_pg(struct ubase_dev *udev, u16 bus_ue_id,
+		      struct ubase_query_tm_pg_cmd *resp);
+int ubase_query_tm_port(struct ubase_dev *udev,
+			struct ubase_query_tm_port_cmd *resp);
+int ubase_ue_init(struct ubase_dev *udev);
+void ubase_ue_uninit(struct ubase_dev *udev);
+int ubase_query_fst_fvt_rqmt(struct ubase_dev *udev,
+			     struct ubase_query_fst_fvt_rqmt_cmd *resp,
+			     u16 bus_ue_id);
+int ubase_query_port_bitmap(struct ubase_dev *udev);
+int __ubase_perf_stats(struct ubase_dev *udev, u64 port_bitmap, u32 period,
+		       struct ubase_perf_stats_result *data, u32 data_size);
 
 #endif

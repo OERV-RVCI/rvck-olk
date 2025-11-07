@@ -12,10 +12,17 @@
 
 #define UBASE_CAP_LEN			3
 #define UBASE_MAX_TCG_NUM		(4)
+#define UBASE_PMEM_PAGE_SIZE		(2 * 1024 * 1024UL) /* 2MB */
 
 enum ubase_service_state {
 	UBASE_STATE_CRQ_SERVICE_SCHED,
 	UBASE_STATE_CRQ_HANDLING,
+	UBASE_SERVICE_STATE_ERR_SCHED,
+	UBASE_SERVICE_STATE_RESET_SCHED,
+	UBASE_STATE_CTRLQ_SERVICE_SCHED,
+	UBASE_STATE_CTRLQ_HANDLING,
+	UBASE_STATE_ARQ_SERVICE_SCHED,
+	UBASE_STATE_ARQ_HANDLING,
 };
 
 struct ubase_delay_work {
@@ -63,5 +70,7 @@ static inline u32 ubase_read_reg(u8 __iomem *base, u32 reg)
 	ubase_write_reg((a)->io_base.addr, reg, value)
 #define ubase_read_dev(a, reg) \
 	ubase_read_reg((a)->io_base.addr, reg)
+
+#define ubase_addr_gen(addr_h, addr_l) ((u64)(addr_h) << 32 | (addr_l))
 
 #endif

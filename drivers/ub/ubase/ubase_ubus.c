@@ -330,13 +330,136 @@ int ubase_ubus_irq_vector(struct device *dev, u32 idx)
 	return ub_irq_vector(ue, idx);
 }
 
+static int ubase_ubus_suspend(struct device *dev)
+{
+	struct ubase_dev *udev = dev_get_drvdata(dev);
+
+	ubase_info(udev, "UBUS suspend start.\n");
+	ubase_suspend(udev);
+
+	return 0;
+}
+
+static int ubase_ubus_resume(struct device *dev)
+{
+	struct ubase_dev *udev = dev_get_drvdata(dev);
+
+	ubase_info(udev, "UBUS resume start.\n");
+	ubase_resume(udev);
+
+	return 0;
+}
+
+static SIMPLE_DEV_PM_OPS(ubase_ubus_pm_ops, ubase_ubus_suspend, ubase_ubus_resume);
+
+static const struct device_driver ubase_ue_driver = {
+	.pm = &ubase_ubus_pm_ops,
+};
+
+static int ubase_ubus_virt_configure(struct ub_entity *ue, int bus_ue_id, bool is_en)
+{
+	struct ubase_dev *udev = dev_get_drvdata(&ue->dev);
+	int ret;
+
+	/*
+	 * The ubus framework have ensure that only mue can come
+	 * here, so we not need to check is this a mue again.
+	 */
+	ubase_info(udev, "ubase virt configure set idx = %d en = %d.\n",
+		   bus_ue_id, is_en);
+
+	if (!is_en)
+		ret = ub_disable_ue(ue, bus_ue_id);
+	else
+		ret = ub_enable_ue(ue, bus_ue_id);
+
+	return ret;
+}
+
+static int ubase_ubus_virt_notify(struct ub_entity *ue, int bus_ue_id, bool is_en)
+{
+	struct ubase_dev *udev = dev_get_drvdata(&ue->dev);
+
+	ubase_info(udev, "ubase virt notify, ue id = %d, en = %d.\n",
+		   bus_ue_id, is_en);
+
+	ubase_virt_handler(udev, (u16)bus_ue_id, is_en);
+
+	return 0;
+}
+
+static int ubase_ubus_activate(struct ub_entity *ue, u32 bus_ue_id)
+{
+	struct ubase_dev *udev = dev_get_drvdata(&ue->dev);
+
+	ubase_info(udev, "ubase activate ue id = %u.\n", bus_ue_id);
+
+	return ubase_activate_handler(udev, bus_ue_id);
+}
+
+static int ubase_ubus_deactivate(struct ub_entity *ue, u32 bus_ue_id)
+{
+	struct ubase_dev *udev = dev_get_drvdata(&ue->dev);
+
+	ubase_info(udev, "ubase deactivate ue id = %u.\n", bus_ue_id);
+
+	return ubase_deactivate_handler(udev, bus_ue_id);
+}
+
+static void ubase_ubus_reset_prepare(struct ub_entity *ue)
+{
+	struct ubase_dev *udev = dev_get_drvdata(&ue->dev);
+
+	ubase_info(udev, "UBUS ELR start.\n");
+	ubase_suspend(udev);
+}
+
+static void ubase_ubus_reset_done(struct ub_entity *ue)
+{
+	struct ubase_dev *udev = dev_get_drvdata(&ue->dev);
+
+	ubase_resume(udev);
+	ubase_info(udev, "UBUS ELR done.\n");
+}
+
+static ub_ers_result_t ubase_ubus_error_detected(struct ub_entity *ue,
+						 ub_channel_state_t state)
+{
+	struct ubase_dev *udev = dev_get_drvdata(&ue->dev);
+
+	ubase_info(udev, "UBUS error detected, state = %u.\n", state);
+
+	switch (state) {
+	case ub_channel_io_normal:
+		return UB_ERS_RESULT_NEED_RESET;
+	case ub_channel_io_frozen:
+		return UB_ERS_RESULT_DISCONNECT;
+	case ub_channel_io_perm_failure:
+	default:
+		return UB_ERS_RESULT_NONE;
+	}
+}
+
+static const struct ub_error_handlers ubase_ubus_err_handler = {
+	.ub_reset_prepare	= ubase_ubus_reset_prepare,
+	.ub_reset_done		= ubase_ubus_reset_done,
+	.ub_error_detected	= ubase_ubus_error_detected,
+};
+
 static struct ub_driver ubase_ubus_driver = {
 	.name		= ubase_ubus_driver_name,
 	.id_table	= ubase_ubus_tbl,
 	.probe		= ubase_ubus_probe,
 	.remove		= ubase_ubus_remove,
 	.shutdown	= ubase_ubus_shutdown,
-	.driver		= {},
+	.virt_configure	= ubase_ubus_virt_configure,
+	.virt_notify	= ubase_ubus_virt_notify,
+	.err_handler	= &ubase_ubus_err_handler,
+	.activate	= ubase_ubus_activate,
+	.deactivate	= ubase_ubus_deactivate,
+	.driver		= {
+		.pm = &ubase_ubus_pm_ops,
+	},
 };
 
 int ubase_ubus_register_driver(void)

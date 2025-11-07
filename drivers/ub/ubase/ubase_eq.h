@@ -38,13 +38,25 @@
 
 /* Vector0 interrupt CMDQ event source register(RW) */
 #define UBASE_VECTOR0_CMDQ_SRC_REG	0x18004
+/* Vector0 interrupt CTRLQ event source register(RW) */
+#define UBASE_VECTOR0_CTRLQ_SRC_REG	0x18014
 /* Vector0 interrupt control register */
 #define UBASE_MISC_VECTOR_REG_OFFSET	0x18020
+/* Software handshake 0 register(RW) */
+#define UBASE_SW_HANDSHAKE_0_REG	0x18044
 /* CMDQ register bits for RX event */
 #define UBASE_VECTOR0_RX_CMDQ_INT_B	1
+/* CTRLQ register bits for RX event */
+#define UBASE_VECTOR0_RX_CTRLQ_INT_B	0
+/* Software handshake 0 register bit for ras report */
+#define UBASE_SW_HANDSHAKE_0_RAS_B		0
+#define UBASE_SW_HANDSHAKE_0_PORT_RESET_B	1
+#define UBASE_SW_HANDSHAKE_0_HIMAC_RESET_B	2
 
 enum ubase_async_event_cause_bit {
 	UBASE_ASYNC_EVENT_CRQ_B,
+	UBASE_ASYNC_EVENT_RAS_B,
+	UBASE_ASYNC_EVENT_CTRLQ_B,
 };
 
 enum ubase_eqc_irqn {
@@ -184,6 +196,7 @@ struct ubase_aeq_work {
 
 int ubase_irq_table_init(struct ubase_dev *udev);
 void ubase_irq_table_uninit(struct ubase_dev *udev);
+void ubase_irq_table_free(struct ubase_dev *udev);
 
 int ubase_register_ae_event(struct ubase_dev *udev);
 void ubase_unregister_ae_event(struct ubase_dev *udev);

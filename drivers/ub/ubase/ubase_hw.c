@@ -10,10 +10,13 @@
 #include <ub/ubase/ubase_comm_mbx.h>
 
 #include "ubase_cmd.h"
+#include "ubase_ctrlq.h"
+#include "ubase_dev.h"
 #include "ubase_mailbox.h"
+#include "ubase_tp.h"
 #include "ubase_hw.h"
 
-#define UBASE_CTX_REMOVE_ALL		(-2)
+static DEFINE_MUTEX(ubase_perf_mutex);
 
 struct ubase_dma_buf_desc {
 	struct ubase_dma_buf	*buf;
@@ -23,6 +26,10 @@ struct ubase_dma_buf_desc {
 
 #define UBASE_DEFINE_DMA_BUFS(udev) \
 	struct ubase_dma_buf_desc bufs[] = { \
+		{ &(udev)->ta_ctx.extdb_buf, UBASE_OPC_TA_EXTDB_VA_CONFIG, \
+		  &ubase_dev_ta_extdb_buf_supported }, \
+		{ &(udev)->ta_ctx.timer_buf, UBASE_OPC_TA_TIMER_VA_CONFIG, \
+		  &ubase_dev_ta_timer_buf_supported } \
 	}
 
 static void ubase_assign_addr_val(void *addr, u32 val, u8 size)
@@ -223,6 +230,21 @@ int ubase_query_dev_res(struct ubase_dev *udev)
 	return ubase_parse_dev_res(udev, &resp);
 }
 
+static void ubase_init_start_idx(struct ubase_dev *udev)
+{
+	struct ubase_adev_caps *udma_caps = &udev->caps.udma_caps;
+	struct ubase_adev_caps *unic_caps = &udev->caps.unic_caps;
+
+	unic_caps->jfs.start_idx = udev->caps.dev_caps.public_jetty_cnt +
+				   udev->caps.dev_caps.rsvd_jetty_cnt;
+
+	udma_caps->jfs.start_idx = unic_caps->jfs.max_cnt +
+				   udev->caps.dev_caps.public_jetty_cnt +
+				   udev->caps.dev_caps.rsvd_jetty_cnt;
+	udma_caps->jfr.start_idx = unic_caps->jfr.max_cnt;
+	udma_caps->jfc.start_idx = unic_caps->jfc.max_cnt;
+}
+
 static int ubase_config_ctx_buf_to_hw(struct ubase_dev *udev,
 				      struct ubase_ctx_buf_cap *ctx_buf,
 				      struct ubase_mbx_attr *attr)
@@ -390,7 +412,22 @@ static int ubase_alloc_and_fill_ctx_buf(struct ubase_dev *udev,
 	return ret;
 }
 
-static int ubase_cmd_ctx_buf_alloc(struct ubase_dev *udev,
+static int ubase_config_jfs_ctx_buf_by_pmem(struct ubase_dev *udev,
+					    struct ubase_mbx_attr *attr)
+{
+	struct ubase_cmd_mailbox mailbox;
+	int ret;
+
+	mailbox.dma = udev->pmem_info.comm.dma_addr;
+	ret = __ubase_hw_upgrade_ctx(udev, attr, &mailbox);
+	if (ret)
+		ubase_err(udev,
+			  "failed to config jfs ctx buf, ret = %d.\n", ret);
+
+	return ret;
+}
+
+int ubase_cmd_ctx_buf_alloc(struct ubase_dev *udev,
 			    struct ubase_ctx_buf_cap *ctx_buf,
 			    struct ubase_mbx_attr *attr)
 {
@@ -399,6 +436,10 @@ static int ubase_cmd_ctx_buf_alloc(struct ubase_dev *udev,
 
 	if (!size)
 		return 0;
+
+	if (attr->op == UBASE_MB_WRITE_JFS_CONTEXT_VA &&
+	    test_bit(UBASE_STATE_PREALLOC_OK_B, &udev->state_bits))
+		return ubase_config_jfs_ctx_buf_by_pmem(udev, attr);
 
 	xa_init(&ctx_buf->ctx_xa);
 	ret = ubase_alloc_and_fill_ctx_buf(udev, ctx_buf, attr, size);
@@ -487,6 +528,153 @@ static int ubase_ctx_buf_alloc(struct ubase_dev *udev)
 	ubase_get_ctx_entry_size(udev);
 
 	return ubase_ctx_alloc(udev, ctx_buf);
+}
+
+static int ubase_config_dma_buf(struct ubase_dev *udev, u16 opc, u64 dma_addr)
+{
+	struct ubase_cfg_dma_buf_req req = {0};
+	struct ubase_cmd_buf in;
+	int ret;
+
+	req.addr_l = cpu_to_le32(lower_32_bits(dma_addr));
+	req.addr_h = cpu_to_le32(upper_32_bits(dma_addr));
+
+	__ubase_fill_inout_buf(&in, opc, false, sizeof(req), &req);
+
+	ret = __ubase_cmd_send_in(udev, &in);
+	if (ret)
+		ubase_err(udev,
+			  "failed to send cmd in cfg dma buf, ret = %d.\n", ret);
+
+	return ret;
+}
+
+static int ubase_config_ta_timer_buf_by_pmem(struct ubase_dev *udev, u16 opc)
+{
+	u64 dma_addr, offset;
+
+	offset = ubase_jfs_ctx_align_size(udev);
+	dma_addr = udev->pmem_info.comm.dma_addr + offset;
+
+	return ubase_config_dma_buf(udev, opc, dma_addr);
+}
+
+static int ubase_init_dma_buf(struct ubase_dev *udev, struct ubase_dma_buf *buf,
+			      u16 opc)
+{
+	int ret;
+
+	if (opc == UBASE_OPC_TA_TIMER_VA_CONFIG &&
+	    test_bit(UBASE_STATE_PREALLOC_OK_B, &udev->state_bits))
+		return ubase_config_ta_timer_buf_by_pmem(udev, opc);
+
+	buf->addr = dma_alloc_coherent(udev->dev, buf->size, &buf->dma_addr,
+				       GFP_KERNEL);
+	if (!buf->addr)
+		return -ENOMEM;
+
+	ret = ubase_config_dma_buf(udev, opc, buf->dma_addr);
+	if (ret)
+		dma_free_coherent(udev->dev, buf->size, buf->addr,
+				  buf->dma_addr);
+
+	return ret;
+}
+
+static void ubase_uninit_dma_buf(struct ubase_dev *udev,
+				 struct ubase_dma_buf *buf)
+{
+	if (!buf->addr)
+		return;
+
+	dma_free_coherent(udev->dev, buf->size, buf->addr, buf->dma_addr);
+	buf->addr = NULL;
+}
+
+static int ubase_init_ta_tp_ext_buf(struct ubase_dev *udev)
+{
+	UBASE_DEFINE_DMA_BUFS(udev);
+	int i, ret;
+
+	for (i = 0; i < ARRAY_SIZE(bufs); i++) {
+		ret = bufs[i].is_supported(udev) ?
+		      ubase_init_dma_buf(udev, bufs[i].buf, bufs[i].opc) : 0;
+		if (ret) {
+			ubase_err(udev,
+				  "failed to init buf[%d], ret = %d.\n", i, ret);
+			goto err_out;
+		}
+	}
+
+	return 0;
+err_out:
+	for (i -= 1; i >= 0; i--) {
+		if (bufs[i].is_supported(udev))
+			ubase_uninit_dma_buf(udev, bufs[i].buf);
+	}
+	return ret;
+}
+
+static void ubase_uninit_ta_tp_ext_buf(struct ubase_dev *udev)
+{
+	UBASE_DEFINE_DMA_BUFS(udev);
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(bufs); i++) {
+		if (bufs[i].is_supported(udev))
+			ubase_uninit_dma_buf(udev, bufs[i].buf);
+	}
+}
+
+int ubase_query_hw_oor_caps(struct ubase_dev *udev)
+{
+	struct ubase_caps *dev_caps = &udev->caps.dev_caps;
+	struct ubase_query_oor_resp resp = {0};
+	struct ubase_cmd_buf in, out;
+	int ret;
+
+	ubase_fill_inout_buf(&in, UBASE_OPC_QUERY_OOR_CAPS, true, 0, NULL);
+	ubase_fill_inout_buf(&out, UBASE_OPC_QUERY_OOR_CAPS, true,
+			     sizeof(resp), &resp);
+
+	ret = __ubase_cmd_send_inout(udev, &in, &out);
+	if (ret) {
+		ubase_err(udev,
+			  "failed to query hw oor caps, ret = %d.\n", ret);
+		return ret;
+	}
+
+	dev_caps->oor_en = resp.oor_en;
+	dev_caps->reorder_queue_en = resp.reorder_cq_buffer_en;
+	dev_caps->reorder_cap = resp.reorder_cap;
+	dev_caps->reorder_queue_shift = resp.reorder_cq_shift;
+	dev_caps->on_flight_size = le32_to_cpu(resp.on_flight_size);
+	dev_caps->at_times = resp.dynamic_ack_timeout;
+
+	return 0;
+}
+
+int ubase_query_port_bitmap(struct ubase_dev *udev)
+{
+	struct ubase_caps *dev_caps = &udev->caps.dev_caps;
+	struct ubase_query_port_bitmap_resp resp = {0};
+	struct ubase_cmd_buf in, out;
+	int ret;
+
+	ubase_fill_inout_buf(&in, UBASE_OPC_QUERY_PORT_BITMAP, true, 0, NULL);
+	ubase_fill_inout_buf(&out, UBASE_OPC_QUERY_PORT_BITMAP, true,
+			     sizeof(resp), &resp);
+
+	ret = __ubase_cmd_send_inout(udev, &in, &out);
+	if (ret && ret != -EPERM) {
+		dev_err(udev->dev,
+			"failed to query port bitmap, ret = %d.\n", ret);
+		return ret;
+	}
+
+	dev_caps->logic_port_bitmap = le32_to_cpu(resp.logic_port_bitmap);
+
+	return 0;
 }
 
 int ubase_query_controller_info(struct ubase_dev *udev)
@@ -586,9 +774,91 @@ static inline void ubase_uninit_ctx_buf(struct ubase_dev *udev)
 	ubase_ctx_free(udev, &udev->ctx_buf, UBASE_CTX_REMOVE_ALL);
 }
 
+static void ubase_init_ctx_buf_lock(struct ubase_ctx_buf *ctx_buf)
+{
+	struct mutex *ctx_mutex[] = { &ctx_buf->jfs.ctx_mutex,
+				      &ctx_buf->jfr.ctx_mutex,
+				      &ctx_buf->jfc.ctx_mutex,
+				      &ctx_buf->jtg.ctx_mutex,
+				      &ctx_buf->rc.ctx_mutex };
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(ctx_mutex); i++)
+		mutex_init(ctx_mutex[i]);
+}
+
+static void ubase_uninit_ctx_buf_lock(struct ubase_ctx_buf *ctx_buf)
+{
+	struct mutex *ctx_mutex[] = { &ctx_buf->jfs.ctx_mutex,
+				      &ctx_buf->jfr.ctx_mutex,
+				      &ctx_buf->jfc.ctx_mutex,
+				      &ctx_buf->jtg.ctx_mutex,
+				      &ctx_buf->rc.ctx_mutex };
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(ctx_mutex); i++)
+		mutex_destroy(ctx_mutex[i]);
+}
+
+int ubase_ue_init(struct ubase_dev *udev)
+{
+	ubase_init_start_idx(udev);
+	INIT_LIST_HEAD(&udev->ue_list);
+	mutex_init(&udev->ue_list_lock);
+	mutex_init(&udev->stats.stats_lock);
+	mutex_init(&udev->stats.activate_record.lock);
+	spin_lock_init(&udev->tp_ctx.tpg_lock);
+	mutex_init(&udev->act_ctx.lock);
+	init_completion(&udev->act_ctx.self.activate_done);
+	init_completion(&udev->act_ctx.other.activate_done);
+	ubase_init_ctx_buf_lock(&udev->ctx_buf);
+
+	return 0;
+}
+
+void ubase_ue_uninit(struct ubase_dev *udev)
+{
+	mutex_destroy(&udev->act_ctx.lock);
+	mutex_destroy(&udev->stats.activate_record.lock);
+	mutex_destroy(&udev->stats.stats_lock);
+	mutex_destroy(&udev->ue_list_lock);
+	ubase_uninit_ctx_buf_lock(&udev->ctx_buf);
+}
+
+static int ubase_notify_ctrl_plane_init_res(struct ubase_dev *udev)
+{
+	struct ubase_ctrlq_reset_ctrl_req req = {0};
+	struct ubase_ctrlq_msg msg = {0};
+	u32 resp;
+	int ret;
+
+	msg.service_ver = UBASE_CTRLQ_SER_VER_01;
+	msg.service_type = UBASE_CTRLQ_SER_TYPE_DEV_REGISTER;
+	msg.opcode = UBASE_CTRLQ_OPC_UE_RESET_CTRL;
+	msg.need_resp = 1;
+	msg.in_size = sizeof(req);
+	msg.in = &req;
+	msg.out_size = sizeof(resp);
+	msg.out = &resp;
+
+	req.flag = UBASE_CTRL_PLANE_INIT_RES;
+
+	ret = __ubase_ctrlq_send(udev, &msg, NULL);
+	if (ret)
+		dev_err(udev->dev,
+			"failed to notify ctrl plane init res, ret = %d.\n",
+			ret);
+
+	return ret;
+}
+
 int ubase_hw_init(struct ubase_dev *udev)
 {
 	int ret;
+
+	ret = ubase_notify_ctrl_plane_init_res(udev);
+	if (ret)
+		return ret;
 
 	ret = ubase_ctx_buf_alloc(udev);
 	if (ret) {
@@ -596,17 +866,163 @@ int ubase_hw_init(struct ubase_dev *udev)
 		return ret;
 	}
 
+	ret = ubase_init_ta_tp_ext_buf(udev);
+	if (ret)
+		goto err_init_ta_tp_ext_buf;
+
+	ret = ubase_dev_init_tp_tpg(udev);
+	if (ret) {
+		ubase_err(udev, "failed to init tp & tpg, ret = %d.\n", ret);
+		goto err_init_tp_tpg;
+	}
+
 	set_bit(UBASE_STATE_CTX_READY_B, &udev->state_bits);
 
 	return 0;
+
+err_init_tp_tpg:
+	ubase_uninit_ta_tp_ext_buf(udev);
+err_init_ta_tp_ext_buf:
+	ubase_uninit_ctx_buf(udev);
+
+	return ret;
 }
 
 void ubase_hw_uninit(struct ubase_dev *udev)
 {
 	clear_bit(UBASE_STATE_CTX_READY_B, &udev->state_bits);
 
-	if (!test_bit(UBASE_STATE_RST_HANDLING_B, &udev->state_bits))
+	ubase_dev_uninit_tp_tpg(udev);
+	ubase_uninit_ta_tp_ext_buf(udev);
+
+	if (!test_bit(UBASE_STATE_RST_HANDLING_B, &udev->state_bits)) {
+		ubase_ctrlq_disable_remote(udev);
 		ubase_destroy_ctx_res(udev);
+	}
 
 	ubase_uninit_ctx_buf(udev);
 }
+
+static int ubase_start_perf_stats(struct ubase_dev *udev, u32 period,
+				  u64 port_bitmap)
+{
+	struct ubase_start_perf_stats_cmd req = {0};
+	struct ubase_cmd_buf in;
+	int ret;
+
+	req.period = cpu_to_le32(period);
+	req.logic_port_bitmap[0] = cpu_to_le32(lower_32_bits(port_bitmap));
+	req.logic_port_bitmap[1] = cpu_to_le32(upper_32_bits(port_bitmap));
+
+	__ubase_fill_inout_buf(&in, UBASE_OPC_START_PERF_STATS, false,
+			       sizeof(req), &req);
+	ret = __ubase_cmd_send_in(udev, &in);
+	if (ret && ret != -EPERM)
+		ubase_err(udev, "failed to cfg perf stats period, ret = %d.\n",
+			  ret);
+
+	return ret == -EPERM ? -EOPNOTSUPP : ret;
+}
+
+static int ubase_stop_perf_stats(struct ubase_dev *udev,
+				 struct ubase_stop_perf_stats_cmd *resp,
+				 u32 period, u16 port_id)
+{
+	struct ubase_stop_perf_stats_cmd req = {0};
+	struct ubase_cmd_buf in, out;
+	int ret;
+
+	req.period = cpu_to_le32(period);
+	req.port_id = cpu_to_le16(port_id);
+
+	__ubase_fill_inout_buf(&in, UBASE_OPC_STOP_PERF_STATS, true,
+			       sizeof(req), &req);
+	__ubase_fill_inout_buf(&out, UBASE_OPC_STOP_PERF_STATS, false,
+			       sizeof(*resp), resp);
+
+	ret = __ubase_cmd_send_inout(udev, &in, &out);
+	if (ret && ret != -EPERM)
+		ubase_err(udev, "failed to query perf stats, ret = %d.\n", ret);
+
+	return ret == -EPERM ? -EOPNOTSUPP : ret;
+}
+
+int __ubase_perf_stats(struct ubase_dev *udev, u64 port_bitmap, u32 period,
+		       struct ubase_perf_stats_result *data, u32 data_size)
+{
+#define UBASE_MS_TO_US(ms) (1000 * (ms))
+	struct ubase_stop_perf_stats_cmd resp = {0};
+	unsigned long logic_port_bitmap;
+	int ret, j, k, port_num;
+	u8 i;
+
+	if (!test_bit(UBASE_STATE_INITED_B, &udev->state_bits) ||
+	    test_bit(UBASE_STATE_RST_HANDLING_B, &udev->state_bits))
+		return -EBUSY;
+
+	logic_port_bitmap = udev->caps.dev_caps.logic_port_bitmap;
+
+	if (port_bitmap) {
+		if (data_size < bitmap_weight((unsigned long *)&port_bitmap,
+					      UBASE_MAX_PORT_NUM) ||
+		    !bitmap_subset((unsigned long *)&port_bitmap,
+				   &logic_port_bitmap,
+				   UBASE_MAX_PORT_NUM))
+			return -EINVAL;
+	} else {
+		if (data_size != UBASE_MAX_PORT_NUM)
+			return -EINVAL;
+
+		port_bitmap = logic_port_bitmap;
+	}
+
+	mutex_lock(&ubase_perf_mutex);
+	ret = ubase_start_perf_stats(udev, period, port_bitmap);
+	if (ret)
+		goto unlock;
+
+	usleep_range(UBASE_MS_TO_US(period), UBASE_MS_TO_US(period + 1));
+
+	port_num = bitmap_weight((unsigned long *)&port_bitmap,
+				 UBASE_MAX_PORT_NUM);
+	for (i = 0, k = 0; i < UBASE_MAX_PORT_NUM && k < port_num; i++) {
+		if (!test_bit(i, (unsigned long *)&port_bitmap))
+			continue;
+		ret = ubase_stop_perf_stats(udev, &resp, period, i);
+		if (ret)
+			goto unlock;
+
+		data[k].tx_port_bw = le32_to_cpu(resp.tx_port_bw);
+		data[k].rx_port_bw = le32_to_cpu(resp.rx_port_bw);
+		data[k].port_id = i;
+		data[k].valid = 1;
+
+		for (j = 0; j < UBASE_STATS_MAX_VL_NUM; j++) {
+			data[k].tx_vl_bw[j] = le32_to_cpu(resp.tx_vl_bw[j]);
+			data[k].rx_vl_bw[j] = le32_to_cpu(resp.rx_vl_bw[j]);
+		}
+
+		k++;
+	}
+
+unlock:
+	mutex_unlock(&ubase_perf_mutex);
+
+	return ret;
+}
+
+int ubase_perf_stats(struct auxiliary_device *adev, u64 port_bitmap, u32 period,
+		     struct ubase_perf_stats_result *data, u32 data_size)
+{
+	struct ubase_dev *udev;
+
+	if (!adev || !data || !period || !data_size)
+		return -EINVAL;
+
+	udev = ubase_get_udev_by_adev(adev);
+	if (!(ubase_dev_ubl_supported(udev) || ubase_dev_fwctl_supported(udev)))
+		return -EOPNOTSUPP;
+
+	return __ubase_perf_stats(udev, port_bitmap, period, data, data_size);
+}
+EXPORT_SYMBOL(ubase_perf_stats);

@@ -10,6 +10,7 @@
 #include <linux/auxiliary_bus.h>
 #include <linux/dma-mapping.h>
 #include <ub/ubase/ubase_comm_cmd.h>
+#include <ub/ubase/ubase_comm_ctrlq.h>
 #include <ub/ubase/ubase_comm_debugfs.h>
 #include <ub/ubase/ubase_comm_dev.h>
 #include <ub/ubase/ubase_comm_eq.h>
@@ -136,6 +137,68 @@ struct ubase_crq_table {
 	struct ubase_crq_event_nbs nbs;
 };
 
+#define UBASE_CTRLQ_DATA_NUM	5
+
+#pragma pack(push, 1)
+struct ubase_ctrlq_base_block {
+	u8	service_ver;
+	u8	service_type;
+	u8	bb_num;
+	u8	opcode;
+	u8	ret;
+	__le16	seq;
+	u8	mbx_ue_id;
+	__le16	bus_ue_id;
+	__le16	rsv;
+	__le32	data[UBASE_CTRLQ_DATA_NUM];
+};
+#pragma pack(pop)
+
+struct ubase_ctrlq_ring {
+	u16		ci;
+	u16		pi;
+	u16		depth;
+	u32		tx_timeout;
+	void __iomem	*base_addr;
+	spinlock_t	lock;
+};
+
+struct ubase_ctrlq_msg_ctx {
+	u8	valid : 1;
+	u8	is_sync : 1;
+	u8	rsv0 : 6;
+	u8	mbx_ue_id;
+	u8	result;
+	u8	rsv1;
+	u16	ue_seq;
+	u16	bus_ue_id;
+	u16	out_size;
+	void	*out;
+	unsigned long	dead_jiffies;
+	struct completion	done;
+};
+
+struct ubase_ctrlq_crq_event_nbs {
+	struct list_head		list;
+	struct ubase_ctrlq_event_nb	crq_nb;
+};
+
+struct ubase_ctrlq_crq_table {
+	struct mutex	lock;
+	unsigned long	last_crq_scheduled;
+	struct ubase_ctrlq_crq_event_nbs	crq_nbs;
+};
+
+struct ubase_ctrlq {
+	u16				csq_next_seq;
+	unsigned long			state;
+	atomic_t			req_cnt;
+	struct ubase_ctrlq_ring		csq;
+	struct ubase_ctrlq_ring		crq;
+	struct ubase_ctrlq_msg_ctx	*msg_queue;
+	struct ubase_ctrlq_crq_table	crq_table;
+};
+
 #define UBASE_ACT_STAT_MAX_NUM 10U
 struct ubase_activate_dev_stats {
 	u64	act_cnt;
@@ -219,6 +282,7 @@ struct ubase_dev {
 	struct ubase_delay_work	period_service_task;
 	struct ubase_delay_work	arq_service_task;
 	struct ubase_crq_table	crq_table;
+	struct ubase_ctrlq	ctrlq;
 	unsigned long		state_bits;
 	struct list_head	ue_list;
 	struct mutex		ue_list_lock;
@@ -261,6 +325,16 @@ static inline bool ubase_dev_uvb_supported(struct ubase_dev *udev)
 	return ubase_get_cap_bit(udev, UBASE_SUPPORT_UVB_B);
 }
 
+static inline bool ubase_ip_over_urma_supported(struct ubase_dev *udev)
+{
+	return ubase_get_cap_bit(udev, UBASE_SUPPORT_IP_OVER_URMA_B);
+}
+
+static inline bool ubase_ip_over_urma_utp_supported(struct ubase_dev *udev)
+{
+	return ubase_get_cap_bit(udev, UBASE_SUPPORT_IP_OVER_URMA_UTP_B);
+}
+
 static inline
 struct ubase_dev *ubase_get_udev_by_adev(struct auxiliary_device *adev)
 {
@@ -281,9 +355,55 @@ static inline bool ubase_dev_ubl_supported(struct ubase_dev *udev)
 	return ubase_get_cap_bit(udev, UBASE_SUPPORT_UBL_B);
 }
 
+static inline bool ubase_dev_ta_extdb_buf_supported(struct ubase_dev *udev)
+{
+	return ubase_get_cap_bit(udev, UBASE_SUPPORT_TA_EXTDB_BUF_B);
+}
+
+static inline bool ubase_dev_ta_timer_buf_supported(struct ubase_dev *udev)
+{
+	return ubase_get_cap_bit(udev, UBASE_SUPPORT_TA_TIMER_BUF_B);
+}
+
+static inline bool ubase_dev_err_handle_supported(struct ubase_dev *udev)
+{
+	return ubase_get_cap_bit(udev, UBASE_SUPPORT_ERR_HANDLE_B);
+}
+
+static inline bool ubase_dev_ctrlq_supported(struct ubase_dev *udev)
+{
+	return ubase_get_cap_bit(udev, UBASE_SUPPORT_CTRLQ_B);
+}
+
 static inline bool ubase_dev_eth_mac_supported(struct ubase_dev *udev)
 {
 	return ubase_get_cap_bit(udev, UBASE_SUPPORT_ETH_MAC_B);
+}
+
+static inline bool ubase_dev_mac_stats_supported(struct ubase_dev *udev)
+{
+	return ubase_get_cap_bit(udev, UBASE_SUPPORT_MAC_STATS_B);
+}
+
+static inline bool __ubase_dev_prealloc_supported(struct ubase_dev *udev)
+{
+	return ubase_get_cap_bit(udev, UBASE_SUPPORT_PRE_ALLOC_B);
+}
+
+static inline bool ubase_activate_proxy_supported(struct ubase_dev *udev)
+{
+	return ubase_get_cap_bit(udev, UBASE_SUPPORT_ACTIVATE_PROXY_B);
+}
+
+static inline bool ubase_utp_supported(struct ubase_dev *udev)
+{
+	return ubase_get_cap_bit(udev, UBASE_SUPPORT_UTP_B);
+}
+
+static inline bool ubase_dev_prealloc_supported(struct ubase_dev *udev)
+{
+	return __ubase_dev_prealloc_supported(udev) &&
+	       PAGE_SIZE != UBASE_PMEM_PAGE_SIZE;
 }
 
 static inline u32 ubase_jfs_num(struct ubase_dev *udev)
@@ -296,6 +416,26 @@ static inline u32 ubase_jfs_num(struct ubase_dev *udev)
 	       dev_caps->public_jetty_cnt + dev_caps->rsvd_jetty_cnt;
 }
 
+static inline u32 ubase_jfs_ctx_align_size(struct ubase_dev *udev)
+{
+	return ALIGN(ubase_jfs_num(udev) * UBASE_JFS_CTX_SIZE, PAGE_SIZE);
+}
+
+static inline u32 ubase_ta_timer_align_size(struct ubase_dev *udev)
+{
+	return ALIGN(udev->ta_ctx.timer_buf.size, PAGE_SIZE);
+}
+
+static inline bool ubase_mbx_ue_id_is_valid(u16 mbx_ue_id,
+					    struct ubase_dev *udev)
+{
+
+	if (!mbx_ue_id || (mbx_ue_id > udev->caps.dev_caps.ue_num - 1))
+		return false;
+
+	return true;
+}
+
 int ubase_adev_idx_alloc(void);
 void ubase_adev_idx_free(int id);
 
@@ -304,5 +444,16 @@ void ubase_port_up(struct ubase_dev *udev);
 
 int ubase_dev_init(struct ubase_dev *udev);
 void ubase_dev_uninit(struct ubase_dev *udev);
+
+int ubase_dev_reset_init(struct ubase_dev *udev);
+void ubase_dev_reset_uninit(struct ubase_dev *udev);
+
+void ubase_suspend_aux_devices(struct ubase_dev *udev);
+void ubase_resume_aux_devices(struct ubase_dev *udev);
+
+void ubase_virt_handler(struct ubase_dev *udev, u16 bus_ue_id, bool is_en);
+
+int ubase_activate_handler(struct ubase_dev *udev, u32 bus_ue_id);
+int ubase_deactivate_handler(struct ubase_dev *udev, u32 bus_ue_id);
 
 #endif

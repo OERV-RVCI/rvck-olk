@@ -7,6 +7,16 @@
 #include <linux/delay.h>
 
 #include "ubase_cmd.h"
+#include "ubase_arq.h"
+#include "ubase_hw.h"
+
+/* When use tracepoint, must define "CREATE_TRACE_POINTS" before include the
+ * trace header file.
+ * If many source file need include the same header file, the
+ * "CREATE_TRACE_POINTS" only define once.
+ */
+#define CREATE_TRACE_POINTS
+#include "ubase_trace.h"
 
 static int ubase_alloc_cmd_queue(struct ubase_dev *udev,
 				 struct ubase_cmdq_ring *ring)
@@ -147,6 +157,7 @@ static void ubase_write_desc_to_cmdq(struct ubase_dev *udev,
 	while (cnt < num) {
 		desc_to_use = &csq->desc[csq->pi];
 		*desc_to_use = desc[cnt];
+		trace_ubase_csq_tx(udev->dev, cnt, csq->pi, csq->ci, desc);
 		(csq->pi)++;
 		if (csq->pi >= csq->desc_num)
 			csq->pi = 0;
@@ -191,6 +202,7 @@ static int ubase_get_cmd_result(struct ubase_dev *udev,
 
 	for (handle = 0; handle < num; handle++) {
 		desc[handle] = csq->desc[pi];
+		trace_ubase_csq_rx(udev->dev, handle, pi, csq->ci, desc);
 		pi++;
 		if (pi >= csq->desc_num)
 			pi = 0;
@@ -348,6 +360,8 @@ int ubase_cmd_init(struct ubase_dev *udev)
 		goto err_queue_init;
 	}
 
+	ubase_arq_init(udev);
+
 	ubase_cmd_init_regs(udev);
 
 	clear_bit(UBASE_STATE_CMD_DISABLE, &udev->hw.state);
@@ -361,6 +375,7 @@ int ubase_cmd_init(struct ubase_dev *udev)
 err_query_version:
 	set_bit(UBASE_STATE_CMD_DISABLE, &udev->hw.state);
 	ubase_cmd_uninit_regs(udev);
+	ubase_arq_uninit(udev);
 	ubase_cmd_queue_uninit(udev);
 err_queue_init:
 	if (!test_bit(UBASE_STATE_RST_HANDLING_B, &udev->state_bits))
@@ -386,6 +401,7 @@ void ubase_cmd_uninit(struct ubase_dev *udev)
 		msleep(UBASE_CMDQ_CLEAR_WAIT_TIME);
 	}
 
+	ubase_arq_uninit(udev);
 	ubase_cmd_queue_uninit(udev);
 
 	if (!test_bit(UBASE_STATE_RST_HANDLING_B, &udev->state_bits))
@@ -532,6 +548,7 @@ static void ubase_gen_multi_bd_data(struct ubase_dev *udev, u32 bd_num,
 
 	for (i = 0; i < bd_num; i++) {
 		desc = &crq->desc[crq->ci];
+		trace_ubase_crq(udev->dev, i, crq->pi, crq->ci, desc);
 		if (i == 0) {
 			memcpy(*msg_data + pos,
 			       desc->data, UBASE_CMD_DATA_LENGTH);
@@ -551,6 +568,7 @@ static void ubase_gen_single_bd_data(struct ubase_dev *udev, void **msg_data)
 	struct ubase_cmdq_desc *desc;
 
 	desc = &crq->desc[crq->ci];
+	trace_ubase_crq(udev->dev, 1, crq->pi, crq->ci, desc);
 	*msg_data = crq->desc[crq->ci].data;
 	UBASE_MOVE_CRQ_RING_PTR(crq);
 }
@@ -605,8 +623,11 @@ void ubase_cmd_crq_handler(struct ubase_dev *udev)
 
 		ubase_gen_bd_data(udev, bd_num, &msg_data, msg_data_len);
 
-		ubase_cmd_exec_callback(udev, opcode, msg_data,
-					msg_data_len);
+		if (ubase_is_arq_msg(opcode))
+			ubase_add_to_arq(udev, opcode, msg_data, msg_data_len);
+		else
+			ubase_cmd_exec_callback(udev, opcode, msg_data,
+						msg_data_len);
 
 		ubase_free_bd_data(msg_data, bd_num);
 	}
@@ -943,3 +964,37 @@ void ubase_unregister_crq_event(struct auxiliary_device *aux_dev, u16 opcode)
 	__ubase_unregister_crq_event(udev, opcode);
 }
 EXPORT_SYMBOL(ubase_unregister_crq_event);
+
+void ubase_mask_key_words(struct ubase_cmdq_desc *desc, u16 opc, int idx)
+{
+	struct ubase_cfg_dma_buf_req *req;
+	union ubase_mbox *mb;
+
+	switch (opc) {
+	case UBASE_OPC_TP_TIMER_VA_CONFIG:
+	case UBASE_OPC_TP_EXTDB_VA_CONFIG:
+	case UBASE_OPC_TA_EXTDB_VA_CONFIG:
+	case UBASE_OPC_TA_TIMER_VA_CONFIG:
+		if (idx)
+			return;
+		req = (struct ubase_cfg_dma_buf_req *)desc->data;
+		req->addr_l = 0;
+		req->addr_h = 0;
+		break;
+	case UBASE_OPC_POST_MB:
+		if (idx)
+			return;
+		mb = (union ubase_mbox *)desc->data;
+		mb->in_param_l = 0;
+		mb->in_param_h = 0;
+		break;
+	case UBASE_OPC_CFG_VPORT_BUF:
+		if (idx)
+			memset(desc, 0, sizeof(struct ubase_cmdq_desc));
+		else
+			memset(desc->data, 0, sizeof(desc->data));
+		break;
+	default:
+		return;
+	}
+}
