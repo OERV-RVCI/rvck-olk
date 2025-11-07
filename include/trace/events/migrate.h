@@ -23,7 +23,8 @@
 	EM( MR_CONTIG_RANGE,	"contig_range")			\
 	EM( MR_LONGTERM_PIN,	"longterm_pin")			\
 	EM(MR_DEMOTION,		"demotion")			\
-	EMe(MR_DAMON_DEMOTION,	"damon_demotion")
+	EM(MR_DAMON_DEMOTION,	"damon_demotion")		\
+	EMe(MR_HOTNESS,		"hotness")
 
 /*
  * First define the enums in the above macros to be exported to userspace
