@@ -329,7 +329,7 @@ static void __unmap_stage2_range(struct kvm_s2_mmu *mmu, phys_addr_t start, u64 
 	WARN_ON(size & ~PAGE_MASK);
 
 	if (_kvm_is_realm(kvm))
-		kvm_realm_unmap_range(kvm, start, size, !only_shared);
+		kvm_realm_unmap_range(kvm, start, size, !only_shared, may_block);
 	else
 		WARN_ON(stage2_apply_range(mmu, start, end,
 					   kvm_pgtable_stage2_unmap,
@@ -349,7 +349,7 @@ static void stage2_flush_memslot(struct kvm *kvm,
 	phys_addr_t end = addr + PAGE_SIZE * memslot->npages;
 
 	if (_kvm_is_realm(kvm))
-		kvm_realm_unmap_range(kvm, addr, end - addr, false);
+		kvm_realm_unmap_range(kvm, addr, end - addr, false, true);
 	else
 		stage2_apply_range_resched(&kvm->arch.mmu, addr, end,
 					   kvm_pgtable_stage2_flush);
@@ -1045,7 +1045,9 @@ void kvm_free_stage2_pgd(struct kvm_s2_mmu *mmu)
 	if (_kvm_is_realm(kvm) &&
 	    (kvm_realm_state(kvm) != REALM_STATE_DEAD &&
 	     kvm_realm_state(kvm) != REALM_STATE_NONE)) {
-		unmap_stage2_range(mmu, 0, (~0ULL) & PAGE_MASK, false);
+		struct realm *realm = &kvm->arch.realm;
+
+		unmap_stage2_range(mmu, 0, BIT(realm->ia_bits - 1), true);
 		write_unlock(&kvm->mmu_lock);
 		kvm_realm_destroy_rtts(kvm, pgt->ia_bits);
 

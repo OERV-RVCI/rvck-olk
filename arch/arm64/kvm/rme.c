@@ -343,7 +343,8 @@ static int realm_fold_rtt_level(struct realm *realm, int level,
 static void realm_unmap_shared_range(struct kvm *kvm,
 				     int level,
 				     unsigned long start,
-				     unsigned long end)
+				     unsigned long end,
+				     bool may_block)
 {
 	struct realm *realm = &kvm->arch.realm;
 	unsigned long rd = virt_to_phys(realm->rd);
@@ -368,7 +369,7 @@ static void realm_unmap_shared_range(struct kvm *kvm,
 			if (addr < align_addr)
 				next_addr = align_addr;
 			realm_unmap_shared_range(kvm, level + 1, addr,
-						 min(next_addr, end));
+						 min(next_addr, end), may_block);
 			continue;
 		}
 
@@ -386,15 +387,15 @@ static void realm_unmap_shared_range(struct kvm *kvm,
 				 */
 				next_addr = ALIGN(addr + 1, map_size);
 				realm_unmap_shared_range(kvm, level + 1, addr,
-							 next_addr);
+							 next_addr, may_block);
 			}
 			break;
 		default:
 			WARN_ON(1);
 			return;
 		}
-
-		cond_resched_rwlock_write(&kvm->mmu_lock);
+		if (may_block)
+			cond_resched_rwlock_write(&kvm->mmu_lock);
 	}
 	realm_fold_rtt_level(realm, get_start_level(realm) + 1, start, end);
 }
@@ -693,7 +694,8 @@ void kvm_realm_destroy_rtts(struct kvm *kvm, u32 ia_bits)
 
 static void realm_unmap_private_range(struct kvm *kvm,
 				      unsigned long start,
-				      unsigned long end)
+				      unsigned long end,
+				      bool may_block)
 {
 	struct realm *realm = &kvm->arch.realm;
 	unsigned long next_addr, addr;
@@ -704,6 +706,9 @@ static void realm_unmap_private_range(struct kvm *kvm,
 
 		if (ret)
 			break;
+
+		if (may_block)
+			cond_resched_rwlock_write(&kvm->mmu_lock);
 	}
 
 	realm_fold_rtt_level(realm, get_start_level(realm) + 1,
@@ -711,7 +716,8 @@ static void realm_unmap_private_range(struct kvm *kvm,
 }
 
 void kvm_realm_unmap_range(struct kvm *kvm, unsigned long start,
-			   unsigned long size, bool unmap_private)
+			   unsigned long size, bool unmap_private,
+			   bool may_block)
 {
 	unsigned long end = start + size;
 	struct realm *realm = &kvm->arch.realm;
@@ -722,9 +728,9 @@ void kvm_realm_unmap_range(struct kvm *kvm, unsigned long start,
 		return;
 
 	realm_unmap_shared_range(kvm, find_map_level(realm, start, end),
-				 start, end);
+				 start, end, may_block);
 	if (unmap_private)
-		realm_unmap_private_range(kvm, start, end);
+		realm_unmap_private_range(kvm, start, end, may_block);
 }
 
 static int realm_create_protected_data_granule(struct realm *realm,
@@ -1172,7 +1178,7 @@ static int realm_set_ipa_state(struct kvm_vcpu *vcpu,
 	*top_ipa = ipa;
 
 	if (ripas == RMI_EMPTY && ipa != start)
-		realm_unmap_private_range(kvm, start, ipa);
+		realm_unmap_private_range(kvm, start, ipa, false);
 
 	return ret;
 }
