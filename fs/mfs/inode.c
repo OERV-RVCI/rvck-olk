@@ -19,14 +19,12 @@ static int mfs_inode_set(struct inode *inode, void *lower_target)
 	return 0;
 }
 
-static struct dentry *_mfs_get_inode(struct dentry *dentry,
-					  struct super_block *sb,
+static struct inode *_mfs_get_inode(struct super_block *sb,
 					  struct path *lower_path,
 					  struct path *cache_path)
 {
 	struct mfs_sb_info *sbi = MFS_SB(sb);
-	struct inode *inode, *lower_inode, *cache_inode;
-	struct dentry *ret;
+	struct inode *ret, *lower_inode, *cache_inode;
 
 	lower_inode = d_inode(lower_path->dentry);
 	cache_inode = d_inode(cache_path->dentry);
@@ -49,12 +47,7 @@ static struct dentry *_mfs_get_inode(struct dentry *dentry,
 	}
 
 	/* allocate new inode for mfs */
-	inode = mfs_iget(sb, lower_inode, cache_path);
-	if (IS_ERR(inode)) {
-		ret = ERR_PTR(PTR_ERR(inode));
-		goto out;
-	}
-	ret = d_splice_alias(inode, dentry);
+	ret = mfs_iget(sb, lower_inode, cache_path);
 out:
 	return ret;
 }
@@ -120,11 +113,12 @@ out:
 	return ret;
 }
 
-struct dentry *mfs_lookup(struct inode *dir, struct dentry *dentry,
-			     unsigned int flag)
+static struct dentry *mfs_lookup(struct inode *dir, struct dentry *dentry,
+				    unsigned int flag)
 {
 	struct path parent_lpath, parent_cpath, lpath, cpath;
 	struct dentry *ret, *parent;
+	struct inode *inode;
 	const char *name;
 	int err;
 
@@ -163,14 +157,21 @@ cdentry_fail:
 			goto cdentry_fail;
 	}
 	/* build the inode from lower layer */
-	ret = _mfs_get_inode(dentry, dir->i_sb, &lpath, &cpath);
+	inode = _mfs_get_inode(dir->i_sb, &lpath, &cpath);
+	if (IS_ERR(inode)) {
+		path_put(&lpath);
+		path_put(&cpath);
+		mfs_free_dentry_info(dentry);
+		ret = ERR_PTR(PTR_ERR(inode));
+		goto out;
+	}
+	mfs_install_path(dentry, &lpath, &cpath);
+	ret = d_splice_alias(inode, dentry);
 	if (IS_ERR(ret)) {
 		path_put(&lpath);
 		path_put(&cpath);
 		mfs_free_dentry_info(dentry);
-		goto out;
 	}
-	mfs_install_path(dentry, &lpath, &cpath);
 out:
 	mfs_put_path(&parent_lpath, &parent_cpath);
 	dput(parent);
@@ -217,17 +218,17 @@ static const char *mfs_get_link(struct dentry *dentry,
 	return p;
 }
 
-const struct inode_operations mfs_dir_iops = {
+static const struct inode_operations mfs_dir_iops = {
 	.lookup		= mfs_lookup,
 	.getattr	= mfs_getattr,
 };
 
-const struct inode_operations mfs_symlink_iops = {
+static const struct inode_operations mfs_symlink_iops = {
 	.getattr	= mfs_getattr,
 	.get_link	= mfs_get_link,
 };
 
-const struct inode_operations mfs_file_iops = {
+static const struct inode_operations mfs_file_iops = {
 	.getattr	= mfs_getattr,
 };
 

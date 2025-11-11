@@ -101,7 +101,7 @@ static void mfs_d_release(struct dentry *dentry)
 	mfs_free_dentry_info(dentry);
 }
 
-const struct dentry_operations mfs_dops = {
+static const struct dentry_operations mfs_dops = {
 	.d_release	= mfs_d_release,
 };
 
@@ -138,7 +138,7 @@ static int mfs_show_options(struct seq_file *seq, struct dentry *root)
 	return 0;
 }
 
-const struct super_operations mfs_sops = {
+static const struct super_operations mfs_sops = {
 	.alloc_inode	= mfs_alloc_inode,
 	.free_inode	= mfs_free_inode,
 	.drop_inode	= generic_delete_inode,
@@ -183,7 +183,7 @@ static char *remove_trailing(char *s, char c)
 	return s;
 }
 
-char *_acquire_set_path(char *inputpath, struct path *target)
+static char *_acquire_set_path(char *inputpath, struct path *target)
 {
 	char *p, *realp, *path;
 	char *res;
@@ -400,9 +400,12 @@ static void mfs_kill_sb(struct super_block *sb)
 	clear_bit(MFS_MOUNTED, &sbi->flags);
 	if (support_event(sbi)) {
 		while (test_bit(MFS_CACHE_OPENED, &caches->flags)) {
+			static DEFINE_RATELIMIT_STATE(busy_open, 30 * HZ, 1);
+
 			msleep(100);
-			printk_once(KERN_WARNING "Pending until close the /dev/mfs%u...\n",
-				    sbi->minor);
+			if (!__ratelimit(&busy_open))
+				continue;
+			pr_warn("Pending until close the /dev/mfs%u...\n", sbi->minor);
 		}
 		mfs_fs_dev_exit(sb);
 	}
@@ -478,6 +481,9 @@ static void __exit exit_mfs_fs(void)
 {
 	mfs_dev_exit();
 	unregister_filesystem(&mfs_fs_type);
+
+	/* Make sure all delayed rcu free inodes are safe to be destroyed. */
+	rcu_barrier();
 	mfs_cache_exit();
 	kmem_cache_destroy(mfs_dentry_cachep);
 	kmem_cache_destroy(mfs_inode_cachep);

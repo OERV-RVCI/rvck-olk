@@ -327,7 +327,7 @@ static ssize_t mfs_read_iter(struct kiocb *iocb, struct iov_iter *to)
 	ctx.object = file_inode(file)->i_private;
 	ctx.off = iocb->ki_pos;
 	ctx.op = MFS_OP_READ;
-	ctx.len = min(isize - ctx.off, iov_iter_count(to));
+	ctx.len = min_t(size_t, isize - ctx.off, iov_iter_count(to));
 	ctx.sync = false;
 	ctx.checker = range_check_mem;
 	if (need_sync_event(file_inode(file)->i_sb)) {
@@ -396,7 +396,7 @@ static vm_fault_t mfs_filemap_fault(struct vm_fault *vmf)
 	ctx.file = cfile;
 	ctx.object = file_inode(file)->i_private;
 	ctx.off = vmf->pgoff << PAGE_SHIFT;
-	ctx.len = min(isize - ctx.off, PAGE_SIZE);
+	ctx.len = min_t(size_t, isize - ctx.off, PAGE_SIZE);
 	ctx.op = MFS_OP_FAULT;
 	ctx.sync = false;
 	ctx.checker = range_check_mem;
@@ -425,7 +425,7 @@ static vm_fault_t mfs_filemap_fault(struct vm_fault *vmf)
 	return ret;
 }
 
-vm_fault_t mfs_filemap_map_pages(struct vm_fault *vmf,
+static vm_fault_t mfs_filemap_map_pages(struct vm_fault *vmf,
 					pgoff_t start_pgoff, pgoff_t end_pgoff)
 {
 	struct file *cfile, *file = vmf->vma->vm_file;
@@ -452,7 +452,7 @@ vm_fault_t mfs_filemap_map_pages(struct vm_fault *vmf,
 	ctx.file = cfile;
 	ctx.object = file_inode(file)->i_private;
 	ctx.off = start_pgoff << PAGE_SHIFT;
-	ctx.len = min(isize - ctx.off, (end_pgoff - start_pgoff) << PAGE_SHIFT);
+	ctx.len = min_t(size_t, isize - ctx.off, (end_pgoff - start_pgoff) << PAGE_SHIFT);
 	ctx.op = MFS_OP_FAROUND;
 	ctx.sync = false;
 	ctx.checker = range_check_mem;

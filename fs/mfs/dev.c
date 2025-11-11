@@ -7,7 +7,6 @@
 #include <linux/idr.h>
 #include <linux/poll.h>
 #include <linux/list.h>
-#include "../mount.h"
 
 #include <trace/events/mfs.h>
 
@@ -20,28 +19,10 @@ static const struct class mfs_dev_class = {
 };
 static struct device *mfs_dev;
 
-static inline void mfs_finish_event(struct mfs_event *event, struct xa_state *xas)
-{
-	struct mfs_syncer *syncer = event->syncer;
-
-	if (unlikely(!xas || !event))
-		return;
-
-	if (syncer) {
-		if (xa_cmpxchg(xas->xa, xas->xa_index, event, NULL, 0) != event)
-			return;
-
-		if (atomic_dec_and_test(&syncer->notback))
-			complete(&syncer->done);
-		put_mfs_event(event);
-	}
-}
-
 static int mfs_dev_open(struct inode *inode, struct file *file)
 {
 	struct mfs_caches *caches;
 	struct mfs_sb_info *sbi;
-	struct mount *mnt;
 	unsigned minor = iminor(inode);
 
 	sbi = minor < U8_MAX ? idr_find(&mfs_dev_minor, minor) : NULL;
@@ -57,13 +38,6 @@ static int mfs_dev_open(struct inode *inode, struct file *file)
 		clear_bit(MFS_CACHE_OPENED, &caches->flags);
 		return -EBUSY;
 	}
-	mnt = list_first_entry(&sbi->sb->s_mounts, struct mount, mnt_instance);
-	/* during mounting or delete from s_mounts in umounting */
-	if (list_empty(&sbi->sb->s_mounts)) {
-		clear_bit(MFS_CACHE_OPENED, &caches->flags);
-		return -EBUSY;
-	}
-	sbi->mnt = mntget(&mnt->mnt);
 
 	file->private_data = sbi;
 	set_bit(MFS_CACHE_READY, &caches->flags);
@@ -78,7 +52,6 @@ static int mfs_dev_release(struct inode *inode, struct file *file)
 	clear_bit(MFS_CACHE_READY, &caches->flags);
 	smp_mb__after_atomic();
 	mfs_cancel_all_events(sbi);
-	mntput(sbi->mnt);
 	smp_mb__before_atomic();
 	clear_bit(MFS_CACHE_OPENED, &caches->flags);
 	return 0;
@@ -105,32 +78,34 @@ static ssize_t mfs_dev_read(struct file *file, char __user *buf,
 		xas_unlock(&xas);
 		return 0;
 	}
+	if (event->syncer)
+		get_mfs_event(event);
 	xas_unlock(&xas);
 
 	msg = &event->msg;
 	n = msg->len;
-	if (n > blen)
-		return -EMSGSIZE;
+	if (n > blen) {
+		ret = -EMSGSIZE;
+		goto out;
+	}
 
 	ret = try_hook_fd(event);
 	if (ret < 0)
-		return ret;
+		goto out;
 
 	msg->fd = ret;
 	ret = 0;
+	if (copy_to_user(buf, msg, n)) {
+		ret = -EFAULT;
+		goto out;
+	}
 	xas_lock(&xas);
 	xas_clear_mark(&xas, MFS_EVENT_NEW);
 	caches->next_ev = xas.xa_index + 1;
-	if (event->syncer)
-		get_mfs_event(event);
-	else
+	if (!event->syncer)
 		xas_store(&xas, NULL);
 	xas_unlock(&xas);
-
-	if (copy_to_user(buf, msg, n))
-		ret = -EFAULT;
-	if (ret)
-		mfs_finish_event(event, &xas);
+out:
 	put_mfs_event(event);
 	trace_mfs_dev_read(file, msg->opcode, msg->id, msg->fd);
 	return ret ? ret : n;

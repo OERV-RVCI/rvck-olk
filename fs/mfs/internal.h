@@ -13,7 +13,6 @@
 #include <linux/wait.h>
 #include <linux/completion.h>
 #include <linux/types.h>
-#include <linux/mount.h>
 #include <linux/mfs.h>
 
 #define MFS_NAME "mfs"
@@ -71,7 +70,6 @@ struct mfs_sb_info {
 	int minor;
 
 	unsigned long flags;
-	struct vfsmount *mnt;
 	struct super_block *sb;
 
 	struct mfs_caches caches;
