@@ -370,6 +370,8 @@ static int mfs_init_fs_context(struct fs_context *fc)
 	if (!sbi)
 		return -ENOMEM;
 
+	init_waitqueue_head(&sbi->caches.pollwq);
+	xa_init_flags(&sbi->caches.events, XA_FLAGS_ALLOC);
 	sbi->minor = -1;
 	fc->s_fs_info = sbi;
 	fc->ops = &mfs_context_ops;
@@ -381,6 +383,7 @@ static void mfs_kill_sb(struct super_block *sb)
 	struct mfs_sb_info *sbi = MFS_SB(sb);
 
 	kill_anon_super(sb);
+	mfs_destroy_events(sb);
 	if (sbi->mtree) {
 		path_put(&sbi->lower);
 		kfree(sbi->mtree);

@@ -5,7 +5,6 @@
 
 #include <linux/pagemap.h>
 #include <linux/uio.h>
-#include <linux/types.h>
 #include <linux/completion.h>
 
 static struct mfs_file_info *mfs_file_info_alloc(struct file *lower, struct file *cache)
@@ -243,6 +242,7 @@ static int range_check_mem(struct range_t *r)
 
 static int mfs_check_range(struct range_ctx *ctx)
 {
+	struct mfs_sb_info *sbi = MFS_SB(ctx->object->mfs_inode->i_sb);
 	loff_t start = ctx->off, end = ctx->off + ctx->len;
 	struct file *file = ctx->file;
 	struct range_t r = { .file = file };
@@ -250,6 +250,10 @@ static int mfs_check_range(struct range_ctx *ctx)
 	struct mfs_syncer syncer;
 	int err = 0, err2 = 0;
 
+	if (!support_event(sbi))
+		return 0;
+	if (!cache_is_ready(sbi))
+		return ctx->sync ? -EIO : 0;
 	if (!ctx->len)
 		return 0;
 

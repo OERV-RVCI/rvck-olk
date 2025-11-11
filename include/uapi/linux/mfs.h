@@ -18,4 +18,19 @@ enum {
 	MFS_MODE_REMOTE,
 };
 
+struct mfs_msg {
+	__u8 version;
+	__u8 opcode;
+	__u16 len;
+	__u32 fd;
+	__u32 id;
+	__u8 data[];
+};
+
+struct mfs_read {
+	__u64 off;
+	__u64 len;
+	__s32 pid;
+};
+
 #endif /* _UAPI_LINUX_MFS_H */
