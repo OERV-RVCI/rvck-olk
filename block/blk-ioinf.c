@@ -15,12 +15,20 @@
 #include "blk-mq.h"
 
 #define IOINFG_WEIGHT_UNINIT	(CGROUP_WEIGHT_MAX + 1)
-#define IOINF_MIN_INFLIGHT	30
+#define IOINF_MIN_INFLIGHT	3
 #define IOINFG_MIN_INFLIGHT	1
 /* default wake-up time in jiffies for backgroup job, see ioinf_timer_fn() */
 #define IOINF_TIMER_PERID	(HZ / 2)
 /* Minimum wait queue count for offline cgroups. */
 #define IOINFG_MIN_WQ_NR	8
+
+/* scale inflight from 1/1000 to 100 */
+enum {
+	MIN_SCALE	= 1,		/* one thousandth. */
+	DFL_SCALE	= 100,		/* one tenth. */
+	SCALE_GRAN	= 1000,		/* The control granularity is 1/1000. */
+	MAX_SCALE	= 100000,	/* A hundredfold. */
+};
 
 /* io.inf.qos controls */
 enum {
@@ -68,6 +76,9 @@ struct ioinf {
 
 	struct ioinf_params	params;
 	u32			inflight;
+	u32			scale;
+	u32			old_scale;
+	u32			scale_step;
 
 	/* default time for ioinf_timer_fn */
 	unsigned long		inf_timer_perid;
@@ -313,6 +324,9 @@ retry:
 	}
 
 	rqw->exhausted++;
+	/* wake up ioinf_timer_fn() immediately to adjust scale */
+	if (inf->scale < MAX_SCALE)
+		timer_reduce(&inf->inf_timer, jiffies + 1);
 	return false;
 }
 
@@ -508,7 +522,9 @@ static int ioinf_stat_show(void *data, struct seq_file *m)
 
 	spin_lock_irq(&inf->lock);
 
-	seq_printf(m, "inflight %u->%u\n", inf->params.inflight, inf->inflight);
+	seq_printf(m, "scale %u/%u inflight %u->%u\n",
+		   inf->scale, SCALE_GRAN,
+		   inf->params.inflight, inf->inflight);
 
 	seq_printf(m, "online inflight %d/%u, sleepers: %d\n",
 		   atomic_read(&inf->online.inflight),
@@ -543,6 +559,49 @@ static struct rq_qos_ops ioinf_rqos_ops = {
 	.debugfs_attrs = ioinf_debugfs_attrs,
 #endif
 };
+
+static void __inflight_scale_up(struct ioinf *inf, u32 aim, bool force)
+{
+	u32 new_scale;
+
+	inf->old_scale = inf->scale;
+	if (aim < inf->inflight || inf->scale >= MAX_SCALE)
+		return;
+
+	new_scale = DIV_ROUND_UP(aim * SCALE_GRAN, inf->params.inflight);
+	if (new_scale <= inf->old_scale) {
+		if (!force)
+			return;
+		new_scale = inf->scale + inf->scale_step;
+	}
+
+	inf->scale = new_scale;
+}
+
+static void inflight_scale_up(struct ioinf *inf, u32 aim)
+{
+	__inflight_scale_up(inf, aim, false);
+}
+
+static void inflight_force_scale_up(struct ioinf *inf, u32 aim)
+{
+	__inflight_scale_up(inf, aim, true);
+}
+
+static void inflight_scale_down(struct ioinf *inf, u32 aim)
+{
+	u32 new_scale;
+
+	inf->old_scale = inf->scale;
+	if (inf->inflight <= IOINF_MIN_INFLIGHT || inf->scale <= MIN_SCALE)
+		return;
+
+	new_scale = DIV_ROUND_UP(aim * SCALE_GRAN, inf->params.inflight);
+	if (new_scale >= inf->old_scale)
+		return;
+
+	inf->scale = new_scale;
+}
 
 u32 ioinf_calc_budget(struct ioinf_rq_wait *rqw)
 {
@@ -600,9 +659,12 @@ static void ioinf_sample_lat(struct ioinf *inf)
 static
 void ioinf_update_inflight(struct ioinf *inf, u32 new_online, u32 new_offline)
 {
-
-	if (inf->inflight < IOINF_MIN_INFLIGHT)
+	inf->scale = clamp(inf->scale, MIN_SCALE, MAX_SCALE);
+	inf->inflight = inf->params.inflight * inf->scale / SCALE_GRAN;
+	if (inf->inflight < IOINF_MIN_INFLIGHT) {
 		inf->inflight = IOINF_MIN_INFLIGHT;
+		inf->scale = inf->inflight * SCALE_GRAN / inf->params.inflight;
+	}
 
 	if (new_online < inf->inflight)
 		new_offline = inf->inflight - new_online;
@@ -627,13 +689,22 @@ static void ioinf_timer_fn(struct timer_list *timer)
 	struct ioinf_rq_wait *online = &inf->online;
 	struct ioinf_rq_wait *offline = &inf->offline;
 	unsigned long flags;
-	u32 online_budget, offline_budget;
+	u32 online_budget, offline_budget, total_budget;
 
 	ioinf_sample_lat(inf);
 	spin_lock_irqsave(&inf->lock, flags);
 
 	online_budget = ioinf_calc_budget(online);
 	offline_budget = ioinf_calc_budget(offline);
+	total_budget = online_budget + offline_budget;
+
+	if (online->exhausted)
+		inflight_force_scale_up(inf, total_budget);
+	else if (!online->issued && online_budget <= IOINFG_MIN_INFLIGHT)
+		inflight_scale_up(inf, total_budget);
+	else if (inf->old_scale < inf->scale)
+		inflight_scale_down(inf, total_budget);
+
 	ioinf_update_inflight(inf, online_budget, offline_budget);
 
 	spin_unlock_irqrestore(&inf->lock, flags);
@@ -642,12 +713,14 @@ static void ioinf_timer_fn(struct timer_list *timer)
 
 static u32 ioinf_default_inflight(struct ioinf *inf)
 {
-	u32 inflight = inf->params.inflight;
+	u32 inflight = inf->params.inflight * DFL_SCALE / SCALE_GRAN;
 
 	if (inflight < IOINF_MIN_INFLIGHT)
 		inflight = IOINF_MIN_INFLIGHT;
+	inf->scale = DIV_ROUND_UP(inflight * SCALE_GRAN, inf->params.inflight);
+	inf->old_scale = inf->scale;
 
-	return inflight;
+	return inf->params.inflight * inf->scale / SCALE_GRAN;
 }
 
 static inline int ioinf_rqw_init(struct ioinf_rq_wait *rqw)
@@ -986,9 +1059,14 @@ static ssize_t ioinf_qos_write(struct kernfs_open_file *of, char *input,
 
 	spin_lock_irq(&inf->lock);
 	inf->params = params;
-	if (inf->inflight != params.inflight)
+	inf->old_scale = MAX_SCALE;
+	if (inf->inflight != params.inflight) {
+		inf->scale = SCALE_GRAN;
+		inf->scale_step = DIV_ROUND_UP(SCALE_GRAN,
+					       inf->params.inflight);
 		ioinf_update_inflight(inf, inf->online.hinflight,
 				      inf->offline.hinflight);
+	}
 	spin_unlock_irq(&inf->lock);
 
 	blk_mq_unquiesce_queue(disk->queue);
