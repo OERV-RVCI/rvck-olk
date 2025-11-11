@@ -4,6 +4,7 @@
 #ifndef _MFS_INTERNAL_H
 #define _MFS_INTERNAL_H
 
+#include <linux/file.h>
 #include <linux/fs.h>
 #include <linux/mm.h>
 #include <linux/container_of.h>
@@ -11,6 +12,8 @@
 #include <linux/mfs.h>
 
 #define MFS_NAME "mfs"
+
+#define MFS_OPEN_FLAGS (O_NOATIME)
 
 struct mfs_sb_info {
 	int mode;
@@ -31,6 +34,12 @@ struct mfs_inode {
 	struct inode vfs_inode;
 };
 
+struct mfs_file_info {
+	struct file *lower;
+	struct file *cache;
+	const struct vm_operations_struct *cache_vm_ops;
+};
+
 struct mfs_dentry_info {
 	spinlock_t lock;
 	struct path lower;
@@ -40,6 +49,11 @@ struct mfs_dentry_info {
 #define MFS_SB(sb) ((struct mfs_sb_info *)(sb)->s_fs_info)
 #define MFS_I(ptr) container_of(ptr, struct mfs_inode, vfs_inode)
 #define MFS_D(dent) ((struct mfs_dentry_info *)(dent)->d_fsdata)
+
+extern const struct file_operations mfs_dir_fops;
+extern const struct file_operations mfs_file_fops;
+extern const struct address_space_operations mfs_aops;
+extern const struct vm_operations_struct mfs_file_vm_ops;
 
 static inline struct inode *mfs_lower_inode(const struct inode *i)
 {
@@ -99,6 +113,21 @@ static inline void mfs_release_path(const struct dentry *dent)
 	path_put(&lpath);
 	path_put(&cpath);
 	spin_unlock(&MFS_D(dent)->lock);
+}
+
+static inline void mfs_inode_lock(struct inode *inode)
+{
+	mutex_lock(&MFS_I(inode)->lock);
+}
+
+static inline void mfs_inode_unlock(struct inode *inode)
+{
+	mutex_unlock(&MFS_I(inode)->lock);
+}
+
+static inline bool support_event(struct mfs_sb_info *sbi)
+{
+	return sbi->mode != MFS_MODE_NONE;
 }
 
 struct inode *mfs_iget(struct super_block *sb, struct inode *lower_inode,

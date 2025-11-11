@@ -258,20 +258,31 @@ struct inode *mfs_iget(struct super_block *sb, struct inode *lower_inode,
 	/* new inode */
 	vi = MFS_I(inode);
 	inode->i_ino = lower_inode->i_ino;
+	switch (lower_inode->i_mode & S_IFMT) {
+	case S_IFREG:
+		inode->i_op = &mfs_file_iops;
+		inode->i_fop = &mfs_file_fops;
+		break;
+	case S_IFDIR:
+		inode->i_op = &mfs_dir_iops;
+		inode->i_fop = &mfs_dir_fops;
+		break;
+	case S_IFLNK:
+		inode->i_op = &mfs_symlink_iops;
+		break;
+	default:
+		err = -EOPNOTSUPP;
+		goto err_inode;
+	}
+	inode->i_mapping->a_ops = &mfs_aops;
 	vi->lower = lower_inode;
 	vi->cache = cache_inode;
-
-	if (S_ISDIR(lower_inode->i_mode))
-		inode->i_op = &mfs_dir_iops;
-	else if (S_ISLNK(lower_inode->i_mode))
-		inode->i_op = &mfs_symlink_iops;
-	else
-		inode->i_op = &mfs_file_iops;
-
 	fsstack_copy_attr_all(inode, lower_inode);
 	fsstack_copy_inode_size(inode, lower_inode);
 	unlock_new_inode(inode);
 	return inode;
+err_inode:
+	iget_failed(inode);
 err_put_cache:
 	iput(cache_inode);
 err_put_lower:
