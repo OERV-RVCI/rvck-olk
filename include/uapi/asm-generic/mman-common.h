@@ -33,6 +33,8 @@
 #define MAP_UNINITIALIZED 0x4000000	/* For anonymous mmap, memory could be
 					 * uninitialized */
 
+#define MAP_PEER_SHARED		0x1000000 /* GMEM scene, for heterogeneous memory */
+
 /*
  * Flags for mlock
  */
@@ -78,6 +80,12 @@
 #define MADV_DONTNEED_LOCKED	24	/* like DONTNEED, but drop locked pages too */
 
 #define MADV_COLLAPSE	25		/* Synchronous hugepage collapse */
+
+/* some madvise for heterogeneous memory only GMEM scene */
+#define MADV_GMEM_BASE	0x1000
+#define MADV_PREFETCH	MADV_GMEM_BASE		/* prefetch pages for hNUMA node */
+#define MADV_PINNED	(MADV_GMEM_BASE+1)	/* pin these pages */
+#define MADV_UNPINNED	(MADV_GMEM_BASE+2)	/* unpin these pages */
 
 #define MADV_ETMEM_BASE		0x1100
 #define MADV_SWAPFLAG		MADV_ETMEM_BASE /* for memory to be swap out */

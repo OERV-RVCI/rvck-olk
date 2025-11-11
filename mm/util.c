@@ -30,6 +30,7 @@
 
 #include "internal.h"
 #include "swap.h"
+#include "gmem-internal.h"
 
 /**
  * kfree_const - conditionally free memory
@@ -548,6 +549,9 @@ unsigned long vm_mmap_pgoff(struct file *file, unsigned long addr,
 	struct mm_struct *mm = current->mm;
 	unsigned long populate;
 	LIST_HEAD(uf);
+
+	if (gmem_is_enabled() && (flag & MAP_PEER_SHARED))
+		return gm_vm_mmap_pgoff(file, addr, len, prot, flag, pgoff);
 
 	ret = security_mmap_file(file, prot, flag);
 	if (!ret) {

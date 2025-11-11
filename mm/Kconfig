@@ -1489,6 +1489,20 @@ config NUMABALANCING_MEM_SAMPLING
 
 	  if unsure, say N to disable the NUMABALANCING_MEM_SAMPLING.
 
+config GMEM
+	bool "gmem subsystem for multi-MMU cooperative management"
+	depends on (ARM64 || X86_64) && MMU && TRANSPARENT_HUGEPAGE
+	select ARCH_USES_HIGH_VMA_FLAGS
+	default y
+	help
+	  This provides a high-level interface that decouples MMU-specific functions.
+	  Device drivers can thus attach themselves to a process’s address space and
+	  let the OS take charge of their memory management. This eliminates
+	  the need for device drivers to reinvent the wheel and allows them to
+	  benefit from general memory optimizations integrated by GMEM.
+
+	  say Y here to enable gmem subsystem
+
 source "mm/damon/Kconfig"
 
 config THP_CONTROL

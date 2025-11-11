@@ -322,6 +322,13 @@ extern unsigned int kobjsize(const void *objp);
 #define VM_NOHUGEPAGE	0x40000000	/* MADV_NOHUGEPAGE marked this vma */
 #define VM_MERGEABLE	0x80000000	/* KSM may merge identical pages */
 
+#ifdef CONFIG_GMEM
+# define VM_PEER_SHARED_BIT	56 /* movable memory between host and device */
+#define VM_PEER_SHARED	BIT(VM_PEER_SHARED_BIT)
+#else
+#define VM_PEER_SHARED	VM_NONE
+#endif
+
 #ifdef CONFIG_USERSWAP
 # define VM_USWAP_BIT	61
 #define VM_USWAP	BIT(VM_USWAP_BIT)
@@ -4297,4 +4304,28 @@ int set_linear_mapping_invalid(unsigned long start_pfn, unsigned long end_pfn,
 	return -EINVAL;
 }
 #endif
+
+#ifdef CONFIG_GMEM
+DECLARE_STATIC_KEY_FALSE(gmem_status);
+
+static inline bool gmem_is_enabled(void)
+{
+	return static_branch_likely(&gmem_status);
+}
+
+static inline bool vma_is_peer_shared(struct vm_area_struct *vma)
+{
+	if (!gmem_is_enabled())
+		return false;
+
+	return !!(vma->vm_flags & VM_PEER_SHARED);
+}
+#else
+static inline bool gmem_is_enabled(void) { return false; }
+static inline bool vma_is_peer_shared(struct vm_area_struct *vma)
+{
+	return false;
+}
+#endif
+
 #endif /* _LINUX_MM_H */

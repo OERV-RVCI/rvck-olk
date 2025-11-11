@@ -48,6 +48,7 @@
 #include <linux/sched/mm.h>
 #include <linux/ksm.h>
 #include <linux/share_pool.h>
+#include <linux/vm_object.h>
 
 #include <linux/uaccess.h>
 #include <asm/cacheflush.h>
@@ -58,6 +59,7 @@
 #include <trace/events/mmap.h>
 
 #include "internal.h"
+#include "gmem-internal.h"
 
 #ifndef arch_mmap_check
 #define arch_mmap_check(addr, len, flags)	(0)
@@ -646,6 +648,7 @@ static inline int dup_anon_vma(struct vm_area_struct *dst,
 	if (src->anon_vma && !dst->anon_vma) {
 		int ret;
 
+		dup_vm_object(dst, src, true);
 		vma_assert_write_locked(dst);
 		dst->anon_vma = src->anon_vma;
 		ret = anon_vma_clone(dst, src);
@@ -701,6 +704,13 @@ int vma_expand(struct vma_iterator *vmi, struct vm_area_struct *vma,
 	/* Only handles expanding */
 	VM_WARN_ON(vma->vm_start < start || vma->vm_end > end);
 
+	if (vma_is_peer_shared(vma)) {
+		if (!remove_next)
+			vm_object_adjust(vma, start, end);
+		else
+			vm_object_merge(vma, next->vm_end);
+	}
+
 	/* Note: vma iterator must be pointing to 'start' */
 	vma_iter_config(vmi, start, end);
 	if (vma_iter_prealloc(vmi, vma))
@@ -751,6 +761,9 @@ int vma_shrink(struct vma_iterator *vmi, struct vm_area_struct *vma,
 	init_vma_prep(&vp, vma);
 	vma_prepare(&vp);
 	vma_adjust_trans_huge(vma, start, end, 0);
+
+	if (vma_is_peer_shared(vma))
+		vm_object_adjust(vma, start, end);
 
 	vma_iter_clear(vmi);
 	vma->vm_start = start;
@@ -1002,6 +1015,9 @@ struct vm_area_struct *vma_merge(struct vma_iterator *vmi, struct mm_struct *mm,
 			if (!next->anon_vma)
 				err = dup_anon_vma(prev, curr, &anon_dup);
 		}
+
+		if (!err && vma_is_peer_shared(prev))
+			vm_object_merge(prev, next->vm_end);
 	} else if (merge_prev) {			/* case 2 */
 		if (curr) {
 			vma_start_write(curr);
@@ -1020,6 +1036,9 @@ struct vm_area_struct *vma_merge(struct vma_iterator *vmi, struct mm_struct *mm,
 			}
 			if (!err)
 				err = dup_anon_vma(prev, curr, &anon_dup);
+
+			if (!err && vma_is_peer_shared(prev))
+				vm_object_merge(prev, end);
 		}
 	} else { /* merge_next */
 		vma_start_write(next);
@@ -1030,6 +1049,9 @@ struct vm_area_struct *vma_merge(struct vma_iterator *vmi, struct mm_struct *mm,
 			adjust = next;
 			adj_start = -(prev->vm_end - addr);
 			err = dup_anon_vma(next, prev, &anon_dup);
+
+			if (!err && vma_is_peer_shared(prev))
+				vm_object_merge(prev, addr);
 		} else {
 			/*
 			 * Note that cases 3 and 8 are the ONLY ones where prev
@@ -1045,6 +1067,9 @@ struct vm_area_struct *vma_merge(struct vma_iterator *vmi, struct mm_struct *mm,
 				remove = curr;
 				err = dup_anon_vma(next, curr, &anon_dup);
 			}
+
+			if (!err && vma_is_peer_shared(curr))
+				vm_object_merge(vma, next->vm_end);
 		}
 	}
 
@@ -1267,6 +1292,8 @@ static unsigned long __mmap_region_ext(struct mm_struct *mm,
 				   struct file *file, unsigned long addr,
 				   unsigned long len, vm_flags_t vm_flags,
 				   unsigned long pgoff, struct list_head *uf);
+
+
 /*
  * The caller must write-lock current->mm->mmap_lock.
  */
@@ -1320,7 +1347,7 @@ unsigned long __do_mmap_mm(struct mm_struct *mm, struct file *file, unsigned lon
 	if (IS_ERR_VALUE(addr))
 		return addr;
 
-	if (flags & MAP_FIXED_NOREPLACE) {
+	if ((flags & MAP_FIXED_NOREPLACE) || (flags & MAP_PEER_SHARED)) {
 		if (find_vma_intersection(mm, addr, addr + len))
 			return -EEXIST;
 	}
@@ -1440,6 +1467,13 @@ unsigned long __do_mmap_mm(struct mm_struct *mm, struct file *file, unsigned lon
 			vm_flags |= VM_NORESERVE;
 	}
 
+	if (flags & MAP_PEER_SHARED) {
+		if (!gmem_is_enabled())
+			return -EINVAL;
+		vm_flags |= VM_PEER_SHARED;
+		len = gm_round_up(len);
+	}
+
 	addr = __mmap_region_ext(mm, file, addr, len, vm_flags, pgoff, uf);
 	if (!IS_ERR_VALUE(addr) &&
 	    ((vm_flags & VM_LOCKED) ||
@@ -1464,6 +1498,11 @@ unsigned long ksys_mmap_pgoff(unsigned long addr, unsigned long len,
 {
 	struct file *file = NULL;
 	unsigned long retval;
+
+	if (!gm_mmap_check_flags(flags)) {
+		retval = -EINVAL;
+		goto out_fput;
+	}
 
 	if (!(flags & MAP_ANONYMOUS)) {
 		audit_mmap_fd(fd, flags);
@@ -1902,6 +1941,8 @@ get_unmapped_area(struct file *file, unsigned long addr, unsigned long len,
 	if (file) {
 		if (file->f_op->get_unmapped_area)
 			get_area = file->f_op->get_unmapped_area;
+	} else if (gmem_is_enabled() && (flags & MAP_PEER_SHARED)) {
+		get_area = gm_get_unmapped_area_aligned;
 	} else if (flags & MAP_SHARED) {
 		/*
 		 * mmap_region() will call shmem_zero_setup() to create a file,
@@ -2486,6 +2527,9 @@ int __split_vma(struct vma_iterator *vmi, struct vm_area_struct *vma,
 	vma_prepare(&vp);
 	vma_adjust_trans_huge(vma, vma->vm_start, addr, 0);
 
+	if (vma_is_peer_shared(vma))
+		vm_object_split(vma, new);
+
 	if (new_below) {
 		vma->vm_start = addr;
 		vma->vm_pgoff += (addr - new->vm_start) >> PAGE_SHIFT;
@@ -2711,6 +2755,15 @@ int do_vmi_munmap(struct vma_iterator *vmi, struct mm_struct *mm,
 	unsigned long end;
 	struct vm_area_struct *vma;
 
+	if (gmem_is_enabled()) {
+		unsigned long ret = gmem_unmap_align(mm, start, len);
+
+		if (IS_ERR_VALUE(ret))
+			return ret;
+		else if (ret)
+			len = ret;
+	}
+
 	if ((offset_in_page(start)) || start > TASK_SIZE || len > TASK_SIZE-start)
 		return -EINVAL;
 
@@ -2745,6 +2798,8 @@ int do_munmap(struct mm_struct *mm, unsigned long start, size_t len,
 {
 	VMA_ITERATOR(vmi, mm, start);
 
+	if (gmem_is_enabled())
+		gmem_unmap_region(mm, start, len);
 	return do_vmi_munmap(&vmi, mm, start, len, uf, false);
 }
 
@@ -3028,6 +3083,9 @@ static int __vm_munmap(unsigned long start, size_t len, bool unlock)
 
 	if (sp_check_addr(start))
 		return -EINVAL;
+
+	if (gmem_is_enabled())
+		gmem_unmap_region(mm, start, len);
 
 	if (mmap_write_lock_killable(mm))
 		return -EINTR;
@@ -3410,6 +3468,9 @@ destroy:
 	__mt_destroy(&mm->mm_mt);
 	mmap_write_unlock(mm);
 	vm_unacct_memory(nr_accounted);
+
+	if (gmem_is_enabled())
+		destroy_gm_as(mm);
 }
 
 /* Insert vm structure into process list sorted by address
