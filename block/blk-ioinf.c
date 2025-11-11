@@ -13,6 +13,7 @@
 #include "blk-cgroup.h"
 #include "blk-rq-qos.h"
 #include "blk-mq.h"
+#include "blk-io-hierarchy/stats.h"
 
 #define IOINFG_WEIGHT_UNINIT	(CGROUP_WEIGHT_MAX + 1)
 #define IOINF_MIN_INFLIGHT	3
@@ -368,7 +369,7 @@ static int ioinf_wake_fn(struct wait_queue_entry *curr,
 }
 
 static void ioinf_throttle(struct ioinf *inf, struct ioinf_rq_wait *rqw,
-			   bool is_prio)
+			   struct bio *bio, bool is_prio)
 {
 	bool has_sleeper;
 	u32 wq_idx;
@@ -390,6 +391,7 @@ static void ioinf_throttle(struct ioinf *inf, struct ioinf_rq_wait *rqw,
 	if (ioinf_inflight_cb(&data))
 		return;
 
+	bio_hierarchy_start_io_acct(bio, STAGE_IOINF);
 	data.do_wakeup = true;
 	wq_idx = atomic_fetch_inc(&rqw->next_wq) % rqw->wq_nr;
 	has_sleeper = !prepare_to_wait_exclusive(&rqw->wait[wq_idx], &data.wq,
@@ -418,6 +420,7 @@ static void ioinf_throttle(struct ioinf *inf, struct ioinf_rq_wait *rqw,
 
 	finish_wait(&rqw->wait[wq_idx], &data.wq);
 	atomic_dec(&rqw->sleepers);
+	bio_hierarchy_end_io_acct(bio, STAGE_IOINF);
 }
 
 static void ioinf_rqos_throttle(struct rq_qos *rqos, struct bio *bio)
@@ -432,13 +435,13 @@ static void ioinf_rqos_throttle(struct rq_qos *rqos, struct bio *bio)
 	is_prio = bio_issue_as_root_blkg(bio) || fatal_signal_pending(current);
 
 	if (infg_offline(infg)) {
-		ioinf_throttle(inf, &inf->offline, is_prio);
+		ioinf_throttle(inf, &inf->offline, bio, is_prio);
 		return;
 	}
 
 	if (!inf->online.issued && !inf->params.qos_enabled)
 		inf->max_scale = inf->scale = inf->old_scale = SCALE_GRAN;
-	ioinf_throttle(inf, &inf->online, is_prio);
+	ioinf_throttle(inf, &inf->online, bio, is_prio);
 }
 
 static void ioinf_rqos_track(struct rq_qos *rqos, struct request *rq,
@@ -522,6 +525,7 @@ static void ioinf_rqos_exit(struct rq_qos *rqos)
 {
 	struct ioinf *inf = rqos_to_inf(rqos);
 
+	blk_mq_unregister_hierarchy(rqos->disk->queue, STAGE_IOINF);
 	blkcg_deactivate_policy(rqos->disk, &blkcg_policy_ioinf);
 
 	hrtimer_cancel(&inf->wakeup_timer);
@@ -879,6 +883,8 @@ static int blk_ioinf_init(struct gendisk *disk)
 	ret = blkcg_activate_policy(disk, &blkcg_policy_ioinf);
 	if (ret)
 		goto err_del_qos;
+
+	blk_mq_register_hierarchy(disk->queue, STAGE_IOINF);
 	return 0;
 
 err_del_qos:
