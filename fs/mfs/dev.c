@@ -9,6 +9,8 @@
 #include <linux/list.h>
 #include "../mount.h"
 
+#include <trace/events/mfs.h>
+
 static DEFINE_MUTEX(mfs_dev_lock);
 static DEFINE_IDR(mfs_dev_minor);
 
@@ -130,6 +132,7 @@ static ssize_t mfs_dev_read(struct file *file, char __user *buf,
 	if (ret)
 		mfs_finish_event(event, &xas);
 	put_mfs_event(event);
+	trace_mfs_dev_read(file, msg->opcode, msg->id, msg->fd);
 	return ret ? ret : n;
 }
 

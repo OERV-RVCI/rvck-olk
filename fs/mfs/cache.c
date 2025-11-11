@@ -9,6 +9,8 @@
 #include <linux/rwsem.h>
 #include <linux/pagemap.h>
 
+#include <trace/events/mfs.h>
+
 /*
  * Used for cache object
  */
@@ -278,6 +280,7 @@ void mfs_post_event_read(struct mfs_cache_object *object,
 
 	/* 2. hold object's owner mfs_inode */
 	ihold(object->mfs_inode);
+	trace_mfs_post_event_read(object->mfs_inode, off, len, op);
 	refcount_set(&event->ref, 1);
 	event->object = object;
 	event->msg.version = 0;

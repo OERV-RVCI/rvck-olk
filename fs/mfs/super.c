@@ -13,6 +13,9 @@
 #include <linux/delay.h>
 #include <linux/string.h>
 
+#define CREATE_TRACE_POINTS
+#include <trace/events/mfs.h>
+
 /*
  * Used for alloc_inode
  */

@@ -7,6 +7,8 @@
 #include <linux/fs_stack.h>
 #include <linux/namei.h>
 
+#include <trace/events/mfs.h>
+
 static int mfs_inode_eq(struct inode *inode, void *lower_target)
 {
 	return mfs_lower_inode(inode) == (struct inode *)lower_target;
@@ -126,6 +128,7 @@ struct dentry *mfs_lookup(struct inode *dir, struct dentry *dentry,
 	const char *name;
 	int err;
 
+	trace_mfs_lookup(dir, dentry, flag);
 	parent = dget_parent(dentry);
 	mfs_get_path(parent, &parent_lpath, &parent_cpath);
 	err = mfs_alloc_dentry_info(dentry);

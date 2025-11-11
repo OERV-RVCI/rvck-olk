@@ -7,6 +7,8 @@
 #include <linux/uio.h>
 #include <linux/completion.h>
 
+#include <trace/events/mfs.h>
+
 static struct mfs_file_info *mfs_file_info_alloc(struct file *lower, struct file *cache)
 {
 	struct mfs_file_info  *info = kzalloc(sizeof(struct mfs_file_info), GFP_KERNEL);
@@ -36,6 +38,7 @@ static int mfs_open(struct inode *inode, struct file *file)
 	struct mfs_file_info *file_info;
 	int err = 0;
 
+	trace_mfs_open(inode, file);
 	mfs_get_path(dentry, &lpath, &cpath);
 	lfile = dentry_open(&lpath, flags, current_cred());
 	if (IS_ERR(lfile)) {
@@ -71,6 +74,7 @@ put_path:
 
 static int mfs_release(struct inode *inode, struct file *file)
 {
+	trace_mfs_release(inode, file);
 	mfs_file_info_free(file->private_data);
 	return 0;
 }
