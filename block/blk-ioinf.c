@@ -38,6 +38,16 @@ struct ioinf_params {
 	unsigned long flags;
 };
 
+struct ioinf_io_stat {
+	u64 nr;
+	u64 lat;
+};
+
+struct ioinf_lat_stat {
+	struct ioinf_io_stat read;
+	struct ioinf_io_stat write;
+};
+
 struct ioinf_rq_wait {
 	wait_queue_head_t	*wait;
 	u32			wq_nr;
@@ -74,6 +84,11 @@ struct ioinf {
 	/* timer for ioinf_wakeup_timer_fn */
 	struct hrtimer		wakeup_timer;
 	bool			waking;
+
+	struct ioinf_lat_stat	last_stat;
+	struct ioinf_lat_stat	cur_stat;
+	struct ioinf_lat_stat	delta_stat;
+	struct ioinf_lat_stat __percpu *stat;
 };
 
 /* per disk-cgroup pair structure */
@@ -403,6 +418,27 @@ static void ioinf_rqos_track(struct rq_qos *rqos, struct request *rq,
 	rq->blkg = blkg;
 }
 
+static void ioinf_record_lat(struct ioinf *inf, struct request *rq)
+{
+	u64 lat;
+
+	lat = rq->io_end_time_ns ? rq->io_end_time_ns : blk_time_get_ns();
+	lat -= rq->alloc_time_ns;
+
+	switch (req_op(rq)) {
+	case REQ_OP_READ:
+		this_cpu_inc(inf->stat->read.nr);
+		this_cpu_add(inf->stat->read.lat, lat);
+		break;
+	case REQ_OP_WRITE:
+		this_cpu_inc(inf->stat->write.nr);
+		this_cpu_add(inf->stat->write.lat, lat);
+		break;
+	default:
+		break;
+	}
+}
+
 static void ioinf_rqos_done_bio(struct rq_qos *rqos, struct bio *bio)
 {
 	struct blkcg_gq *blkg = ioinf_bio_blkg(bio);
@@ -429,11 +465,19 @@ static void ioinf_rqos_done_bio(struct rq_qos *rqos, struct bio *bio)
 static void ioinf_rqos_done(struct rq_qos *rqos, struct request *rq)
 {
 	struct blkcg_gq *blkg = rq->blkg;
+	struct ioinf_gq *infg;
 
 	if (!blkg)
 		return;
 
 	rq->blkg = NULL;
+
+	infg = blkg_to_infg(blkg);
+	if (!infg || !infg->inf->params.enabled ||
+	    infg_offline(infg) || infg_nolimit(infg))
+		return;
+
+	ioinf_record_lat(infg->inf, rq);
 }
 
 static void ioinf_rqos_exit(struct rq_qos *rqos)
@@ -447,8 +491,46 @@ static void ioinf_rqos_exit(struct rq_qos *rqos)
 	ioinf_wake_up_all(inf);
 	kfree(inf->online.wait);
 	kfree(inf->offline.wait);
+	free_percpu(inf->stat);
 	kfree(inf);
 }
+
+static int ioinf_stat_show(void *data, struct seq_file *m)
+{
+	struct rq_qos *rqos = data;
+	struct ioinf *inf = rqos_to_inf(rqos);
+	struct ioinf_lat_stat *stat;
+
+	if (!inf->params.enabled) {
+		seq_puts(m, "\tinf.qos disabled.\n");
+		return 0;
+	}
+
+	spin_lock_irq(&inf->lock);
+
+	seq_printf(m, "inflight %u->%u\n", inf->params.inflight, inf->inflight);
+
+	seq_printf(m, "online inflight %d/%u, sleepers: %d\n",
+		   atomic_read(&inf->online.inflight),
+		   inf->online.hinflight, atomic_read(&inf->online.sleepers));
+	seq_printf(m, "offline inflight %d/%u, sleepers: %d\n",
+		   atomic_read(&inf->offline.inflight),
+		   inf->offline.hinflight, atomic_read(&inf->offline.sleepers));
+
+	stat = &inf->delta_stat;
+	seq_puts(m, "online average latency:\n");
+	seq_printf(m, "(%llu-%llu) (%llu-%llu)\n",
+		   stat->read.nr, stat->read.lat,
+		   stat->write.nr, stat->write.lat);
+	spin_unlock_irq(&inf->lock);
+
+	return 0;
+}
+
+static const struct blk_mq_debugfs_attr ioinf_debugfs_attrs[] = {
+	{"stat", 0400, ioinf_stat_show},
+	{},
+};
 
 static struct rq_qos_ops ioinf_rqos_ops = {
 	.throttle	= ioinf_rqos_throttle,
@@ -456,6 +538,10 @@ static struct rq_qos_ops ioinf_rqos_ops = {
 	.done		= ioinf_rqos_done,
 	.track		= ioinf_rqos_track,
 	.exit		= ioinf_rqos_exit,
+
+#ifdef CONFIG_BLK_DEBUG_FS
+	.debugfs_attrs = ioinf_debugfs_attrs,
+#endif
 };
 
 u32 ioinf_calc_budget(struct ioinf_rq_wait *rqw)
@@ -470,6 +556,45 @@ u32 ioinf_calc_budget(struct ioinf_rq_wait *rqw)
 		new_budget += div_u64(exhausted * new_budget, issued);
 
 	return new_budget;
+}
+
+static void ioinf_sample_cpu_lat(struct ioinf_lat_stat *cur, int cpu,
+				 struct ioinf_lat_stat __percpu *stat)
+{
+	struct ioinf_lat_stat *pstat = per_cpu_ptr(stat, cpu);
+
+	cur->read.nr += pstat->read.nr;
+	cur->read.lat += pstat->read.lat;
+	cur->write.nr += pstat->write.nr;
+	cur->write.lat += pstat->write.lat;
+}
+
+static void ioinf_update_delta_stat(struct ioinf_lat_stat *cur,
+	struct ioinf_lat_stat *last, struct ioinf_lat_stat *delta)
+{
+	delta->read.nr += cur->read.nr - last->read.nr;
+	delta->read.lat += cur->read.lat - last->read.lat;
+	if (delta->read.nr > 0)
+		delta->read.lat = div_u64(delta->read.lat, delta->read.nr);
+
+	delta->write.nr += cur->write.nr - last->write.nr;
+	delta->write.lat += cur->write.lat - last->write.lat;
+	if (delta->write.nr > 0)
+		delta->write.lat = div_u64(delta->write.lat, delta->write.nr);
+}
+
+static void ioinf_sample_lat(struct ioinf *inf)
+{
+	int cpu;
+
+	inf->last_stat = inf->cur_stat;
+	memset(&inf->cur_stat, 0, sizeof(struct ioinf_lat_stat));
+	for_each_possible_cpu(cpu)
+		ioinf_sample_cpu_lat(&inf->cur_stat, cpu, inf->stat);
+
+	memset(&inf->delta_stat, 0, sizeof(struct ioinf_lat_stat));
+	ioinf_update_delta_stat(&inf->cur_stat, &inf->last_stat,
+				&inf->delta_stat);
 }
 
 static
@@ -504,6 +629,7 @@ static void ioinf_timer_fn(struct timer_list *timer)
 	unsigned long flags;
 	u32 online_budget, offline_budget;
 
+	ioinf_sample_lat(inf);
 	spin_lock_irqsave(&inf->lock, flags);
 
 	online_budget = ioinf_calc_budget(online);
@@ -547,10 +673,14 @@ static int blk_ioinf_init(struct gendisk *disk)
 	if (!inf)
 		return ret;
 
+	inf->stat = alloc_percpu(struct ioinf_lat_stat);
+	if (!inf->stat)
+		goto free_inf;
+
 	inf->offline.wq_nr = umax(num_possible_cpus() / 2, IOINFG_MIN_WQ_NR);
 	ret = ioinf_rqw_init(&inf->offline);
 	if (ret)
-		goto free_inf;
+		goto free_stat;
 
 	inf->online.wq_nr = 1;
 	ret = ioinf_rqw_init(&inf->online);
@@ -587,6 +717,8 @@ err_cancel_timer:
 	kfree(inf->online.wait);
 free_wq:
 	kfree(inf->offline.wait);
+free_stat:
+	free_percpu(inf->stat);
 free_inf:
 	kfree(inf);
 	return ret;
