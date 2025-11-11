@@ -3,12 +3,16 @@
 
 #include "internal.h"
 
+#include <linux/anon_inodes.h>
 #include <linux/mfs.h>
 
 /*
  * Used for cache object
  */
 static struct kmem_cache *mfs_cobject_cachep;
+
+static const struct file_operations mfs_fd_fops = {
+};
 
 static int mfs_setup_object(struct mfs_cache_object *object,
 				 struct inode *inode,
@@ -34,6 +38,18 @@ static int mfs_setup_object(struct mfs_cache_object *object,
 	object->fd = -1;
 	object->anon_file = NULL;
 	return 0;
+}
+
+struct mfs_event *mfs_pick_event(struct xa_state *xas,
+				 unsigned long xa_max)
+{
+	struct mfs_event *event;
+
+	xas_for_each_marked(xas, event, xa_max, MFS_EVENT_NEW) {
+		return event;
+	}
+
+	return NULL;
 }
 
 void mfs_post_event_read(struct mfs_cache_object *object,
@@ -167,6 +183,70 @@ void mfs_cancel_syncer_events(struct mfs_cache_object *object,
 		iput(event->object->mfs_inode);
 		kfree(event);
 	}
+}
+
+void mfs_cancel_all_events(struct mfs_sb_info *sbi)
+{
+	struct mfs_caches *caches = &sbi->caches;
+	struct xarray *xa = &caches->events;
+	struct mfs_syncer *syncer;
+	struct mfs_event *event;
+	unsigned long index;
+
+	xa_lock(xa);
+	xa_for_each(xa, index, event) {
+		__xa_erase(xa, index);
+		xa_unlock(xa);
+		if (event->syncer) {
+			syncer = event->syncer;
+			if (atomic_dec_return(&syncer->notback) == 0)
+				complete(&syncer->done);
+			spin_lock(&syncer->list_lock);
+			list_del_init(&event->link);
+			spin_unlock(&syncer->list_lock);
+		}
+		iput(event->object->mfs_inode);
+		kfree(event);
+		xa_lock(xa);
+	}
+	caches->next_ev = 0;
+	caches->next_msg = 0;
+	xa_unlock(xa);
+}
+
+int try_hook_fd(struct mfs_event *event)
+{
+	struct mfs_cache_object *object = event->object;
+	struct file *anon_file;
+	int fd;
+
+	down_read(&object->rwsem);
+	if (object->fd > 0) {
+		up_read(&object->rwsem);
+		return object->fd;
+	}
+	up_read(&object->rwsem);
+	down_write(&object->rwsem);
+	fd = get_unused_fd_flags(O_WRONLY);
+	if (fd < 0) {
+		up_write(&object->rwsem);
+		return fd;
+	}
+
+	anon_file = anon_inode_getfile("[mfs]", &mfs_fd_fops, object, O_WRONLY);
+	if (IS_ERR(anon_file)) {
+		put_unused_fd(fd);
+		up_write(&object->rwsem);
+		return PTR_ERR(anon_file);
+	}
+	anon_file->f_mode |= FMODE_PWRITE | FMODE_LSEEK;
+	object->fd = fd;
+	object->anon_file = anon_file;
+	/* lifecyle of fd/anon_file should later than mfs_inode */
+	ihold(object->mfs_inode);
+	fd_install(fd, anon_file);
+	up_write(&object->rwsem);
+	return fd;
 }
 
 struct mfs_cache_object *mfs_alloc_object(struct inode *inode,

@@ -13,6 +13,7 @@
 #include <linux/wait.h>
 #include <linux/completion.h>
 #include <linux/types.h>
+#include <linux/mount.h>
 #include <linux/mfs.h>
 
 #define MFS_NAME "mfs"
@@ -20,8 +21,12 @@
 #define MFS_OPEN_FLAGS (O_NOATIME)
 #define MFS_EVENT_NEW	XA_MARK_1
 
+/* mfs_sb_info flags */
+#define MFS_MOUNTED 0
+
 /* mfs_caches flags */
 #define MFS_CACHE_READY 0
+#define MFS_CACHE_OPENED 1
 
 struct mfs_cache_object {
 	struct file *cache_file;
@@ -65,6 +70,8 @@ struct mfs_sb_info {
 
 	int minor;
 
+	unsigned long flags;
+	struct vfsmount *mnt;
 	struct super_block *sb;
 
 	struct mfs_caches caches;
@@ -203,12 +210,21 @@ struct inode *mfs_iget(struct super_block *sb, struct inode *lower_inode,
 int mfs_alloc_dentry_info(struct dentry *dentry);
 void mfs_free_dentry_info(struct dentry *dentry);
 
+int mfs_fs_dev_init(struct super_block *sb);
+void mfs_fs_dev_exit(struct super_block *sb);
+int mfs_dev_init(void);
+void mfs_dev_exit(void);
+
+struct mfs_event *mfs_pick_event(struct xa_state *xas,
+				 unsigned long xa_max);
 void mfs_post_event_read(struct mfs_cache_object *object,
 			       loff_t off, uint64_t len,
 			       struct mfs_syncer *syncer, int op);
 void mfs_destroy_events(struct super_block *sb);
 void mfs_cancel_syncer_events(struct mfs_cache_object *object,
 			      struct mfs_syncer *syncer);
+void mfs_cancel_all_events(struct mfs_sb_info *sbi);
+int try_hook_fd(struct mfs_event *event);
 struct mfs_cache_object *mfs_alloc_object(struct inode *inode,
 					       struct path *cache_path);
 void mfs_free_object(void *data);

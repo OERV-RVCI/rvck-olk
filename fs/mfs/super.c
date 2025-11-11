@@ -10,6 +10,8 @@
 #include <linux/namei.h>
 #include <linux/seq_file.h>
 #include <linux/statfs.h>
+#include <linux/delay.h>
+#include <linux/string.h>
 
 /*
  * Used for alloc_inode
@@ -301,6 +303,12 @@ static int mfs_fc_fill_super(struct super_block *sb, struct fs_context *fc)
 	if (err)
 		return err;
 
+	if (support_event(sbi)) {
+		err = mfs_fs_dev_init(sb);
+		if (err)
+			return err;
+	}
+
 	inode = mfs_iget(sb, d_inode(sbi->lower.dentry), &sbi->cache);
 	if (IS_ERR(inode)) {
 		err = PTR_ERR(inode);
@@ -318,12 +326,15 @@ static int mfs_fc_fill_super(struct super_block *sb, struct fs_context *fc)
 		goto out_dput;
 	mfs_install_path(sb->s_root, &sbi->lower, &sbi->cache);
 	sbi->sb = sb;
+	set_bit(MFS_MOUNTED, &sbi->flags);
 	return 0;
 out_dput:
 	dput(sb->s_root);
 out_iput:
 	iput(inode);
 out_exit:
+	if (support_event(sbi))
+		mfs_fs_dev_exit(sb);
 	return err;
 }
 
@@ -381,7 +392,17 @@ static int mfs_init_fs_context(struct fs_context *fc)
 static void mfs_kill_sb(struct super_block *sb)
 {
 	struct mfs_sb_info *sbi = MFS_SB(sb);
+	struct mfs_caches *caches = &sbi->caches;
 
+	clear_bit(MFS_MOUNTED, &sbi->flags);
+	if (support_event(sbi)) {
+		while (test_bit(MFS_CACHE_OPENED, &caches->flags)) {
+			msleep(100);
+			printk_once(KERN_WARNING "Pending until close the /dev/mfs%u...\n",
+				    sbi->minor);
+		}
+		mfs_fs_dev_exit(sb);
+	}
 	kill_anon_super(sb);
 	mfs_destroy_events(sb);
 	if (sbi->mtree) {
@@ -433,8 +454,14 @@ static int __init init_mfs_fs(void)
 	if (err)
 		goto err_register;
 
+	err = mfs_dev_init();
+	if (err)
+		goto err_dev;
+
 	pr_info("MFS module loaded\n");
 	return 0;
+err_dev:
+	unregister_filesystem(&mfs_fs_type);
 err_register:
 	mfs_cache_exit();
 err_cache:
@@ -446,6 +473,7 @@ err_dentryp:
 
 static void __exit exit_mfs_fs(void)
 {
+	mfs_dev_exit();
 	unregister_filesystem(&mfs_fs_type);
 	mfs_cache_exit();
 	kmem_cache_destroy(mfs_dentry_cachep);

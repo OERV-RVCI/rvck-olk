@@ -18,6 +18,12 @@ enum {
 	MFS_MODE_REMOTE,
 };
 
+struct mfs_ioc_fsinfo {
+	__u8 mode;  /* 0: none, 1: local, 2: remote */
+};
+
+#define MFS_IOC_FSINFO	_IOR(0xbd,	1, struct  mfs_ioc_fsinfo)
+
 struct mfs_msg {
 	__u8 version;
 	__u8 opcode;
