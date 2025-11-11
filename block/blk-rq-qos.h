@@ -13,12 +13,19 @@
 
 struct blk_mq_debugfs_attr;
 
+/*
+ * enum rq_qos_id has been deprecated because of KABI incompatibility.
+ * Use the macro definitions below instead.
+ */
 enum rq_qos_id {
 	RQ_QOS_WBT,
 	RQ_QOS_LATENCY,
 	RQ_QOS_COST,
-	RQ_QOS_INFLIGHT,
 };
+#define RQ_QOS_WBT		0
+#define RQ_QOS_LATENCY		1
+#define RQ_QOS_COST		2
+#define RQ_QOS_INFLIGHT		3
 
 struct rq_wait {
 	wait_queue_head_t wait;
@@ -28,7 +35,7 @@ struct rq_wait {
 struct rq_qos {
 	const struct rq_qos_ops *ops;
 	struct gendisk *disk;
-	enum rq_qos_id id;
+	KABI_REPLACE(enum rq_qos_id id, u32 id)
 	struct rq_qos *next;
 #ifdef CONFIG_BLK_DEBUG_FS
 	struct dentry *debugfs_dir;
@@ -59,8 +66,7 @@ struct rq_depth {
 	unsigned int default_depth;
 };
 
-static inline struct rq_qos *rq_qos_id(struct request_queue *q,
-				       enum rq_qos_id id)
+static inline struct rq_qos *rq_qos_id(struct request_queue *q, u32 id)
 {
 	struct rq_qos *rqos;
 	for (rqos = q->rq_qos; rqos; rqos = rqos->next) {
@@ -86,7 +92,7 @@ static inline void rq_wait_init(struct rq_wait *rq_wait)
 	init_waitqueue_head(&rq_wait->wait);
 }
 
-int rq_qos_add(struct rq_qos *rqos, struct gendisk *disk, enum rq_qos_id id,
+int rq_qos_add(struct rq_qos *rqos, struct gendisk *disk, u32 id,
 		const struct rq_qos_ops *ops);
 void rq_qos_del(struct rq_qos *rqos);
 
