@@ -23,7 +23,7 @@
 #define   NOC_PMU_GLOBAL_CTRL_TT_EN	BIT(1)
 #define NOC_PMU_CNT_INFO		0x1e08
 #define   NOC_PMU_CNT_INFO_OVERFLOW(n)	BIT(n)
-#define NOC_PMU_EVENT_CTRL(n)		(0x1e20 + 4 * (n))
+#define NOC_PMU_EVENT_CTRL0		0x1e20
 #define   NOC_PMU_EVENT_CTRL_TYPE	GENMASK(4, 0)
 /*
  * Note channel of 0x0 will reset the counter value, so don't do it before
@@ -31,18 +31,27 @@
  */
 #define   NOC_PMU_EVENT_CTRL_CHANNEL	GENMASK(10, 8)
 #define   NOC_PMU_EVENT_CTRL_EN		BIT(11)
-#define NOC_PMU_EVENT_COUNTER(n)	(0x1e80 + 8 * (n))
+#define NOC_PMU_EVENT_COUNTER0		0x1e80
 
 #define NOC_PMU_NR_COUNTERS		4
-#define NOC_PMU_COUNTER_BITS		64
+#define NOC_PMU_CH_DEFAULT		0x7
 
-#define NOC_PMU_CH_DEFAULT	0x7
+#define NOC_PMU_EVENT_CTRLn(ctrl0, n)	((ctrl0) + 4 * (n))
+#define NOC_PMU_EVENT_CNTRn(cntr0, n)	((cntr0) + 8 * (n))
 
 HISI_PMU_EVENT_ATTR_EXTRACTOR(ch, config1, 2, 0);
 HISI_PMU_EVENT_ATTR_EXTRACTOR(tt_en, config1, 3, 3);
 
 /* Dynamic CPU hotplug state used by this PMU driver */
 static enum cpuhp_state hisi_noc_pmu_cpuhp_state;
+
+struct hisi_noc_pmu_regs {
+	u32 version;
+	u32 pmu_ctrl;
+	u32 event_ctrl0;
+	u32 event_cntr0;
+	u32 overflow_status;
+};
 
 /*
  * Tracetag filtering is not per event and all the events should keep
@@ -57,12 +66,13 @@ static bool hisi_noc_pmu_check_global_filter(struct perf_event *curr,
 
 static void hisi_noc_pmu_write_evtype(struct hisi_pmu *noc_pmu, int idx, u32 type)
 {
+	struct hisi_noc_pmu_regs *reg_info = noc_pmu->dev_info->private;
 	u32 reg;
 
-	reg = readl(noc_pmu->base + NOC_PMU_EVENT_CTRL(idx));
+	reg = readl(noc_pmu->base + NOC_PMU_EVENT_CTRLn(reg_info->event_ctrl0, idx));
 	reg &= ~NOC_PMU_EVENT_CTRL_TYPE;
 	reg |= FIELD_PREP(NOC_PMU_EVENT_CTRL_TYPE, type);
-	writel(reg, noc_pmu->base + NOC_PMU_EVENT_CTRL(idx));
+	writel(reg, noc_pmu->base + NOC_PMU_EVENT_CTRLn(reg_info->event_ctrl0, idx));
 }
 
 static int hisi_noc_pmu_get_event_idx(struct perf_event *event)
@@ -82,33 +92,39 @@ static int hisi_noc_pmu_get_event_idx(struct perf_event *event)
 static u64 hisi_noc_pmu_read_counter(struct hisi_pmu *noc_pmu,
 				     struct hw_perf_event *hwc)
 {
-	return readq(noc_pmu->base + NOC_PMU_EVENT_COUNTER(hwc->idx));
+	struct hisi_noc_pmu_regs *reg_info = noc_pmu->dev_info->private;
+
+	return readq(noc_pmu->base + NOC_PMU_EVENT_CNTRn(reg_info->event_cntr0, hwc->idx));
 }
 
 static void hisi_noc_pmu_write_counter(struct hisi_pmu *noc_pmu,
 				       struct hw_perf_event *hwc, u64 val)
 {
-	writeq(val, noc_pmu->base + NOC_PMU_EVENT_COUNTER(hwc->idx));
+	struct hisi_noc_pmu_regs *reg_info = noc_pmu->dev_info->private;
+
+	writeq(val, noc_pmu->base + NOC_PMU_EVENT_CNTRn(reg_info->event_cntr0, hwc->idx));
 }
 
 static void hisi_noc_pmu_enable_counter(struct hisi_pmu *noc_pmu,
 					struct hw_perf_event *hwc)
 {
+	struct hisi_noc_pmu_regs *reg_info = noc_pmu->dev_info->private;
 	u32 reg;
 
-	reg = readl(noc_pmu->base + NOC_PMU_EVENT_CTRL(hwc->idx));
+	reg = readl(noc_pmu->base + NOC_PMU_EVENT_CTRLn(reg_info->event_ctrl0, hwc->idx));
 	reg |= NOC_PMU_EVENT_CTRL_EN;
-	writel(reg, noc_pmu->base + NOC_PMU_EVENT_CTRL(hwc->idx));
+	writel(reg, noc_pmu->base + NOC_PMU_EVENT_CTRLn(reg_info->event_ctrl0, hwc->idx));
 }
 
 static void hisi_noc_pmu_disable_counter(struct hisi_pmu *noc_pmu,
 					 struct hw_perf_event *hwc)
 {
+	struct hisi_noc_pmu_regs *reg_info = noc_pmu->dev_info->private;
 	u32 reg;
 
-	reg = readl(noc_pmu->base + NOC_PMU_EVENT_CTRL(hwc->idx));
+	reg = readl(noc_pmu->base + NOC_PMU_EVENT_CTRLn(reg_info->event_ctrl0, hwc->idx));
 	reg &= ~NOC_PMU_EVENT_CTRL_EN;
-	writel(reg, noc_pmu->base + NOC_PMU_EVENT_CTRL(hwc->idx));
+	writel(reg, noc_pmu->base + NOC_PMU_EVENT_CTRLn(reg_info->event_ctrl0, hwc->idx));
 }
 
 static void hisi_noc_pmu_enable_counter_int(struct hisi_pmu *noc_pmu,
@@ -124,35 +140,45 @@ static void hisi_noc_pmu_disable_counter_int(struct hisi_pmu *noc_pmu,
 
 static void hisi_noc_pmu_start_counters(struct hisi_pmu *noc_pmu)
 {
+	struct hisi_noc_pmu_regs *reg_info = noc_pmu->dev_info->private;
 	u32 reg;
 
-	reg = readl(noc_pmu->base + NOC_PMU_GLOBAL_CTRL);
+	reg = readl(noc_pmu->base + reg_info->pmu_ctrl);
 	reg |= NOC_PMU_GLOBAL_CTRL_PMU_EN;
-	writel(reg, noc_pmu->base + NOC_PMU_GLOBAL_CTRL);
+	writel(reg, noc_pmu->base + reg_info->pmu_ctrl);
 }
 
 static void hisi_noc_pmu_stop_counters(struct hisi_pmu *noc_pmu)
 {
+	struct hisi_noc_pmu_regs *reg_info = noc_pmu->dev_info->private;
 	u32 reg;
 
-	reg = readl(noc_pmu->base + NOC_PMU_GLOBAL_CTRL);
+	reg = readl(noc_pmu->base + reg_info->pmu_ctrl);
 	reg &= ~NOC_PMU_GLOBAL_CTRL_PMU_EN;
-	writel(reg, noc_pmu->base + NOC_PMU_GLOBAL_CTRL);
+	writel(reg, noc_pmu->base + reg_info->pmu_ctrl);
 }
 
 static u32 hisi_noc_pmu_get_int_status(struct hisi_pmu *noc_pmu)
 {
-	return readl(noc_pmu->base + NOC_PMU_CNT_INFO);
+	struct hisi_noc_pmu_regs *reg_info = noc_pmu->dev_info->private;
+
+	return readl(noc_pmu->base + reg_info->overflow_status);
 }
 
 static void hisi_noc_pmu_clear_int_status(struct hisi_pmu *noc_pmu, int idx)
 {
-	writel(~NOC_PMU_CNT_INFO_OVERFLOW(idx), noc_pmu->base + NOC_PMU_CNT_INFO);
+	struct hisi_noc_pmu_regs *reg_info = noc_pmu->dev_info->private;
+	u32 reg;
+
+	reg = readl(noc_pmu->base + reg_info->overflow_status);
+	reg &= ~NOC_PMU_CNT_INFO_OVERFLOW(idx);
+	writel(reg, noc_pmu->base + reg_info->overflow_status);
 }
 
 static void hisi_noc_pmu_enable_filter(struct perf_event *event)
 {
 	struct hisi_pmu *noc_pmu = to_hisi_pmu(event->pmu);
+	struct hisi_noc_pmu_regs *reg_info = noc_pmu->dev_info->private;
 	struct hw_perf_event *hwc = &event->hw;
 	u32 tt_en = hisi_get_tt_en(event);
 	u32 ch = hisi_get_ch(event);
@@ -161,25 +187,26 @@ static void hisi_noc_pmu_enable_filter(struct perf_event *event)
 	if (!ch)
 		ch = NOC_PMU_CH_DEFAULT;
 
-	reg = readl(noc_pmu->base + NOC_PMU_EVENT_CTRL(hwc->idx));
+	reg = readl(noc_pmu->base + NOC_PMU_EVENT_CTRLn(reg_info->event_ctrl0, hwc->idx));
 	reg &= ~NOC_PMU_EVENT_CTRL_CHANNEL;
 	reg |= FIELD_PREP(NOC_PMU_EVENT_CTRL_CHANNEL, ch);
-	writel(reg, noc_pmu->base + NOC_PMU_EVENT_CTRL(hwc->idx));
+	writel(reg, noc_pmu->base + NOC_PMU_EVENT_CTRLn(reg_info->event_ctrl0, hwc->idx));
 
 	/*
 	 * Since tracetag filter applies to all the counters, don't touch it
 	 * if user doesn't specify it explicitly.
 	 */
 	if (tt_en) {
-		reg = readl(noc_pmu->base + NOC_PMU_GLOBAL_CTRL);
+		reg = readl(noc_pmu->base + reg_info->pmu_ctrl);
 		reg |= NOC_PMU_GLOBAL_CTRL_TT_EN;
-		writel(reg, noc_pmu->base + NOC_PMU_GLOBAL_CTRL);
+		writel(reg, noc_pmu->base + reg_info->pmu_ctrl);
 	}
 }
 
 static void hisi_noc_pmu_disable_filter(struct perf_event *event)
 {
 	struct hisi_pmu *noc_pmu = to_hisi_pmu(event->pmu);
+	struct hisi_noc_pmu_regs *reg_info = noc_pmu->dev_info->private;
 	u32 tt_en = hisi_get_tt_en(event);
 	u32 reg;
 
@@ -191,9 +218,9 @@ static void hisi_noc_pmu_disable_filter(struct perf_event *event)
 		return;
 
 	if (tt_en) {
-		reg = readl(noc_pmu->base + NOC_PMU_GLOBAL_CTRL);
+		reg = readl(noc_pmu->base + reg_info->pmu_ctrl);
 		reg &= ~NOC_PMU_GLOBAL_CTRL_TT_EN;
-		writel(reg, noc_pmu->base + NOC_PMU_GLOBAL_CTRL);
+		writel(reg, noc_pmu->base + reg_info->pmu_ctrl);
 	}
 }
 
@@ -260,6 +287,8 @@ static const struct attribute_group *hisi_noc_pmu_attr_groups[] = {
 
 static int hisi_noc_pmu_dev_init(struct platform_device *pdev, struct hisi_pmu *noc_pmu)
 {
+	struct hisi_noc_pmu_regs *reg_info;
+
 	hisi_uncore_pmu_init_topology(noc_pmu, &pdev->dev);
 
 	if (noc_pmu->topo.scl_id < 0)
@@ -276,14 +305,21 @@ static int hisi_noc_pmu_dev_init(struct platform_device *pdev, struct hisi_pmu *
 		return dev_err_probe(&pdev->dev, PTR_ERR(noc_pmu->base),
 				     "fail to remap io memory\n");
 
-	noc_pmu->on_cpu = -1;
-	noc_pmu->dev = &pdev->dev;
-	noc_pmu->ops = &hisi_uncore_noc_ops;
-	noc_pmu->pmu_events.attr_groups = hisi_noc_pmu_attr_groups;
+	noc_pmu->dev_info = device_get_match_data(&pdev->dev);
+	if (!noc_pmu->dev_info)
+		return -ENODEV;
+
+	noc_pmu->pmu_events.attr_groups = noc_pmu->dev_info->attr_groups;
+	noc_pmu->counter_bits = noc_pmu->dev_info->counter_bits;
+	noc_pmu->check_event = noc_pmu->dev_info->check_event;
 	noc_pmu->num_counters = NOC_PMU_NR_COUNTERS;
-	noc_pmu->counter_bits = NOC_PMU_COUNTER_BITS;
-	noc_pmu->check_event = NOC_PMU_EVENT_CTRL_TYPE;
-	noc_pmu->identifier = readl(noc_pmu->base + NOC_PMU_VERSION);
+	noc_pmu->ops = &hisi_uncore_noc_ops;
+	noc_pmu->dev = &pdev->dev;
+	noc_pmu->on_cpu = -1;
+
+	reg_info = noc_pmu->dev_info->private;
+	noc_pmu->identifier = readl(noc_pmu->base + reg_info->version);
+
 	return 0;
 }
 
@@ -343,8 +379,23 @@ static int hisi_noc_pmu_probe(struct platform_device *pdev)
 					&noc_pmu->pmu);
 }
 
-const struct acpi_device_id hisi_noc_pmu_ids[] = {
-	{ "HISI04E0", },
+static struct hisi_noc_pmu_regs hisi_noc_v1_pmu_regs = {
+	.version = NOC_PMU_VERSION,
+	.pmu_ctrl = NOC_PMU_GLOBAL_CTRL,
+	.event_ctrl0 = NOC_PMU_EVENT_CTRL0,
+	.event_cntr0 = NOC_PMU_EVENT_COUNTER0,
+	.overflow_status = NOC_PMU_CNT_INFO,
+};
+
+static const struct hisi_pmu_dev_info hisi_noc_v1 = {
+	.attr_groups = hisi_noc_pmu_attr_groups,
+	.counter_bits = 64,
+	.check_event = NOC_PMU_EVENT_CTRL_TYPE,
+	.private = &hisi_noc_v1_pmu_regs,
+};
+
+static const struct acpi_device_id hisi_noc_pmu_ids[] = {
+	{ "HISI04E0", (kernel_ulong_t) &hisi_noc_v1 },
 	{ }
 };
 MODULE_DEVICE_TABLE(acpi, hisi_noc_pmu_ids);

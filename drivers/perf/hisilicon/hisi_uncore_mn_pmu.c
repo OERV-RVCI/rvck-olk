@@ -18,7 +18,7 @@
 static enum cpuhp_state hisi_mn_pmu_online;
 
 /* MN register definition */
-#define HISI_MN_DYNAMIC_CTRL		0x400
+#define HISI_MN_DYNAMIC_CTRL_REG	0x400
 #define   HISI_MN_DYNAMIC_CTRL_EN	BIT(0)
 #define HISI_MN_PERF_CTRL_REG		0x408
 #define   HISI_MN_PERF_CTRL_EN		BIT(6)
@@ -27,13 +27,26 @@ static enum cpuhp_state hisi_mn_pmu_online;
 #define HISI_MN_INT_CLEAR_REG		0x80C
 #define HISI_MN_EVENT_CTRL_REG		0x1C00
 #define HISI_MN_VERSION_REG		0x1C04
-#define HISI_MN_EVTYPE_REGn(n)		(0x1d00 + (n) * 4)
+#define HISI_MN_EVTYPE0_REG		0x1d00
 #define   HISI_MN_EVTYPE_MASK		GENMASK(7, 0)
-#define HISI_MN_CNTR_REGn(n)		(0x1e00 + (n) * 8)
+#define HISI_MN_CNTR0_REG		0x1e00
+#define HISI_MN_EVTYPE_REGn(evtype0, n)	((evtype0) + (n) * 4)
+#define HISI_MN_CNTR_REGn(cntr0, n)	((cntr0) + (n) * 8)
 
 #define HISI_MN_NR_COUNTERS		4
-#define HISI_MN_COUNTER_BITS		48
 #define HISI_MN_TIMEOUT_US		500U
+
+struct hisi_mn_pmu_regs {
+	u32 version;
+	u32 dyn_ctrl;
+	u32 perf_ctrl;
+	u32 int_mask;
+	u32 int_clear;
+	u32 int_status;
+	u32 event_ctrl;
+	u32 event_type0;
+	u32 event_cntr0;
+};
 
 /*
  * Each event request takes a certain amount of time to complete. If
@@ -42,14 +55,15 @@ static enum cpuhp_state hisi_mn_pmu_online;
  */
 static void hisi_mn_pmu_counter_flush(struct hisi_pmu *mn_pmu)
 {
+	struct hisi_mn_pmu_regs *reg_info = mn_pmu->dev_info->private;
 	int ret;
 	u32 val;
 
-	val = readl(mn_pmu->base + HISI_MN_DYNAMIC_CTRL);
+	val = readl(mn_pmu->base + reg_info->dyn_ctrl);
 	val |= HISI_MN_DYNAMIC_CTRL_EN;
-	writel(val, mn_pmu->base + HISI_MN_DYNAMIC_CTRL);
+	writel(val, mn_pmu->base + reg_info->dyn_ctrl);
 
-	ret = readl_poll_timeout_atomic(mn_pmu->base + HISI_MN_DYNAMIC_CTRL,
+	ret = readl_poll_timeout_atomic(mn_pmu->base + reg_info->dyn_ctrl,
 					val, !(val & HISI_MN_DYNAMIC_CTRL_EN),
 					1, HISI_MN_TIMEOUT_US);
 	if (ret)
@@ -59,17 +73,22 @@ static void hisi_mn_pmu_counter_flush(struct hisi_pmu *mn_pmu)
 static u64 hisi_mn_pmu_read_counter(struct hisi_pmu *mn_pmu,
 				    struct hw_perf_event *hwc)
 {
-	return readq(mn_pmu->base + HISI_MN_CNTR_REGn(hwc->idx));
+	struct hisi_mn_pmu_regs *reg_info = mn_pmu->dev_info->private;
+
+	return readq(mn_pmu->base + HISI_MN_CNTR_REGn(reg_info->event_cntr0, hwc->idx));
 }
 
 static void hisi_mn_pmu_write_counter(struct hisi_pmu *mn_pmu,
 				      struct hw_perf_event *hwc, u64 val)
 {
-	writeq(val, mn_pmu->base + HISI_MN_CNTR_REGn(hwc->idx));
+	struct hisi_mn_pmu_regs *reg_info = mn_pmu->dev_info->private;
+
+	writeq(val, mn_pmu->base + HISI_MN_CNTR_REGn(reg_info->event_cntr0, hwc->idx));
 }
 
 static void hisi_mn_pmu_write_evtype(struct hisi_pmu *mn_pmu, int idx, u32 type)
 {
+	struct hisi_mn_pmu_regs *reg_info = mn_pmu->dev_info->private;
 	u32 val;
 
 	/*
@@ -77,28 +96,30 @@ static void hisi_mn_pmu_write_evtype(struct hisi_pmu *mn_pmu, int idx, u32 type)
 	 * There are 2 32-bit event select registers for the
 	 * 8 hardware counters, each event code is 8-bit wide.
 	 */
-	val = readl(mn_pmu->base + HISI_MN_EVTYPE_REGn(idx / 4));
+	val = readl(mn_pmu->base + HISI_MN_EVTYPE_REGn(reg_info->event_type0, idx / 4));
 	val &= ~(HISI_MN_EVTYPE_MASK << HISI_PMU_EVTYPE_SHIFT(idx));
 	val |= (type << HISI_PMU_EVTYPE_SHIFT(idx));
-	writel(val, mn_pmu->base + HISI_MN_EVTYPE_REGn(idx / 4));
+	writel(val, mn_pmu->base + HISI_MN_EVTYPE_REGn(reg_info->event_type0, idx / 4));
 }
 
 static void hisi_mn_pmu_start_counters(struct hisi_pmu *mn_pmu)
 {
+	struct hisi_mn_pmu_regs *reg_info = mn_pmu->dev_info->private;
 	u32 val;
 
-	val = readl(mn_pmu->base + HISI_MN_PERF_CTRL_REG);
+	val = readl(mn_pmu->base + reg_info->perf_ctrl);
 	val |= HISI_MN_PERF_CTRL_EN;
-	writel(val, mn_pmu->base + HISI_MN_PERF_CTRL_REG);
+	writel(val, mn_pmu->base + reg_info->perf_ctrl);
 }
 
 static void hisi_mn_pmu_stop_counters(struct hisi_pmu *mn_pmu)
 {
+	struct hisi_mn_pmu_regs *reg_info = mn_pmu->dev_info->private;
 	u32 val;
 
-	val = readl(mn_pmu->base + HISI_MN_PERF_CTRL_REG);
+	val = readl(mn_pmu->base + reg_info->perf_ctrl);
 	val &= ~HISI_MN_PERF_CTRL_EN;
-	writel(val, mn_pmu->base + HISI_MN_PERF_CTRL_REG);
+	writel(val, mn_pmu->base + reg_info->perf_ctrl);
 
 	hisi_mn_pmu_counter_flush(mn_pmu);
 }
@@ -106,51 +127,59 @@ static void hisi_mn_pmu_stop_counters(struct hisi_pmu *mn_pmu)
 static void hisi_mn_pmu_enable_counter(struct hisi_pmu *mn_pmu,
 				       struct hw_perf_event *hwc)
 {
+	struct hisi_mn_pmu_regs *reg_info = mn_pmu->dev_info->private;
 	u32 val;
 
-	val = readl(mn_pmu->base + HISI_MN_EVENT_CTRL_REG);
+	val = readl(mn_pmu->base + reg_info->event_ctrl);
 	val |= BIT(hwc->idx);
-	writel(val, mn_pmu->base + HISI_MN_EVENT_CTRL_REG);
+	writel(val, mn_pmu->base + reg_info->event_ctrl);
 }
 
 static void hisi_mn_pmu_disable_counter(struct hisi_pmu *mn_pmu,
 					struct hw_perf_event *hwc)
 {
+	struct hisi_mn_pmu_regs *reg_info = mn_pmu->dev_info->private;
 	u32 val;
 
-	val = readl(mn_pmu->base + HISI_MN_EVENT_CTRL_REG);
+	val = readl(mn_pmu->base + reg_info->event_ctrl);
 	val &= ~BIT(hwc->idx);
-	writel(val, mn_pmu->base + HISI_MN_EVENT_CTRL_REG);
+	writel(val, mn_pmu->base + reg_info->event_ctrl);
 }
 
 static void hisi_mn_pmu_enable_counter_int(struct hisi_pmu *mn_pmu,
 					   struct hw_perf_event *hwc)
 {
+	struct hisi_mn_pmu_regs *reg_info = mn_pmu->dev_info->private;
 	u32 val;
 
-	val = readl(mn_pmu->base + HISI_MN_INT_MASK_REG);
+	val = readl(mn_pmu->base + reg_info->int_mask);
 	val &= ~BIT(hwc->idx);
-	writel(val, mn_pmu->base + HISI_MN_INT_MASK_REG);
+	writel(val, mn_pmu->base + reg_info->int_mask);
 }
 
 static void hisi_mn_pmu_disable_counter_int(struct hisi_pmu *mn_pmu,
 					    struct hw_perf_event *hwc)
 {
+	struct hisi_mn_pmu_regs *reg_info = mn_pmu->dev_info->private;
 	u32 val;
 
-	val = readl(mn_pmu->base + HISI_MN_INT_MASK_REG);
+	val = readl(mn_pmu->base + reg_info->int_mask);
 	val |= BIT(hwc->idx);
-	writel(val, mn_pmu->base + HISI_MN_INT_MASK_REG);
+	writel(val, mn_pmu->base + reg_info->int_mask);
 }
 
 static u32 hisi_mn_pmu_get_int_status(struct hisi_pmu *mn_pmu)
 {
-	return readl(mn_pmu->base + HISI_MN_INT_STATUS_REG);
+	struct hisi_mn_pmu_regs *reg_info = mn_pmu->dev_info->private;
+
+	return readl(mn_pmu->base + reg_info->int_status);
 }
 
 static void hisi_mn_pmu_clear_int_status(struct hisi_pmu *mn_pmu, int idx)
 {
-	writel(BIT(idx), mn_pmu->base + HISI_MN_INT_CLEAR_REG);
+	struct hisi_mn_pmu_regs *reg_info = mn_pmu->dev_info->private;
+
+	writel(BIT(idx), mn_pmu->base + reg_info->int_clear);
 }
 
 static struct attribute *hisi_mn_pmu_format_attr[] = {
@@ -221,6 +250,7 @@ static const struct hisi_uncore_ops hisi_uncore_mn_ops = {
 static int hisi_mn_pmu_dev_init(struct platform_device *pdev,
 				struct hisi_pmu *mn_pmu)
 {
+	struct hisi_mn_pmu_regs *reg_info;
 	int ret;
 
 	hisi_uncore_pmu_init_topology(mn_pmu, &pdev->dev);
@@ -242,14 +272,21 @@ static int hisi_mn_pmu_dev_init(struct platform_device *pdev,
 	if (ret)
 		return ret;
 
-	mn_pmu->on_cpu = -1;
-	mn_pmu->dev = &pdev->dev;
-	mn_pmu->ops = &hisi_uncore_mn_ops;
-	mn_pmu->pmu_events.attr_groups = hisi_mn_pmu_attr_groups;
-	mn_pmu->check_event = HISI_MN_EVTYPE_MASK;
+	mn_pmu->dev_info = device_get_match_data(&pdev->dev);
+	if (!mn_pmu->dev_info)
+		return -ENODEV;
+
+	mn_pmu->pmu_events.attr_groups = mn_pmu->dev_info->attr_groups;
+	mn_pmu->counter_bits = mn_pmu->dev_info->counter_bits;
+	mn_pmu->check_event = mn_pmu->dev_info->check_event;
 	mn_pmu->num_counters = HISI_MN_NR_COUNTERS;
-	mn_pmu->counter_bits = HISI_MN_COUNTER_BITS;
-	mn_pmu->identifier = readl(mn_pmu->base + HISI_MN_VERSION_REG);
+	mn_pmu->ops = &hisi_uncore_mn_ops;
+	mn_pmu->dev = &pdev->dev;
+	mn_pmu->on_cpu = -1;
+
+	reg_info = mn_pmu->dev_info->private;
+	mn_pmu->identifier = readl(mn_pmu->base + reg_info->version);
+
 	return 0;
 }
 
@@ -301,8 +338,27 @@ static int hisi_mn_pmu_probe(struct platform_device *pdev)
 	return devm_add_action_or_reset(&pdev->dev, hisi_mn_pmu_unregister, &mn_pmu->pmu);
 }
 
+static struct hisi_mn_pmu_regs hisi_mn_v1_pmu_regs = {
+	.version = HISI_MN_VERSION_REG,
+	.dyn_ctrl = HISI_MN_DYNAMIC_CTRL_REG,
+	.perf_ctrl = HISI_MN_PERF_CTRL_REG,
+	.int_mask = HISI_MN_INT_MASK_REG,
+	.int_clear = HISI_MN_INT_CLEAR_REG,
+	.int_status = HISI_MN_INT_STATUS_REG,
+	.event_ctrl = HISI_MN_EVENT_CTRL_REG,
+	.event_type0 = HISI_MN_EVTYPE0_REG,
+	.event_cntr0 = HISI_MN_CNTR0_REG,
+};
+
+static const struct hisi_pmu_dev_info hisi_mn_v1 = {
+	.attr_groups = hisi_mn_pmu_attr_groups,
+	.counter_bits = 48,
+	.check_event = HISI_MN_EVTYPE_MASK,
+	.private = &hisi_mn_v1_pmu_regs,
+};
+
 static const struct acpi_device_id hisi_mn_pmu_acpi_match[] = {
-	{ "HISI0222", },
+	{ "HISI0222", (kernel_ulong_t) &hisi_mn_v1 },
 	{ }
 };
 MODULE_DEVICE_TABLE(acpi, hisi_mn_pmu_acpi_match);
