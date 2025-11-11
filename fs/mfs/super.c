@@ -53,6 +53,8 @@ static void mfs_evict_inode(struct inode *inode)
 	struct inode *cache_inode = vi->cache;
 
 	truncate_inode_pages_final(&inode->i_data);
+	if (inode->i_private)
+		mfs_free_object(inode->i_private);
 	clear_inode(inode);
 	if (lower_inode) {
 		vi->lower = NULL;
@@ -420,6 +422,10 @@ static int __init init_mfs_fs(void)
 		goto err_dentryp;
 	}
 
+	err = mfs_cache_init();
+	if (err)
+		goto err_cache;
+
 	err = register_filesystem(&mfs_fs_type);
 	if (err)
 		goto err_register;
@@ -427,6 +433,8 @@ static int __init init_mfs_fs(void)
 	pr_info("MFS module loaded\n");
 	return 0;
 err_register:
+	mfs_cache_exit();
+err_cache:
 	kmem_cache_destroy(mfs_dentry_cachep);
 err_dentryp:
 	kmem_cache_destroy(mfs_inode_cachep);
@@ -436,6 +444,7 @@ err_dentryp:
 static void __exit exit_mfs_fs(void)
 {
 	unregister_filesystem(&mfs_fs_type);
+	mfs_cache_exit();
 	kmem_cache_destroy(mfs_dentry_cachep);
 	kmem_cache_destroy(mfs_inode_cachep);
 	pr_info("MFS module unload\n");

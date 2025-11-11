@@ -9,11 +9,29 @@
 #include <linux/mm.h>
 #include <linux/container_of.h>
 #include <linux/spinlock_types.h>
+#include <linux/completion.h>
 #include <linux/mfs.h>
 
 #define MFS_NAME "mfs"
 
 #define MFS_OPEN_FLAGS (O_NOATIME)
+
+struct mfs_cache_object {
+	struct file *cache_file;
+	struct inode *mfs_inode;
+
+	struct rw_semaphore rwsem;
+	int fd;  /* file handle */
+	struct file *anon_file;  /* related with fd */
+};
+
+struct mfs_syncer {
+	atomic_t notback;
+	struct list_head head;
+	spinlock_t list_lock;
+	struct completion done;
+	atomic_t res;
+};
 
 struct mfs_sb_info {
 	int mode;
@@ -130,9 +148,27 @@ static inline bool support_event(struct mfs_sb_info *sbi)
 	return sbi->mode != MFS_MODE_NONE;
 }
 
+static inline bool need_sync_event(struct super_block *sb)
+{
+	struct mfs_sb_info *sbi = MFS_SB(sb);
+
+	return sbi->mode == MFS_MODE_REMOTE;
+}
+
 struct inode *mfs_iget(struct super_block *sb, struct inode *lower_inode,
 			  struct path *cache_path);
 int mfs_alloc_dentry_info(struct dentry *dentry);
 void mfs_free_dentry_info(struct dentry *dentry);
+
+void mfs_post_event_read(struct mfs_cache_object *object,
+			       loff_t off, uint64_t len,
+			       struct mfs_syncer *syncer, int op);
+void mfs_cancel_syncer_events(struct mfs_cache_object *object,
+			      struct mfs_syncer *syncer);
+struct mfs_cache_object *mfs_alloc_object(struct inode *inode,
+					       struct path *cache_path);
+void mfs_free_object(void *data);
+int mfs_cache_init(void);
+void mfs_cache_exit(void);
 
 #endif

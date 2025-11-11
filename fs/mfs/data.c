@@ -6,6 +6,7 @@
 #include <linux/pagemap.h>
 #include <linux/uio.h>
 #include <linux/types.h>
+#include <linux/completion.h>
 
 static struct mfs_file_info *mfs_file_info_alloc(struct file *lower, struct file *cache)
 {
@@ -132,11 +133,179 @@ static int mfs_readdir(struct file *file, struct dir_context *ctx)
 	return iterate_dir(lfile, ctx);
 }
 
+enum range_status {
+	RANGE_DATA,
+	RANGE_HOLE,
+	RANGE_INVAL,
+};
+
+/* Continuous range with same status */
+struct range_t {
+	struct file *file;
+	loff_t off;
+	size_t max;
+	size_t len;
+	int status;
+};
+
+typedef int (*range_check) (struct range_t *r);
+
+struct range_ctx {
+	bool sync;  /* handle the miss case in sync/async way */
+	int op;
+	loff_t off;
+	size_t len;
+	struct file *file;
+	struct mfs_cache_object *object;
+	range_check checker; /* check method for range */
+};
+
+static int range_check_disk(struct range_t *r)
+{
+	loff_t off, to, start = r->off, end = r->off + r->max;
+	struct file *file = r->file;
+	int err = 0;
+
+	off  = vfs_llseek(file, start, SEEK_DATA);
+	if (off < 0) {
+		if (off == (loff_t)-ENXIO) {
+			r->len = end - start;
+			r->status = RANGE_HOLE;
+			goto out;
+		}
+		err = (int)off;
+		goto out;
+	}
+	if (off >= end) {
+		r->len = end - start;
+		r->status = RANGE_HOLE;
+		goto out;
+	}
+	if (off > start) {
+		r->len = end - off;
+		r->status = RANGE_HOLE;
+		goto out;
+	}
+	to = vfs_llseek(file, start, SEEK_HOLE);
+	if (to < 0) {
+		err = (int)to;
+		goto out;
+	}
+	if (to < end) {
+		r->len = to - start;
+		r->status = RANGE_DATA;
+		goto out;
+	}
+	r->len = end - start;
+	r->status = RANGE_DATA;
+out:
+	return err;
+}
+
+static int range_check_mem(struct range_t *r)
+{
+	struct inode *inode = file_inode(r->file);
+	struct address_space *mapping = inode->i_mapping;
+	loff_t cur_off = r->off, end = r->off + r->max;
+	struct folio *folio;
+
+	/* check from the first folio */
+	folio = filemap_get_folio(mapping, cur_off >> PAGE_SHIFT);
+	if (IS_ERR(folio)) {
+		r->status = RANGE_HOLE;
+		cur_off += PAGE_SIZE;
+	} else {
+		r->status = RANGE_DATA;
+		cur_off += folio_size(folio);
+		folio_put(folio);
+	}
+
+	while (cur_off < end) {
+		folio = filemap_get_folio(mapping, cur_off >> PAGE_SHIFT);
+		if (IS_ERR(folio)) {
+			if (r->status == RANGE_DATA)
+				break;
+			/* continuous hole */
+			cur_off += PAGE_SIZE;
+			continue;
+		}
+		if (r->status == RANGE_HOLE) {
+			folio_put(folio);
+			break;
+		}
+		cur_off += folio_size(folio);
+		folio_put(folio);
+	}
+
+	r->len = cur_off - r->off;
+	return 0;
+}
+
+static int mfs_check_range(struct range_ctx *ctx)
+{
+	loff_t start = ctx->off, end = ctx->off + ctx->len;
+	struct file *file = ctx->file;
+	struct range_t r = { .file = file };
+	size_t len = ctx->len;
+	struct mfs_syncer syncer;
+	int err = 0, err2 = 0;
+
+	if (!ctx->len)
+		return 0;
+
+	atomic_set(&syncer.notback, 1);
+	init_completion(&syncer.done);
+	INIT_LIST_HEAD(&syncer.head);
+	spin_lock_init(&syncer.list_lock);
+	atomic_set(&syncer.res, 0);
+	while (start < end) {
+		r.off = round_down(start, PAGE_SIZE);
+		r.max = len + (start - r.off);
+		r.len = 0;
+		r.status = RANGE_INVAL;
+		err = ctx->checker(&r);
+		if (err)
+			goto err;
+		switch (r.status) {
+		case RANGE_DATA:
+			start += r.len;
+			len -= r.len;
+			break;
+		case RANGE_HOLE:
+			start += r.len;
+			len -= r.len;
+			if (ctx->sync)
+				mfs_post_event_read(ctx->object, r.off, r.len, &syncer, ctx->op);
+			else
+				mfs_post_event_read(ctx->object, r.off, r.len, NULL, ctx->op);
+			break;
+		default:
+			pr_warn("invalid range status:%d\n", r.status);
+			WARN_ON_ONCE(1);
+			err = -EINVAL;
+			goto err;
+		}
+	}
+
+err:
+	if (atomic_dec_return(&syncer.notback) > 0) {
+		err2 = wait_for_completion_interruptible(&syncer.done);
+		if (err2)
+			mfs_cancel_syncer_events(ctx->object, &syncer);
+		else
+			err = atomic_read(&syncer.res);
+	}
+	return err ?: err2;
+}
+
 static ssize_t mfs_read_iter(struct kiocb *iocb, struct iov_iter *to)
 {
 	struct file *cfile, *file = iocb->ki_filp;
 	struct mfs_file_info *fi = file->private_data;
+	size_t isize = i_size_read(file_inode(file));
+	struct range_ctx ctx;
 	ssize_t rsize;
+	int err;
 
 	if (!iov_iter_count(to))
 		return 0;
@@ -146,6 +315,22 @@ static ssize_t mfs_read_iter(struct kiocb *iocb, struct iov_iter *to)
 		return -EINVAL;
 
 	(void)get_file(cfile);
+	ctx.file = cfile;
+	ctx.object = file_inode(file)->i_private;
+	ctx.off = iocb->ki_pos;
+	ctx.op = MFS_OP_READ;
+	ctx.len = min(isize - ctx.off, iov_iter_count(to));
+	ctx.sync = false;
+	ctx.checker = range_check_mem;
+	if (need_sync_event(file_inode(file)->i_sb)) {
+		ctx.sync = true;
+		ctx.checker = range_check_disk;
+	}
+	err = mfs_check_range(&ctx);
+	if (err) {
+		fput(cfile);
+		return err;
+	}
 
 	iocb->ki_filp = cfile;
 	rsize = cfile->f_op->read_iter(iocb, to);
@@ -181,9 +366,12 @@ static vm_fault_t mfs_filemap_fault(struct vm_fault *vmf)
 {
 	struct file *cfile, *file = vmf->vma->vm_file;
 	struct mfs_file_info *fi = file->private_data;
+	size_t isize = i_size_read(file_inode(file));
 	const struct vm_operations_struct *cvm_ops;
 	struct vm_area_struct cvma, *vma, **vma_;
+	struct range_ctx ctx;
 	vm_fault_t ret;
+	int err;
 
 	vma = vmf->vma;
 	memcpy(&cvma, vma, sizeof(struct vm_area_struct));
@@ -193,8 +381,26 @@ static vm_fault_t mfs_filemap_fault(struct vm_fault *vmf)
 
 	if (unlikely(!cvm_ops->fault))
 		return VM_FAULT_SIGBUS;
+	if ((vmf->pgoff << PAGE_SHIFT) >= isize)
+		return VM_FAULT_SIGBUS;
 
 	(void)get_file(cfile);
+	ctx.file = cfile;
+	ctx.object = file_inode(file)->i_private;
+	ctx.off = vmf->pgoff << PAGE_SHIFT;
+	ctx.len = min(isize - ctx.off, PAGE_SIZE);
+	ctx.op = MFS_OP_FAULT;
+	ctx.sync = false;
+	ctx.checker = range_check_mem;
+	if (need_sync_event(file_inode(file)->i_sb)) {
+		ctx.sync = true;
+		ctx.checker = range_check_disk;
+	}
+	err = mfs_check_range(&ctx);
+	if (err) {
+		fput(cfile);
+		return VM_FAULT_SIGBUS;
+	}
 
 	/*
 	 * Dealing fault in mfs will call cachefile's fault eventually,
@@ -216,17 +422,38 @@ vm_fault_t mfs_filemap_map_pages(struct vm_fault *vmf,
 {
 	struct file *cfile, *file = vmf->vma->vm_file;
 	struct mfs_file_info *fi = file->private_data;
+	size_t isize = i_size_read(file_inode(file));
 	const struct vm_operations_struct *cvm_ops;
 	struct vm_area_struct cvma, *vma, **vma_;
+	struct range_ctx ctx;
 	vm_fault_t ret;
+	int err;
 
 	vma = vmf->vma;
 	memcpy(&cvma, vma, sizeof(struct vm_area_struct));
 	cfile = fi->cache;
 	cvm_ops = fi->cache_vm_ops;
 	cvma.vm_file = cfile;
+
+	if (unlikely(!cvm_ops->map_pages))
+		return 0;
+	if ((start_pgoff << PAGE_SHIFT) >= isize)
+		return 0;
+
 	(void)get_file(cfile);
-	if (unlikely(!cvm_ops->map_pages)) {
+	ctx.file = cfile;
+	ctx.object = file_inode(file)->i_private;
+	ctx.off = start_pgoff << PAGE_SHIFT;
+	ctx.len = min(isize - ctx.off, (end_pgoff - start_pgoff) << PAGE_SHIFT);
+	ctx.op = MFS_OP_FAROUND;
+	ctx.sync = false;
+	ctx.checker = range_check_mem;
+	if (need_sync_event(file_inode(file)->i_sb)) {
+		ctx.sync = true;
+		ctx.checker = range_check_disk;
+	}
+	err = mfs_check_range(&ctx);
+	if (err) {
 		fput(cfile);
 		return 0;
 	}

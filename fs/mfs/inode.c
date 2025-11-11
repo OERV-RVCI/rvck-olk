@@ -275,6 +275,14 @@ struct inode *mfs_iget(struct super_block *sb, struct inode *lower_inode,
 		goto err_inode;
 	}
 	inode->i_mapping->a_ops = &mfs_aops;
+	if (S_ISREG(cache_inode->i_mode)) {
+		vi->vfs_inode.i_private = mfs_alloc_object(inode, cache_path);
+		if (IS_ERR(vi->vfs_inode.i_private)) {
+			err = PTR_ERR(vi->vfs_inode.i_private);
+			vi->vfs_inode.i_private = NULL;
+			goto err_inode;
+		}
+	}
 	vi->lower = lower_inode;
 	vi->cache = cache_inode;
 	fsstack_copy_attr_all(inode, lower_inode);

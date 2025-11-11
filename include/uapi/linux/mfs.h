@@ -6,6 +6,12 @@
 #include <linux/types.h>
 #include <linux/ioctl.h>
 
+enum mfs_opcode {
+	MFS_OP_READ = 0,
+	MFS_OP_FAULT,
+	MFS_OP_FAROUND,
+};
+
 enum {
 	MFS_MODE_NONE = 0,
 	MFS_MODE_LOCAL,
