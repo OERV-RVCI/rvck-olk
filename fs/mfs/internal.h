@@ -52,6 +52,27 @@ static inline void pathcpy(struct path *dst, const struct path *src)
 	dst->mnt = src->mnt;
 }
 
+/*
+ * dent: mfs vfs dentry
+ */
+static inline void mfs_get_path(const struct dentry *dent,
+				    struct path *lpath,
+				    struct path *cpath)
+{
+	spin_lock(&MFS_D(dent)->lock);
+	pathcpy(lpath, &MFS_D(dent)->lower);
+	path_get(lpath);
+	pathcpy(cpath, &MFS_D(dent)->cache);
+	path_get(cpath);
+	spin_unlock(&MFS_D(dent)->lock);
+}
+
+static inline void mfs_put_path(struct path *lpath, struct path *cpath)
+{
+	path_put(lpath);
+	path_put(cpath);
+}
+
 static inline void mfs_install_path(const struct dentry *dent,
 					 struct path *lpath,
 					 struct path *cpath)

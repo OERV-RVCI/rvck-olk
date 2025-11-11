@@ -17,6 +17,217 @@ static int mfs_inode_set(struct inode *inode, void *lower_target)
 	return 0;
 }
 
+static struct dentry *_mfs_get_inode(struct dentry *dentry,
+					  struct super_block *sb,
+					  struct path *lower_path,
+					  struct path *cache_path)
+{
+	struct mfs_sb_info *sbi = MFS_SB(sb);
+	struct inode *inode, *lower_inode, *cache_inode;
+	struct dentry *ret;
+
+	lower_inode = d_inode(lower_path->dentry);
+	cache_inode = d_inode(cache_path->dentry);
+
+	/* lower file system cannot change */
+	if (lower_inode->i_sb != sbi->lower.dentry->d_sb) {
+		ret = ERR_PTR(-EXDEV);
+		goto out;
+	}
+
+	/* check consistency: mode and size */
+	if ((lower_inode->i_mode & S_IFMT) != (cache_inode->i_mode & S_IFMT)) {
+		ret = ERR_PTR(-EUCLEAN);
+		goto out;
+	}
+	if (S_ISREG(lower_inode->i_mode)
+		&& lower_inode->i_size != cache_inode->i_size) {
+		ret = ERR_PTR(-EUCLEAN);
+		goto out;
+	}
+
+	/* allocate new inode for mfs */
+	inode = mfs_iget(sb, lower_inode, cache_path);
+	if (IS_ERR(inode)) {
+		ret = ERR_PTR(PTR_ERR(inode));
+		goto out;
+	}
+	ret = d_splice_alias(inode, dentry);
+out:
+	return ret;
+}
+
+static int _lookup_create(struct path *lpath, struct path *parent_cpath,
+			      const char *name, struct path *cpath)
+{
+	struct dentry *ldentry, *parent_cdentry, *dentry;
+	struct inode *linode, *cdir;
+	int ret = 0, _ret;
+
+	ldentry = lpath->dentry;
+	parent_cdentry = parent_cpath->dentry;
+	linode = d_inode(ldentry);
+	cdir = d_inode(parent_cpath->dentry);
+
+	inode_lock_nested(cdir, I_MUTEX_PARENT);
+retry:
+	dentry = lookup_one_len(name, parent_cdentry, strlen(name));
+	if (IS_ERR(dentry)) {
+		ret = PTR_ERR(dentry);
+		goto out;
+	}
+
+	cpath->mnt = mntget(parent_cpath->mnt);
+	cpath->dentry = dentry;
+	if (d_is_positive(dentry))
+		goto out;
+
+	if (d_is_dir(ldentry)) {
+		ret = vfs_mkdir(&nop_mnt_idmap, cdir, dentry, linode->i_mode);
+		if (ret)
+			goto new_err;
+		/*
+		 * In the event that the filesystem does not use the @dentry
+		 * but leaves it negative or unhashes it.
+		 */
+		if (unlikely(d_unhashed(dentry))) {
+			mntput(parent_cpath->mnt);
+			dput(dentry);
+			goto retry;
+		}
+	} else {
+		/* dir or file, symlink will be considerred the regular file */
+		ret = vfs_create(&nop_mnt_idmap, cdir, dentry, linode->i_mode, true);
+		if (ret)
+			goto new_err;
+		ret = vfs_truncate(cpath, linode->i_size);
+		if (ret)
+			goto truncate_err;
+	}
+	goto out;
+
+truncate_err:
+	_ret = vfs_unlink(&nop_mnt_idmap, cdir, dentry, NULL);
+	if (_ret)
+		pr_err("cleanup failed for file:%s, err:%d\n", name, _ret);
+new_err:
+	mntput(parent_cpath->mnt);
+	dput(dentry);
+out:
+	inode_unlock(cdir);
+	return ret;
+}
+
+struct dentry *mfs_lookup(struct inode *dir, struct dentry *dentry,
+			     unsigned int flag)
+{
+	struct path parent_lpath, parent_cpath, lpath, cpath;
+	struct dentry *ret, *parent;
+	const char *name;
+	int err;
+
+	parent = dget_parent(dentry);
+	mfs_get_path(parent, &parent_lpath, &parent_cpath);
+	err = mfs_alloc_dentry_info(dentry);
+	if (err) {
+		ret = ERR_PTR(err);
+		goto out;
+	}
+	/* lookup from lower layer */
+	name = dentry->d_name.name;
+	err = vfs_path_lookup(parent_lpath.dentry,
+			      parent_lpath.mnt,
+			      name, 0, &lpath);
+	if (err) {
+		ret = ERR_PTR(err);
+		mfs_free_dentry_info(dentry);
+		goto out;
+	}
+	/* check from cache layer */
+	err = vfs_path_lookup(parent_cpath.dentry,
+			      parent_cpath.mnt,
+			      name, 0, &cpath);
+	if (err) {
+		if (err != -ENOENT) {
+cdentry_fail:
+			ret = ERR_PTR(err);
+			path_put(&lpath);
+			mfs_free_dentry_info(dentry);
+			goto out;
+		}
+		err = _lookup_create(&lpath, &parent_cpath, name, &cpath);
+		if (err)
+			goto cdentry_fail;
+	}
+	/* build the inode from lower layer */
+	ret = _mfs_get_inode(dentry, dir->i_sb, &lpath, &cpath);
+	if (IS_ERR(ret)) {
+		path_put(&lpath);
+		path_put(&cpath);
+		mfs_free_dentry_info(dentry);
+		goto out;
+	}
+	mfs_install_path(dentry, &lpath, &cpath);
+out:
+	mfs_put_path(&parent_lpath, &parent_cpath);
+	dput(parent);
+	return ret;
+}
+
+static int mfs_getattr(struct mnt_idmap *idmap, const struct path *path,
+		       struct kstat *stat, u32 request_mask,
+		       unsigned int query_flags)
+{
+	struct mfs_inode *vi = MFS_I(d_inode(path->dentry));
+
+	generic_fillattr(idmap, request_mask, vi->lower, stat);
+	return 0;
+}
+
+static const char *mfs_get_link(struct dentry *dentry,
+				struct inode *inode,
+				struct delayed_call *done)
+{
+	struct mfs_sb_info *sbi = MFS_SB(inode->i_sb);
+	struct path lpath, cpath;
+	struct dentry *ldentry;
+	const char *p;
+
+	if (!dentry)
+		return ERR_PTR(-ECHILD);
+
+	mfs_get_path(dentry, &lpath, &cpath);
+	ldentry = lpath.dentry;
+	p = vfs_get_link(ldentry, done);
+	mfs_put_path(&lpath, &cpath);
+
+	if (IS_ERR(p) || p[0] != '/')
+		return p;
+	if (strlen(p) <= strlen(sbi->mtree))
+		return ERR_PTR(-EXDEV);
+	if (strncmp(sbi->mtree, p, strlen(sbi->mtree)) != 0)
+		return ERR_PTR(-EXDEV);
+	p += strlen(sbi->mtree);
+	if (p[0] != '/')
+		return ERR_PTR(-EXDEV);
+	p += 1;
+	return p;
+}
+
+const struct inode_operations mfs_dir_iops = {
+	.lookup		= mfs_lookup,
+	.getattr	= mfs_getattr,
+};
+
+const struct inode_operations mfs_symlink_iops = {
+	.getattr	= mfs_getattr,
+	.get_link	= mfs_get_link,
+};
+
+const struct inode_operations mfs_file_iops = {
+	.getattr	= mfs_getattr,
+};
+
 struct inode *mfs_iget(struct super_block *sb, struct inode *lower_inode,
 			 struct path *cache_path)
 {
@@ -49,6 +260,13 @@ struct inode *mfs_iget(struct super_block *sb, struct inode *lower_inode,
 	inode->i_ino = lower_inode->i_ino;
 	vi->lower = lower_inode;
 	vi->cache = cache_inode;
+
+	if (S_ISDIR(lower_inode->i_mode))
+		inode->i_op = &mfs_dir_iops;
+	else if (S_ISLNK(lower_inode->i_mode))
+		inode->i_op = &mfs_symlink_iops;
+	else
+		inode->i_op = &mfs_file_iops;
 
 	fsstack_copy_attr_all(inode, lower_inode);
 	fsstack_copy_inode_size(inode, lower_inode);
