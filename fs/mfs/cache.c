@@ -5,13 +5,219 @@
 
 #include <linux/anon_inodes.h>
 #include <linux/mfs.h>
+#include <linux/fadvise.h>
+#include <linux/rwsem.h>
+#include <linux/pagemap.h>
 
 /*
  * Used for cache object
  */
 static struct kmem_cache *mfs_cobject_cachep;
 
+static int fd_release(struct inode *inode, struct file *file)
+{
+	struct mfs_cache_object *object = file->private_data;
+
+	down_write(&object->rwsem);
+	if (object->fd > 0) {
+		object->fd = -1;
+		object->anon_file = NULL;
+		iput(object->mfs_inode);
+	}
+	up_write(&object->rwsem);
+	return 0;
+}
+
+static ssize_t fd_write_iter(struct kiocb *iocb, struct iov_iter *iter)
+{
+	struct file *ori_file = iocb->ki_filp;
+	struct mfs_cache_object *object = ori_file->private_data;
+	struct mfs_sb_info *sbi = MFS_SB(object->mfs_inode->i_sb);
+	ssize_t ret;
+
+	if (!test_bit(MFS_CACHE_READY, &sbi->caches.flags))
+		return -EINVAL;
+	if (sbi->mode != MFS_MODE_REMOTE)
+		return -EOPNOTSUPP;
+
+	iocb->ki_filp = object->cache_file;
+	ret = vfs_iocb_iter_write(object->cache_file, iocb, iter);
+	iocb->ki_filp = ori_file;
+	return ret;
+}
+
+static loff_t fd_llseek(struct file *filp, loff_t pos, int whence)
+{
+	struct mfs_cache_object *object = filp->private_data;
+	struct mfs_sb_info *sbi = MFS_SB(object->mfs_inode->i_sb);
+
+	if (!test_bit(MFS_CACHE_READY, &sbi->caches.flags))
+		return -EINVAL;
+	if (sbi->mode != MFS_MODE_REMOTE)
+		return -EOPNOTSUPP;
+
+	return vfs_llseek(object->cache_file, pos, whence);
+}
+
+/* Used for sync events */
+static long _ioc_done(struct mfs_cache_object *object,
+			 struct mfs_ioc_done *done)
+{
+	struct mfs_sb_info *sbi = MFS_SB(object->mfs_inode->i_sb);
+	struct mfs_caches *caches = &sbi->caches;
+	XA_STATE(xas, &caches->events, done->id);
+	struct mfs_syncer *syncer;
+	struct mfs_event *event;
+
+	xas_lock(&xas);
+	event = xas_load(&xas);
+	if (!event || event->object != object) {
+		xa_unlock(&caches->events);
+		return -EINVAL;
+	}
+	xas_store(&xas, NULL);
+	xas_unlock(&xas);
+
+	syncer = event->syncer;
+	if (done->ret)
+		atomic_cmpxchg(&syncer->res, 0, -EIO);
+	spin_lock(&syncer->list_lock);
+	list_del(&event->link);
+	spin_unlock(&syncer->list_lock);
+	if (atomic_dec_return(&syncer->notback) == 0)
+		complete(&syncer->done);
+	put_mfs_event(event);
+	return 0;
+}
+
+static void force_ra(struct address_space *mapping, struct file *file,
+			pgoff_t start, pgoff_t end)
+{
+	unsigned long default_pages = (4 * 1024 * 1024) / PAGE_SIZE;
+	DEFINE_READAHEAD(ractl, file, NULL, mapping, start);
+	pgoff_t index = start;
+	unsigned long nr_to_read;
+
+	nr_to_read = end - start + 1;
+	while (nr_to_read) {
+		if (default_pages > nr_to_read)
+			default_pages = nr_to_read;
+		if (index > end)
+			return;
+		ractl._index = index;
+		page_cache_ra_unbounded(&ractl, default_pages, 0);
+		index += default_pages;
+		nr_to_read -= default_pages;
+	}
+}
+
+/* Used for async events */
+static long _ioc_ra(struct mfs_cache_object *object,
+		      struct mfs_ioc_ra *ra)
+{
+	struct file *file = object->cache_file;
+	struct address_space *mapping = file->f_mapping;
+	struct inode *inode = file_inode(file);
+	loff_t endbyte, isize;
+	pgoff_t start, end;
+
+	isize = i_size_read(inode);
+	if (!isize)
+		return 0;
+	if (ra->off >= isize)
+		return -EINVAL;
+	endbyte = (u64)ra->off + (u64)ra->len;
+	if (!ra->len || endbyte < ra->len)
+		endbyte = LLONG_MAX;
+	else
+		endbyte--;
+	endbyte = min_t(loff_t, endbyte, isize);
+
+	start = ra->off >> PAGE_SHIFT;
+	end = endbyte >> PAGE_SHIFT;
+
+	force_ra(mapping, file, start, end);
+	return 0;
+}
+
+static long fd_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+{
+	struct mfs_cache_object *object = filp->private_data;
+	struct mfs_sb_info *sbi = MFS_SB(object->mfs_inode->i_sb);
+	int ret = 0;
+
+	if (!test_bit(MFS_CACHE_READY, &sbi->caches.flags))
+		return -EINVAL;
+
+	switch (cmd) {
+	case MFS_IOC_DONE:
+	{
+		struct mfs_ioc_done done;
+
+		if (sbi->mode != MFS_MODE_REMOTE)
+			return -EOPNOTSUPP;
+		if (copy_from_user(&done, (void __user *)arg, sizeof(done)))
+			return -EFAULT;
+		ret = _ioc_done(object, &done);
+		break;
+	}
+	case MFS_IOC_RA:
+	{
+		struct mfs_ioc_ra ra;
+
+		if (sbi->mode != MFS_MODE_LOCAL)
+			return -EOPNOTSUPP;
+		if (copy_from_user(&ra, (void __user *)arg, sizeof(ra)))
+			return -EFAULT;
+		ret = _ioc_ra(object, &ra);
+		break;
+	}
+	case MFS_IOC_RPATH:
+	{
+		struct mfs_ioc_rpath __user *ua = (struct mfs_ioc_rpath __user *)arg;
+		struct mfs_ioc_rpath *rpath;
+		int plen, clen;
+		u32 bytes;
+		char *p;
+
+		if (get_user(bytes, &ua->max))
+			return -EFAULT;
+		rpath = kzalloc(bytes + sizeof(struct mfs_ioc_rpath), GFP_KERNEL);
+		if (!rpath)
+			return -ENOMEM;
+
+		rpath->max = bytes;
+		p = file_path(object->cache_file, rpath->d, rpath->max);
+		if (IS_ERR(p)) {
+			kfree(rpath);
+			return PTR_ERR(p);
+		}
+		plen = strlen(p), clen = strlen(sbi->cachedir);
+		if (plen <= clen) {
+			kfree(rpath);
+			return -EFAULT;
+		}
+		rpath->len = plen - clen;
+		/* include the tailing nil */
+		memmove(rpath->d, p + clen, rpath->len + 1);
+		if (copy_to_user((void __user *)arg, rpath,
+				  rpath->len + 1 + sizeof(struct mfs_ioc_rpath)))
+			ret = -EFAULT;
+		kfree(rpath);
+		break;
+	}
+	default:
+		return -EINVAL;
+	}
+	return ret;
+}
+
 static const struct file_operations mfs_fd_fops = {
+	.owner		= THIS_MODULE,
+	.release	= fd_release,
+	.write_iter	= fd_write_iter,
+	.llseek		= fd_llseek,
+	.unlocked_ioctl = fd_ioctl,
 };
 
 static int mfs_setup_object(struct mfs_cache_object *object,
