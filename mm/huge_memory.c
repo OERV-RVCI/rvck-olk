@@ -603,6 +603,22 @@ static ssize_t thp_mapping_align_store(struct kobject *kobj,
 static struct kobj_attribute thp_mapping_align_attr =
 	__ATTR_RW(thp_mapping_align);
 
+static ssize_t zero_page_full_cow_show(struct kobject *kobj,
+		struct kobj_attribute *attr, char *buf)
+{
+	return single_hugepage_flag_show(kobj, attr, buf,
+			TRANSPARENT_HUGEPAGE_ZERO_PAGE_FULL_COW_FLAG);
+}
+static ssize_t zero_page_full_cow_store(struct kobject *kobj,
+		struct kobj_attribute *attr, const char *buf, size_t count)
+{
+	return single_hugepage_flag_store(kobj, attr, buf, count,
+			TRANSPARENT_HUGEPAGE_ZERO_PAGE_FULL_COW_FLAG);
+}
+
+static struct kobj_attribute zero_page_full_cow_attr =
+	__ATTR_RW(zero_page_full_cow);
+
 static struct attribute *hugepage_attr[] = {
 	&enabled_attr.attr,
 	&defrag_attr.attr,
@@ -615,6 +631,7 @@ static struct attribute *hugepage_attr[] = {
 	&file_enabled_attr.attr,
 	&thp_exec_enabled_attr.attr,
 	&thp_mapping_align_attr.attr,
+	&zero_page_full_cow_attr.attr,
 	NULL,
 };
 
@@ -2013,6 +2030,10 @@ static vm_fault_t do_huge_zero_wp_pmd(struct vm_fault *vmf)
 	struct mmu_notifier_range range;
 	struct folio *folio;
 	vm_fault_t ret = 0;
+
+	if (!test_bit(TRANSPARENT_HUGEPAGE_ZERO_PAGE_FULL_COW_FLAG,
+		      &transparent_hugepage_flags))
+		return VM_FAULT_FALLBACK;
 
 	folio = vma_alloc_anon_folio_pmd(vma, vmf->address);
 	if (unlikely(!folio))
