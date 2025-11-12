@@ -208,7 +208,11 @@ struct request {
 	KABI_RESERVE(4)
 	KABI_RESERVE(5)
 #endif
+#ifdef CONFIG_BLK_CGROUP_IOINFLIGHT
+	KABI_USE(6, struct blkcg_gq *blkg)
+#else
 	KABI_RESERVE(6)
+#endif
 	KABI_RESERVE(7)
 	KABI_RESERVE(8)
 };

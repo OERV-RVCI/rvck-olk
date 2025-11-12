@@ -789,7 +789,7 @@ void blk_mq_debugfs_unregister_sched(struct request_queue *q)
 	q->sched_debugfs_dir = NULL;
 }
 
-static const char *rq_qos_id_to_name(enum rq_qos_id id)
+static const char *rq_qos_id_to_name(u32 id)
 {
 	switch (id) {
 	case RQ_QOS_WBT:
@@ -798,6 +798,8 @@ static const char *rq_qos_id_to_name(enum rq_qos_id id)
 		return "latency";
 	case RQ_QOS_COST:
 		return "cost";
+	case RQ_QOS_INFLIGHT:
+		return "inflight";
 	}
 	return "unknown";
 }

@@ -304,7 +304,7 @@ void rq_qos_exit(struct request_queue *q)
 	mutex_unlock(&q->rq_qos_mutex);
 }
 
-int rq_qos_add(struct rq_qos *rqos, struct gendisk *disk, enum rq_qos_id id,
+int rq_qos_add(struct rq_qos *rqos, struct gendisk *disk, u32 id,
 		const struct rq_qos_ops *ops)
 {
 	struct request_queue *q = disk->queue;
