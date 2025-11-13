@@ -4215,6 +4215,7 @@ void vma_pgtable_walk_end(struct vm_area_struct *vma);
 enum reclaim_reason {
 	RR_KSWAPD,
 	RR_DIRECT_RECLAIM,
+	RR_HUGEPAGE_RECLAIM,
 	RR_TYPES
 };
 
