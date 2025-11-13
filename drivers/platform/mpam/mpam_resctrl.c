@@ -686,7 +686,7 @@ static u16 percent_to_mbw_max(u32 pc, u8 wd)
 static u16 percent_to_ca_max(u32 pc, u8 wd)
 {
 	struct rdt_resource *l3 = resctrl_arch_get_resource(RDT_RESOURCE_L3);
-	u32 valid_max;
+	u32 valid_max, ca_max;
 
 	if (read_cpuid_implementor() != ARM_CPU_IMP_HISI)
 		return percent_to_mbw_max(pc, wd);
@@ -698,7 +698,8 @@ static u16 percent_to_ca_max(u32 pc, u8 wd)
 	if (pc >= MAX_MBA_BW)
 		return valid_max << (16 - wd);
 
-	return ((pc * valid_max + 50) / 100) << (16 - wd);
+	ca_max = DIV_ROUND_UP(pc * valid_max, 100);
+	return ca_max << (16 - wd);
 }
 
 static u16 ca_max_to_percent(u16 ca_max, u8 wd)
@@ -717,7 +718,7 @@ static u16 ca_max_to_percent(u16 ca_max, u8 wd)
 	if (ca_max >= valid_max)
 		return MAX_MBA_BW;
 
-	return (ca_max * 100 + valid_max / 2) / valid_max;
+	return (ca_max * 100) / valid_max;
 }
 
 /* Test whether we can export MPAM_CLASS_CACHE:{2,3}? */
@@ -1321,6 +1322,26 @@ u32 resctrl_arch_get_config(struct rdt_resource *r, struct rdt_domain *d,
 	}
 }
 
+static bool mpam_cpbm_hisi_check_invalid(struct rdt_resource *r,
+					 unsigned long val)
+{
+	static const struct midr_range cpus[] = {
+		MIDR_ALL_VERSIONS(MIDR_HISI_HIP12),
+		{ /* sentinel */ }
+	};
+
+	if (!is_midr_in_range_list(cpus))
+		return false;
+
+	if (r->cache_level != 3)
+		return false;
+
+	if (val & ~(BIT(18) | BIT(17)))
+		return false;
+
+	return true;
+}
+
 int resctrl_arch_update_one(struct rdt_resource *r, struct rdt_domain *d,
 			    u32 closid, enum resctrl_conf_type t, u32 cfg_val)
 {
@@ -1348,6 +1369,9 @@ int resctrl_arch_update_one(struct rdt_resource *r, struct rdt_domain *d,
 	switch (r->rid) {
 	case RDT_RESOURCE_L2:
 	case RDT_RESOURCE_L3:
+		if (mpam_cpbm_hisi_check_invalid(r, cfg_val))
+			return -EINVAL;
+
 		/* TODO: Scaling is not yet supported */
 		cfg.cpbm = cfg_val;
 		mpam_set_feature(mpam_feat_cpor_part, &cfg);
