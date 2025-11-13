@@ -3501,7 +3501,8 @@ check_alloc_wmark:
 			    !zone_allows_reclaim(ac->preferred_zoneref->zone, zone))
 				continue;
 
-			ret = node_reclaim(zone->zone_pgdat, gfp_mask, order);
+			ret = node_reclaim(zone->zone_pgdat, gfp_mask, order,
+					   alloc_flags, zone);
 			switch (ret) {
 			case NODE_RECLAIM_NOSCAN:
 				/* did not scan */

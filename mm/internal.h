@@ -1077,11 +1077,12 @@ static inline void mminit_verify_zonelist(void)
 #define NODE_RECLAIM_SUCCESS	1
 
 #ifdef CONFIG_NUMA
-extern int node_reclaim(struct pglist_data *, gfp_t, unsigned int);
+int node_reclaim(struct pglist_data *pgdat, gfp_t mask, unsigned int order,
+		 int alloc_flags, struct zone *zone);
 extern int find_next_best_node(int node, nodemask_t *used_node_mask);
 #else
 static inline int node_reclaim(struct pglist_data *pgdat, gfp_t mask,
-				unsigned int order)
+		unsigned int order, int alloc_flags, struct zone *zone)
 {
 	return NODE_RECLAIM_NOSCAN;
 }
