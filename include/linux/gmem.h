@@ -217,6 +217,8 @@ struct gm_page {
 /* For driver to add device pages */
 int gm_add_pages(unsigned int hnid, struct list_head *pages);
 struct gm_page *alloc_gm_page_struct(void);
+enum gm_ret gm_dev_fault(struct mm_struct *mm, unsigned long addr,
+				struct gm_dev *dev, int behavior);
 
 #endif /* CONFIG_GMEM */
 
