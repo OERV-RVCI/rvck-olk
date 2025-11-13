@@ -102,6 +102,7 @@ struct kvm_userspace_memory_region {
  */
 #define KVM_MEM_LOG_DIRTY_PAGES	(1UL << 0)
 #define KVM_MEM_READONLY	(1UL << 1)
+#define KVM_MEM_HUGE_POD	(1UL << 9)
 
 /* for KVM_IRQ_LINE */
 struct kvm_irq_level {
@@ -1567,6 +1568,8 @@ struct kvm_user_data {
 	__u64 ram_size;
 	struct kvm_numa_info numa_info;
 };
+
+#define KVM_POD_TOUCHED_LOG       _IO(KVMIO,  0xfe)
 
 /* enable ucontrol for s390 */
 struct kvm_s390_ucas_mapping {

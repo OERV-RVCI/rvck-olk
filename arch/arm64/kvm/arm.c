@@ -2093,6 +2093,9 @@ int kvm_arch_vm_ioctl(struct file *filp, unsigned int ioctl, unsigned long arg)
 
 		return kvm_vm_set_attr(kvm, &attr);
 	}
+	case KVM_POD_TOUCHED_LOG: {
+		return kvm_mmu_mark_touched_log(kvm);
+	}
 #ifdef CONFIG_VIRT_PLAT_DEV
 	case KVM_CREATE_SHADOW_DEV: {
 		struct kvm_master_dev_info *mdi;
