@@ -2447,6 +2447,8 @@ static inline void kvm_handle_signal_exit(struct kvm_vcpu *vcpu)
 }
 #endif /* CONFIG_KVM_XFER_TO_GUEST_WORK */
 
+int kvm_mmu_mark_touched_log(struct kvm *kvm);
+
 #ifdef CONFIG_HAVE_KVM_PINNED_VMID
 int kvm_pinned_vmid_get(struct kvm *kvm);
 void kvm_pinned_vmid_put(struct kvm *kvm);
