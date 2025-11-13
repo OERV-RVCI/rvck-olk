@@ -30,6 +30,7 @@ enum migrate_reason {
 	MR_LONGTERM_PIN,
 	MR_DEMOTION,
 	MR_DAMON_DEMOTION,
+	MR_HOTNESS,
 	MR_TYPES
 };
 
