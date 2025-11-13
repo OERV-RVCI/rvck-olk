@@ -7550,7 +7550,8 @@ int node_reclaim(struct pglist_data *pgdat, gfp_t gfp_mask, unsigned int order,
 	if (test_and_set_bit(PGDAT_RECLAIM_LOCKED, &pgdat->flags))
 		return NODE_RECLAIM_NOSCAN;
 
-	if (alloc_flags & ALLOC_KSWAPD)
+	if ((node_reclaim_mode & RECLAIM_KSWAPD) &&
+	    (alloc_flags & ALLOC_KSWAPD))
 		wakeup_kswapd(zone, gfp_mask, order, gfp_zone(gfp_mask));
 
 	ret = __node_reclaim(pgdat, gfp_mask, order);
