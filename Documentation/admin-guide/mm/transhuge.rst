@@ -203,6 +203,13 @@ page by writing 0 or enable it back by writing 1::
 	echo 0 >/sys/kernel/mm/transparent_hugepage/use_zero_page
 	echo 1 >/sys/kernel/mm/transparent_hugepage/use_zero_page
 
+By default kernel disable zero page full CoW. When it's enabled, kernel
+will try to allocate PMD page for PMD-mappable zero anonymous mapping on
+WP mode. We can enable it by writing 1 or disable it back by writing 0::
+
+	echo 0 >/sys/kernel/mm/transparent_hugepage/zero_page_full_cow
+	echo 1 >/sys/kernel/mm/transparent_hugepage/zero_page_full_cow
+
 Some userspace (such as a test program, or an optimized memory
 allocation library) may want to know the size (in bytes) of a
 PMD-mappable transparent hugepage::
