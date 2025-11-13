@@ -7762,6 +7762,16 @@ F:	Documentation/filesystems/erofs.rst
 F:	fs/erofs/
 F:	include/trace/events/erofs.h
 
+MFS FILE SYSTEM
+M:	Hongbo Li <lihongbo22@huawei.com>
+M:	Xiaojia Huang <huangxiaojia2@huawei.com>
+L:	linux-fsdevel@vger.kernel.org
+S:	Maintained
+F:	Documentation/filesystems/mfs.rst
+F:	fs/mfs/
+F:	include/trace/events/mfs.h
+F:	include/uapi/linux/mfs.h
+
 ERRSEQ ERROR TRACKING INFRASTRUCTURE
 M:	Jeff Layton <jlayton@kernel.org>
 S:	Maintained
