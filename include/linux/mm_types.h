@@ -1006,7 +1006,7 @@ struct mm_struct {
 		/* total used reliable pages */
 		atomic_long_t reliable_nr_page;
 #endif
-#if IS_ENABLED(CONFIG_ETMEM) && IS_ENABLED(CONFIG_KVM)
+#if IS_ENABLED(CONFIG_KVM)
 		struct kvm *kvm;
 #endif
 	} __randomize_layout;
