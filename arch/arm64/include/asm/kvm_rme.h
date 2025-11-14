@@ -114,7 +114,8 @@ int _handle_rec_exit(struct kvm_vcpu *vcpu, int rec_run_status);
 void kvm_realm_unmap_range(struct kvm *kvm,
 			   unsigned long ipa,
 			   unsigned long size,
-			   bool unmap_private);
+			   bool unmap_private,
+			   bool may_block);
 int realm_map_protected(struct realm *realm,
 			unsigned long base_ipa,
 			kvm_pfn_t pfn,
