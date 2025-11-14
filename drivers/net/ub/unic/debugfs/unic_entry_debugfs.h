@@ -8,9 +8,12 @@
 #define __UNIC_ENTRY_DEBUGFS_H__
 
 #include <linux/in6.h>
+#include <linux/if_ether.h>
 #include <ub/ubase/ubase_comm_debugfs.h>
 
-#include "unic_comm_addr.h"
+#ifndef UBL_ALEN
+#define UBL_ALEN 16
+#endif
 
 #define UNIC_BITMAP_LEN		8
 #define UNIC_DBG_MAC_NUM	16
