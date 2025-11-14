@@ -2138,7 +2138,7 @@ struct folio *alloc_migration_target(struct folio *src, unsigned long private)
  * @get_new_folio:	The function used to allocate free folios to be used
  *			as the target of the folio migration.
  * @put_new_folio:	The function used to free target folios if migration
- *			fails, or NULL if no special handing is necessary.
+ *			fails, or NULL if no special handling is necessary.
  * @private:		Private data to be passed on to get_new_folio()
  * @mode:		The migration mode that specifies the constraints for
  *			folio migration, if any.

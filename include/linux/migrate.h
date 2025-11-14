@@ -98,7 +98,7 @@ static inline struct folio *alloc_migration_target(struct folio *src,
 static inline int isolate_and_migrate_folios(struct folio **folios, unsigned int nr_folios,
 		new_folio_t get_new_folio, free_folio_t put_new_folio,
 		unsigned long private, enum migrate_mode mode,
-		unsigned int *nr_succeeded);
+		unsigned int *nr_succeeded)
 	{ return -EINVAL; }
 static inline bool isolate_movable_page(struct page *page, isolate_mode_t mode)
 	{ return false; }
