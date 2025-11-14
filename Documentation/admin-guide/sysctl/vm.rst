@@ -1035,6 +1035,7 @@ This is value OR'ed together of
 1	Zone reclaim on
 2	Zone reclaim writes dirty pages out
 4	Zone reclaim swaps pages
+8       Zone reclaim wakeup kswapd
 =	===================================
 
 zone_reclaim_mode is disabled by default.  For file servers or workloads

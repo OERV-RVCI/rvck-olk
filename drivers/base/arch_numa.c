@@ -190,8 +190,27 @@ void __init setup_per_cpu_areas(void)
 }
 #endif
 
-#ifdef CONFIG_ARCH_CUSTOM_NUMA_DISTANCE
 #define DISTANCE_MAX		(1 << DISTANCE_BITS)
+int __init node_reclaim_distance_setup(char *str)
+{
+	int val;
+
+	if (kstrtoint(str, 0, &val))
+		return -EINVAL;
+
+	if (val < LOCAL_DISTANCE || val >= DISTANCE_MAX)
+		return -EINVAL;
+
+	if (val != RECLAIM_DISTANCE) {
+		node_reclaim_distance = val;
+		pr_info("Force set node_reclaim_distance to %d\n", val);
+	}
+
+	return 0;
+}
+early_param("node_reclaim_distance", node_reclaim_distance_setup);
+
+#ifdef CONFIG_ARCH_CUSTOM_NUMA_DISTANCE
 static void get_numa_distance_info(int *numa_levels, int *max_distance)
 {
 	DECLARE_BITMAP(distance_map, DISTANCE_MAX);
@@ -221,25 +240,6 @@ static void get_numa_distance_info(int *numa_levels, int *max_distance)
 	if (max_distance)
 		*max_distance = max;
 }
-
-static int __init node_reclaim_distance_setup(char *str)
-{
-	int val;
-
-	if (kstrtoint(str, 0, &val))
-		return -EINVAL;
-
-	if (val < LOCAL_DISTANCE || val >= DISTANCE_MAX)
-		return -EINVAL;
-
-	if (val != RECLAIM_DISTANCE) {
-		node_reclaim_distance = val;
-		pr_info("Force set node_reclaim_distance to %d\n", val);
-	}
-
-	return 0;
-}
-early_param("node_reclaim_distance", node_reclaim_distance_setup);
 
 static void __init node_reclaim_distance_adjust(void)
 {
