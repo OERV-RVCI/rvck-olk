@@ -24153,6 +24153,7 @@ F:      drivers/net/ethernet/mucse/
 ZCOPY DRIVER
 M:	Mingrui Liu <liumingrui@huawei.com>
 S:	Maintained
+F:	Documentation/misc-devices/zcopy.rst
 F:	drivers/misc/zcopy/
 F:	include/trace/events/attach.h
 
