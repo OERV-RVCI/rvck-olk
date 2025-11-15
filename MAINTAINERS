@@ -24150,6 +24150,11 @@ M:      Yibo Dong <dong100@mucse.com>
 S:      Maintained
 F:      drivers/net/ethernet/mucse/
 
+ZCOPY DRIVER
+M:	Mingrui Liu <liumingrui@huawei.com>
+S:	Maintained
+F:	drivers/misc/zcopy/
+
 THE REST
 M:	Linus Torvalds <torvalds@linux-foundation.org>
 L:	linux-kernel@vger.kernel.org
