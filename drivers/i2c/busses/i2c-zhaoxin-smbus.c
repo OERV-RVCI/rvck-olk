@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * Zhaoxin SMBus controller driver
+ *  i2c-zhaoxin-smbus.c - Zhaoxin SMBus controller driver
  *
- * Copyright(c) 2023 Shanghai Zhaoxin Semiconductor Corporation.
- * All rights reserved.
+ *  Copyright(c) 2023 Shanghai Zhaoxin Semiconductor Corporation.
+ *                    All rights reserved.
  */
 
 #include <linux/acpi.h>
@@ -15,7 +15,7 @@
 #include <linux/module.h>
 #include <linux/platform_device.h>
 
-#define DRIVER_VERSION "3.1.0"
+#define DRIVER_VERSION "3.4.0"
 
 #define ZXSMB_NAME "smbus_zhaoxin"
 
@@ -23,40 +23,40 @@
  * registers
  */
 /* SMBus MMIO address offsets */
-#define ZXSMB_STS		0x00
-#define   ZXSMB_BUSY            BIT(0)
-#define   ZXSMB_CMD_CMPLET      BIT(1)
-#define   ZXSMB_DEV_ERR         BIT(2)
-#define   ZXSMB_BUS_CLSI        BIT(3)
-#define   ZXSMB_FAIL_TRANS      BIT(4)
-#define   ZXSMB_STS_MASK        GENMASK(4, 0)
-#define   ZXSMB_NSMBSRST        BIT(5)
-#define ZXSMB_CTL		0x02
-#define   ZXSMB_CMPLT_EN        BIT(0)
-#define   ZXSMB_KILL_PRG        BIT(1)
-#define   ZXSMB_START           BIT(6)
-#define   ZXSMB_PEC_EN          BIT(7)
-#define ZXSMB_CMD		0x03
-#define ZXSMB_ADD		0x04
-#define ZXSMB_DAT0		0x05
-#define ZXSMB_DAT1		0x06
-#define ZXSMB_BLKDAT		0x07
+#define ZXSMB_STS 0x00
+#define ZXSMB_BUSY BIT(0)
+#define ZXSMB_CMD_CMPLET BIT(1)
+#define ZXSMB_DEV_ERR BIT(2)
+#define ZXSMB_BUS_CLSI BIT(3)
+#define ZXSMB_FAIL_TRANS BIT(4)
+#define ZXSMB_STS_MASK GENMASK(4, 0)
+#define ZXSMB_NSMBSRST BIT(5)
+#define ZXSMB_CTL 0x02
+#define ZXSMB_CMPLT_EN BIT(0)
+#define ZXSMB_KILL_PRG BIT(1)
+#define ZXSMB_START BIT(6)
+#define ZXSMB_PEC_EN BIT(7)
+#define ZXSMB_CMD 0x03
+#define ZXSMB_ADD 0x04
+#define ZXSMB_DAT0 0x05
+#define ZXSMB_DAT1 0x06
+#define ZXSMB_BLKDAT 0x07
 
 /*
  * platform related information
  */
- /* protocol cmd constants */
-#define ZXSMB_QUICK		0x00
-#define ZXSMB_BYTE		0x04
-#define ZXSMB_BYTE_DATA		0x08
-#define ZXSMB_WORD_DATA		0x0C
-#define ZXSMB_PROC_CALL		0x10
-#define ZXSMB_BLOCK_DATA	0x14
-#define ZXSMB_I2C_10_BIT_ADDR	0x18
-#define ZXSMB_I2C_PROC_CALL	0x30
-#define ZXSMB_I2C_BLOCK_DATA	0x34
-#define ZXSMB_I2C_7_BIT_ADDR	0x38
-#define ZXSMB_UNIVERSAL		0x3C
+/* protocol cmd constants */
+#define ZXSMB_QUICK 0x00
+#define ZXSMB_BYTE 0x04
+#define ZXSMB_BYTE_DATA 0x08
+#define ZXSMB_WORD_DATA 0x0C
+#define ZXSMB_PROC_CALL 0x10
+#define ZXSMB_BLOCK_DATA 0x14
+#define ZXSMB_I2C_10_BIT_ADDR 0x18
+#define ZXSMB_I2C_PROC_CALL 0x30
+#define ZXSMB_I2C_BLOCK_DATA 0x34
+#define ZXSMB_I2C_7_BIT_ADDR 0x38
+#define ZXSMB_UNIVERSAL 0x3C
 
 #define ZXSMB_TIMEOUT 500
 
@@ -74,11 +74,13 @@ struct zxsmb {
 static irqreturn_t zxsmb_irq_handle(int irq, void *dev_id)
 {
 	struct zxsmb *smb = (struct zxsmb *)dev_id;
+	u8 status;
 
-	smb->status = inb(smb->base + ZXSMB_STS);
-	if ((smb->status & ZXSMB_STS_MASK) == 0)
+	status = inb(smb->base + ZXSMB_STS);
+	if ((status & ZXSMB_STS_MASK) == 0 || (status & ZXSMB_BUSY))
 		return IRQ_NONE;
 
+	smb->status = status;
 	/* clear status */
 	outb(smb->status, smb->base + ZXSMB_STS);
 	complete(&smb->complete);
@@ -138,7 +140,14 @@ static int zxsmb_wait_polling_finish(struct zxsmb *smb)
 	} while ((status & ZXSMB_BUSY) && (--time_left));
 
 	if (time_left == 0) {
-		dev_dbg(smb->dev, "polling timeout\n");
+		if (status & ZXSMB_BUSY) {
+			/* kill process and try again */
+			outb(ZXSMB_KILL_PRG, smb->base + ZXSMB_CTL);
+			outb(status, smb->base + ZXSMB_STS);
+			dev_err(smb->dev, "timeout and Bus still busy\n");
+			return -EAGAIN;
+		}
+		dev_err(smb->dev, "polling timeout\n");
 		return -EIO;
 	}
 
@@ -179,7 +188,6 @@ static int zxsmb_trans_start(struct zxsmb *smb)
 	reinit_completion(&smb->complete);
 	smb->status = 0;
 	outb(tmp, base + ZXSMB_CTL);
-
 	return 0;
 }
 
@@ -197,7 +205,6 @@ static int zxsmb_transaction(struct zxsmb *smb)
 		err = zxsmb_wait_polling_finish(smb);
 
 	outb(0, smb->base + ZXSMB_CTL);
-
 	return err;
 }
 
@@ -239,14 +246,11 @@ static int zxsmb_smbus_xfer(struct i2c_adapter *adap, u16 addr, u16 flags, char 
 	case I2C_SMBUS_I2C_BLOCK_DATA:
 	case I2C_SMBUS_BLOCK_DATA:
 		len = data->block[0];
-		if (read && size == I2C_SMBUS_I2C_BLOCK_DATA)
-			outb(len, base + ZXSMB_DAT1);
+		outb(len, base + ZXSMB_DAT0);
 		outb(command, base + ZXSMB_CMD);
 		/* Reset ZXSMB_BLKDAT */
 		inb(base + ZXSMB_CTL);
 		if (!read) {
-			outb(len, base + ZXSMB_DAT0);
-			outb(0, base + ZXSMB_DAT1);
 			for (i = 1; i <= len; i++)
 				outb(data->block[i], base + ZXSMB_BLKDAT);
 		}
@@ -280,6 +284,11 @@ prepare_read:
 		data->word = inb(base + ZXSMB_DAT0) + (inb(base + ZXSMB_DAT1) << 8);
 		break;
 	case ZXSMB_I2C_BLOCK_DATA:
+		inb(base + ZXSMB_CTL);
+		data->block[0] = len;
+		for (i = 1; i <= len; i++)
+			data->block[i] = inb(base + ZXSMB_BLKDAT);
+		break;
 	case ZXSMB_BLOCK_DATA:
 		data->block[0] = inb(base + ZXSMB_DAT0);
 		if (data->block[0] > I2C_SMBUS_BLOCK_MAX)
@@ -300,12 +309,12 @@ exit_unsupported:
 
 static u32 zxsmb_func(struct i2c_adapter *adapter)
 {
-	return I2C_FUNC_SMBUS_EMUL;
+	return I2C_FUNC_SMBUS_EMUL | I2C_FUNC_SMBUS_READ_BLOCK_DATA;
 }
 
 static const struct i2c_algorithm smbus_algorithm = {
 	.smbus_xfer = zxsmb_smbus_xfer,
-	.functionality  = zxsmb_func,
+	.functionality = zxsmb_func,
 };
 
 static int zxsmb_probe(struct platform_device *pdev)
@@ -313,6 +322,7 @@ static int zxsmb_probe(struct platform_device *pdev)
 	struct zxsmb *smb;
 	struct resource *res;
 	struct i2c_adapter *adap;
+	int err;
 
 	smb = devm_kzalloc(&pdev->dev, sizeof(*smb), GFP_KERNEL);
 	if (!smb)
@@ -328,9 +338,8 @@ static int zxsmb_probe(struct platform_device *pdev)
 	}
 
 	smb->irq = platform_get_irq(pdev, 0);
-	if (smb->irq < 0 ||
-	    devm_request_irq(&pdev->dev, smb->irq, zxsmb_irq_handle, IRQF_SHARED, pdev->name,
-			     smb)) {
+	if (smb->irq < 0 || devm_request_irq(&pdev->dev, smb->irq, zxsmb_irq_handle, IRQF_SHARED,
+					     pdev->name, smb)) {
 		dev_warn(&pdev->dev, "failed to request irq %d\n", smb->irq);
 		smb->irq = 0;
 	} else {
@@ -350,7 +359,13 @@ static int zxsmb_probe(struct platform_device *pdev)
 		 dev_name(smb->dev));
 	i2c_set_adapdata(&smb->adap, smb);
 
-	return i2c_add_adapter(&smb->adap);
+	err = i2c_add_adapter(&smb->adap);
+	if (err)
+		return err;
+
+	dev_info(smb->dev, "adapter /dev/i2c-%d registered. version %s\n", adap->nr,
+		 DRIVER_VERSION);
+	return 0;
 }
 
 static int zxsmb_remove(struct platform_device *pdev)
@@ -375,13 +390,13 @@ static struct platform_driver zxsmb_driver = {
 	.remove = zxsmb_remove,
 	.driver = {
 		.name = ZXSMB_NAME,
-		.acpi_match_table = ACPI_PTR(zxsmb_acpi_match),
+		.acpi_match_table = zxsmb_acpi_match,
 	},
 };
 
 module_platform_driver(zxsmb_driver);
 
 MODULE_AUTHOR("hanshu@zhaoxin.com");
-MODULE_DESCRIPTION("Zhaoxin SMBus driver");
+MODULE_DESCRIPTION("ZHAOXIN SMBus driver");
 MODULE_VERSION(DRIVER_VERSION);
 MODULE_LICENSE("GPL");

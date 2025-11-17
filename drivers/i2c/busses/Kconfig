@@ -1373,6 +1373,7 @@ config I2C_VIPERBOARD
 config I2C_ZHAOXIN_SMBUS
 	tristate "Zhaoxin SMBus Interface"
 	depends on (PCI && (CPU_SUP_CENTAUR || CPU_SUP_ZHAOXIN)) || COMPILE_TEST
+	default m
 	help
 	  If you say yes to this option, support will be included for the
 	  ZHAOXIN SMBus interface
