@@ -4,6 +4,8 @@
 #define pr_fmt(fmt) "CDMA: " fmt
 #define dev_fmt pr_fmt
 
+#include <linux/list.h>
+#include <linux/rwsem.h>
 #include "cdma_segment.h"
 #include "cdma_dev.h"
 #include "cdma_cmd.h"
@@ -11,7 +13,12 @@
 #include "cdma_queue.h"
 #include "cdma_jfc.h"
 #include "cdma.h"
+#include "cdma_handle.h"
 #include <ub/cdma/cdma_api.h>
+
+LIST_HEAD(g_client_list);
+DECLARE_RWSEM(g_clients_rwsem);
+DECLARE_RWSEM(g_device_rwsem);
 
 struct dma_device *dma_get_device_list(u32 *num_devices)
 {
@@ -437,6 +444,166 @@ void dma_unimport_seg(struct dma_seg *dma_seg)
 }
 EXPORT_SYMBOL_GPL(dma_unimport_seg);
 
+static int cdma_param_transfer(struct dma_device *dma_dev, int queue_id,
+			       struct cdma_dev **cdev,
+			       struct cdma_queue **cdma_queue)
+{
+	struct cdma_queue *tmp_q;
+	struct cdma_dev *tmp_dev;
+	u32 eid;
+
+	eid = dma_dev->attr.eid.dw0;
+	tmp_dev = get_cdma_dev_by_eid(eid);
+	if (!tmp_dev) {
+		pr_err("get cdma dev failed, eid = 0x%x.\n", eid);
+		return -EINVAL;
+	}
+
+	if (tmp_dev->status == CDMA_SUSPEND) {
+		pr_warn("cdma device is not prepared, eid = 0x%x.\n", eid);
+		return -EINVAL;
+	}
+
+	tmp_q = cdma_find_queue(tmp_dev, queue_id);
+	if (!tmp_q) {
+		dev_err(tmp_dev->dev, "get resource failed.\n");
+		return -EINVAL;
+	}
+
+	if (!tmp_q->tp || !tmp_q->jfs || !tmp_q->jfc) {
+		dev_err(tmp_dev->dev, "get jetty parameters failed.\n");
+		return -EFAULT;
+	}
+
+	*cdev = tmp_dev;
+	*cdma_queue = tmp_q;
+
+	return 0;
+}
+
+enum dma_status dma_write(struct dma_device *dma_dev, struct dma_seg *rmt_seg,
+			  struct dma_seg *local_seg, int queue_id)
+{
+	struct cdma_queue *cdma_queue = NULL;
+	struct cdma_dev *cdev = NULL;
+	int ret;
+
+	if (!dma_dev || !rmt_seg || !local_seg) {
+		pr_err("write input parameters error.\n");
+		return DMA_STATUS_INVAL;
+	}
+
+	ret = cdma_param_transfer(dma_dev, queue_id, &cdev, &cdma_queue);
+	if (ret)
+		return DMA_STATUS_INVAL;
+
+	ret = cdma_write(cdev, cdma_queue, local_seg, rmt_seg, NULL);
+	if (ret)
+		return DMA_STATUS_INVAL;
+
+	return DMA_STATUS_OK;
+}
+EXPORT_SYMBOL_GPL(dma_write);
+
+enum dma_status dma_write_with_notify(struct dma_device *dma_dev,
+				      struct dma_seg *rmt_seg,
+				      struct dma_seg *local_seg, int queue_id,
+				      struct dma_notify_data *data)
+{
+	struct cdma_queue *cdma_queue = NULL;
+	struct cdma_dev *cdev = NULL;
+	int ret;
+
+	if (!dma_dev || !rmt_seg || !local_seg || !data || !data->notify_seg) {
+		pr_err("write with notify input parameters error.\n");
+		return DMA_STATUS_INVAL;
+	}
+
+	ret = cdma_param_transfer(dma_dev, queue_id, &cdev, &cdma_queue);
+	if (ret)
+		return DMA_STATUS_INVAL;
+
+	ret = cdma_write(cdev, cdma_queue, local_seg, rmt_seg, data);
+	if (ret)
+		return DMA_STATUS_INVAL;
+
+	return DMA_STATUS_OK;
+}
+EXPORT_SYMBOL_GPL(dma_write_with_notify);
+
+enum dma_status dma_read(struct dma_device *dma_dev, struct dma_seg *rmt_seg,
+			 struct dma_seg *local_seg, int queue_id)
+{
+	struct cdma_queue *cdma_queue = NULL;
+	struct cdma_dev *cdev = NULL;
+	int ret;
+
+	if (!dma_dev || !rmt_seg || !local_seg) {
+		pr_err("read input parameters error.\n");
+		return DMA_STATUS_INVAL;
+	}
+
+	ret = cdma_param_transfer(dma_dev, queue_id, &cdev, &cdma_queue);
+	if (ret)
+		return DMA_STATUS_INVAL;
+
+	ret = cdma_read(cdev, cdma_queue, local_seg, rmt_seg);
+	if (ret)
+		return DMA_STATUS_INVAL;
+
+	return DMA_STATUS_OK;
+}
+EXPORT_SYMBOL_GPL(dma_read);
+
+enum dma_status dma_cas(struct dma_device *dma_dev, struct dma_seg *rmt_seg,
+			struct dma_seg *local_seg, int queue_id,
+			struct dma_cas_data *data)
+{
+	struct cdma_queue *cdma_queue = NULL;
+	struct cdma_dev *cdev = NULL;
+	int ret;
+
+	if (!dma_dev || !rmt_seg || !local_seg || !data) {
+		pr_err("cas input parameters error.\n");
+		return DMA_STATUS_INVAL;
+	}
+
+	ret = cdma_param_transfer(dma_dev, queue_id, &cdev, &cdma_queue);
+	if (ret)
+		return DMA_STATUS_INVAL;
+
+	ret = cdma_cas(cdev, cdma_queue, local_seg, rmt_seg, data);
+	if (ret)
+		return DMA_STATUS_INVAL;
+
+	return DMA_STATUS_OK;
+}
+EXPORT_SYMBOL_GPL(dma_cas);
+
+enum dma_status dma_faa(struct dma_device *dma_dev, struct dma_seg *rmt_seg,
+			struct dma_seg *local_seg, int queue_id, u64 add)
+{
+	struct cdma_queue *cdma_queue = NULL;
+	struct cdma_dev *cdev = NULL;
+	int ret;
+
+	if (!dma_dev || !rmt_seg || !local_seg) {
+		pr_err("faa input parameters error.\n");
+		return DMA_STATUS_INVAL;
+	}
+
+	ret = cdma_param_transfer(dma_dev, queue_id, &cdev, &cdma_queue);
+	if (ret)
+		return DMA_STATUS_INVAL;
+
+	ret = cdma_faa(cdev, cdma_queue, local_seg, rmt_seg, add);
+	if (ret)
+		return DMA_STATUS_INVAL;
+
+	return DMA_STATUS_OK;
+}
+EXPORT_SYMBOL_GPL(dma_faa);
+
 int dma_poll_queue(struct dma_device *dma_dev, int queue_id, u32 cr_cnt,
 		   struct dma_cr *cr)
 {
@@ -471,3 +638,79 @@ int dma_poll_queue(struct dma_device *dma_dev, int queue_id, u32 cr_cnt,
 	return cdma_poll_jfc(cdma_queue->jfc, cr_cnt, cr);
 }
 EXPORT_SYMBOL_GPL(dma_poll_queue);
+
+int dma_register_client(struct dma_client *client)
+{
+	struct cdma_dev *cdev = NULL;
+	struct xarray *cdma_devs_tbl;
+	unsigned long index = 0;
+	u32 devs_num;
+
+	if (client == NULL || client->client_name == NULL ||
+		client->add == NULL || client->remove == NULL ||
+		client->stop == NULL) {
+		pr_err("invalid parameter.\n");
+		return -EINVAL;
+	}
+
+	if (strnlen(client->client_name, DMA_MAX_DEV_NAME) >= DMA_MAX_DEV_NAME) {
+		pr_err("invalid parameter, client name.\n");
+		return -EINVAL;
+	}
+
+	down_write(&g_device_rwsem);
+
+	cdma_devs_tbl = get_cdma_dev_tbl(&devs_num);
+
+	xa_for_each(cdma_devs_tbl, index, cdev) {
+		if (client->add && client->add(cdev->eid))
+			pr_info("dma client: %s add failed.\n",
+				client->client_name);
+	}
+	down_write(&g_clients_rwsem);
+	list_add_tail(&client->list_node, &g_client_list);
+	up_write(&g_clients_rwsem);
+	up_write(&g_device_rwsem);
+
+	pr_info("dma client: %s register success.\n", client->client_name);
+	return 0;
+}
+EXPORT_SYMBOL_GPL(dma_register_client);
+
+void dma_unregister_client(struct dma_client *client)
+{
+	struct cdma_dev *cdev = NULL;
+	struct xarray *cdma_devs_tbl;
+	unsigned long index = 0;
+	u32 devs_num;
+
+	if (client == NULL || client->client_name == NULL ||
+		client->add == NULL || client->remove == NULL ||
+		client->stop == NULL) {
+		pr_err("Invalid parameter.\n");
+		return;
+	}
+
+	if (strnlen(client->client_name, DMA_MAX_DEV_NAME) >= DMA_MAX_DEV_NAME) {
+		pr_err("invalid parameter, client name.\n");
+		return;
+	}
+
+	down_write(&g_device_rwsem);
+	cdma_devs_tbl = get_cdma_dev_tbl(&devs_num);
+
+	xa_for_each(cdma_devs_tbl, index, cdev) {
+		if (client->stop && client->remove) {
+			client->stop(cdev->eid);
+			client->remove(cdev->eid);
+		}
+	}
+
+	down_write(&g_clients_rwsem);
+	list_del(&client->list_node);
+	up_write(&g_clients_rwsem);
+	up_write(&g_device_rwsem);
+
+	pr_info("dma client: %s unregister success.\n", client->client_name);
+}
+EXPORT_SYMBOL_GPL(dma_unregister_client);
