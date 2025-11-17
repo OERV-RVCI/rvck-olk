@@ -4,13 +4,16 @@
 
 #include <linux/atomic.h>
 #include <linux/jump_label.h>
+#include <linux/mm_types.h>
 #include <linux/percpu.h>
 #include <linux/sched.h>
 #include <linux/types.h>
 #include <linux/xcall.h>
+#include <linux/refcount.h>
 
 #include <asm/actlr.h>
 #include <asm/cpufeature.h>
+#include <asm/syscall.h>
 
 struct xcall_comm {
 	char *name;
@@ -30,9 +33,24 @@ struct xcall {
 	char			*name;
 };
 
+struct xcall_area {
+	/*
+	 * 0...NR_syscalls - 1: function pointers to hijack default syscall
+	 * NR_syscalls...NR_syscalls * 2 - 1: function pointers in kernel module
+	 */
+	unsigned long		sys_call_table[NR_syscalls * 2];
+	refcount_t		ref;
+	struct xcall		*xcall;
+	void			*sys_call_data[NR_syscalls];
+};
+
 #ifdef CONFIG_DYNAMIC_XCALL
 extern int xcall_attach(struct xcall_comm *info);
 extern int xcall_detach(struct xcall_comm *info);
+
+#define mm_xcall_area(mm)	((struct xcall_area *)((mm)->xcall))
+#else
+#define mm_xcall_area(mm)	(NULL)
 #endif /* CONFIG_DYNAMIC_XCALL */
 
 DECLARE_STATIC_KEY_FALSE(xcall_enable);

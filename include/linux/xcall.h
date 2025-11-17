@@ -8,6 +8,10 @@
 
 #include <linux/module.h>
 
+struct vm_area_struct;
+struct mm_struct;
+struct inode;
+
 struct xcall_prog_object {
 	unsigned long scno;
 	unsigned long func;
@@ -27,12 +31,21 @@ struct xcall_prog {
 #ifdef CONFIG_DYNAMIC_XCALL
 extern int xcall_prog_register(struct xcall_prog *prog);
 extern void xcall_prog_unregister(struct xcall_prog *prog);
+extern void mm_init_xcall_area(struct mm_struct *mm, struct task_struct *p);
+extern void clear_xcall_area(struct mm_struct *mm);
+extern int xcall_mmap(struct vm_area_struct *vma, struct mm_struct *mm);
 #else /* !CONFIG_DYNAMIC_XCALL */
 static inline int xcall_prog_register(struct xcall_prog *prog)
 {
 	return -EINVAL;
 }
 static inline void xcall_prog_unregister(struct xcall_prog *prog) {}
+static inline void mm_init_xcall_area(struct mm_struct *mm, struct task_struct *p) {}
+static inline void clear_xcall_area(struct mm_struct *mm) {}
+static inline int xcall_mmap(struct vm_area_struct *vma, struct mm_struct *mm)
+{
+	return 0;
+}
 #endif /* CONFIG_DYNAMIC_XCALL */
 
 #endif /* _LINUX_XCALL_H */

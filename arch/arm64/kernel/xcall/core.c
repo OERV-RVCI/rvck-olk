@@ -6,6 +6,7 @@
 #define pr_fmt(fmt)	"xcall: " fmt
 
 #include <linux/slab.h>
+#include <linux/syscalls.h>
 #include <linux/xcall.h>
 
 #include <asm/xcall.h>
@@ -40,6 +41,8 @@ static struct xcall_prog *get_xcall_prog_locked(const char *module)
 
 	return ret;
 }
+
+#define inv_xcall_syscall ((unsigned long)__arm64_sys_ni_syscall)
 
 static struct xcall *get_xcall(struct xcall *xcall)
 {
@@ -108,6 +111,115 @@ static int init_xcall(struct xcall *xcall, struct xcall_comm *comm)
 	INIT_LIST_HEAD(&xcall->list);
 
 	return 0;
+}
+
+static int fill_xcall_syscall(struct xcall_area *area, struct xcall *xcall)
+{
+	unsigned int scno_offset, scno_count = 0;
+	struct xcall_prog_object *obj;
+
+	obj = xcall->program->objs;
+	while (scno_count < xcall->program->nr_scno && obj->func) {
+		scno_offset = NR_syscalls + obj->scno;
+		if (area->sys_call_table[scno_offset] != inv_xcall_syscall) {
+			pr_err("Process can not mount more than one xcall.\n");
+			return -EINVAL;
+		}
+
+		area->sys_call_table[scno_offset] = obj->func;
+		obj += 1;
+		scno_count++;
+	}
+
+	return 0;
+}
+
+static struct xcall_area *create_xcall_area(struct mm_struct *mm)
+{
+	struct xcall_area *area;
+	int i;
+
+	area = kzalloc(sizeof(*area), GFP_KERNEL);
+	if (!area)
+		return NULL;
+
+	refcount_set(&area->ref, 1);
+
+	for (i = 0; i < NR_syscalls; i++) {
+		area->sys_call_table[i] = inv_xcall_syscall;
+		area->sys_call_table[i + NR_syscalls] = inv_xcall_syscall;
+	}
+
+	/*
+	 * Pairs with the READ_ONCE(mm->xcall) in xcall_map() to avoid
+	 * the reord of the access on mm->xcall and filling mm->xcall.
+	 */
+	smp_store_release(&mm->xcall, area);
+	return area;
+}
+
+/*
+ * Initialize the xcall data of mm_struct data.
+ * And register xcall into one address space, which includes create
+ * the mm_struct associated xcall_area data
+ */
+int xcall_mmap(struct vm_area_struct *vma, struct mm_struct *mm)
+{
+	struct xcall_area *area;
+	struct xcall *xcall;
+	int ret = -EINVAL;
+
+	if (list_empty(&xcalls_list))
+		return 0;
+
+	spin_lock(&xcall_list_lock);
+	xcall = find_xcall(NULL, file_inode(vma->vm_file));
+	spin_unlock(&xcall_list_lock);
+	if (!xcall)
+		return ret;
+
+	if (!xcall->program)
+		goto put_xcall;
+
+	area = mm_xcall_area(mm);
+	if (!area && !create_xcall_area(mm)) {
+		ret = -ENOMEM;
+		goto put_xcall;
+	}
+
+	area = (struct xcall_area *)READ_ONCE(mm->xcall);
+	// Each process is allowed to be associated with only one xcall.
+	if (!cmpxchg(&area->xcall, NULL, xcall) && !fill_xcall_syscall(area, xcall))
+		return 0;
+
+put_xcall:
+	put_xcall(xcall);
+	return ret;
+}
+
+void mm_init_xcall_area(struct mm_struct *mm, struct task_struct *p)
+{
+	struct xcall_area *area = mm_xcall_area(mm);
+
+	if (area)
+		refcount_inc(&area->ref);
+}
+
+void clear_xcall_area(struct mm_struct *mm)
+{
+	struct xcall_area *area = mm_xcall_area(mm);
+
+	if (!area)
+		return;
+
+	if (!refcount_dec_and_test(&area->ref))
+		return;
+
+	if (area->xcall)
+		put_xcall(area->xcall);
+
+	kfree(area);
+	mm->xcall = NULL;
 }
 
 int xcall_attach(struct xcall_comm *comm)

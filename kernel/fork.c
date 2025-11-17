@@ -106,6 +106,7 @@
 #endif
 #include <linux/share_pool.h>
 #include <linux/tick.h>
+#include <linux/xcall.h>
 
 #include <asm/pgalloc.h>
 #include <linux/uaccess.h>
@@ -974,6 +975,7 @@ void __mmdrop(struct mm_struct *mm)
 	mm_free_pgd(mm);
 	destroy_context(mm);
 	mmu_notifier_subscriptions_destroy(mm);
+	clear_xcall_area(mm);
 	check_mm(mm);
 	put_user_ns(mm->user_ns);
 	mm_pasid_drop(mm);
@@ -1373,6 +1375,7 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p,
 #if defined(CONFIG_DAMON_MEM_SAMPLING)
 	mm->damon_fifo = NULL;
 #endif
+	mm_init_xcall_area(mm, p);
 	mm_init_uprobes_state(mm);
 	hugetlb_count_init(mm);
 
