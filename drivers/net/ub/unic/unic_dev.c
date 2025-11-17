@@ -293,6 +293,30 @@ static void unic_uninit_channels_attr(struct unic_dev *unic_dev)
 	mutex_destroy(&channels->mutex);
 }
 
+u16 unic_cqe_period_round_down(u16 cqe_period)
+{
+	u16 period[] = {
+		UNIC_CQE_PERIOD_0,
+		UNIC_CQE_PERIOD_4,
+		UNIC_CQE_PERIOD_16,
+		UNIC_CQE_PERIOD_64,
+		UNIC_CQE_PERIOD_256,
+		UNIC_CQE_PERIOD_1024,
+		UNIC_CQE_PERIOD_4096,
+		UNIC_CQE_PERIOD_16384,
+		UNIC_CQE_PERIOD_ERR
+	};
+	u16 i;
+
+	for (i = 0; i < ARRAY_SIZE(period) - 1; i++) {
+		if (cqe_period >= period[i] &&
+		    cqe_period < period[i + 1])
+			return period[i];
+	}
+
+	return UNIC_CQE_PERIOD_ERR;
+}
+
 int unic_init_tx(struct unic_dev *unic_dev, u32 num)
 {
 	struct unic_channel *c;
@@ -550,6 +574,7 @@ static int unic_dev_init_mtu(struct unic_dev *unic_dev)
 
 static int unic_init_mac(struct unic_dev *unic_dev)
 {
+	struct unic_link_stats *record = &unic_dev->stats.link_record;
 	struct unic_mac *mac = &unic_dev->hw.mac;
 	int ret;
 
@@ -577,7 +602,15 @@ static int unic_init_mac(struct unic_dev *unic_dev)
 		return ret;
 	}
 
+	mutex_init(&record->lock);
 	return 0;
+}
+
+static void unic_uninit_mac(struct unic_dev *unic_dev)
+{
+	struct unic_link_stats *record = &unic_dev->stats.link_record;
+
+	mutex_destroy(&record->lock);
 }
 
 int unic_set_mtu(struct unic_dev *unic_dev, int new_mtu)
@@ -798,11 +831,11 @@ static int unic_init_netdev_priv(struct net_device *netdev,
 
 	ret = unic_init_dev_addr(priv);
 	if (ret)
-		goto err_uninit_vport;
+		goto unic_unint_mac;
 
 	ret = unic_init_channels_attr(priv);
 	if (ret)
-		goto err_uninit_vport;
+		goto unic_unint_mac;
 
 	ret = unic_init_channels(priv, priv->channels.num);
 	if (ret) {
@@ -816,6 +849,8 @@ static int unic_init_netdev_priv(struct net_device *netdev,
 
 err_uninit_channels_attr:
 	unic_uninit_channels_attr(priv);
+unic_unint_mac:
+	unic_uninit_mac(priv);
 err_uninit_vport:
 	unic_uninit_vport(priv);
 destroy_lock:
@@ -830,6 +865,7 @@ static void unic_uninit_netdev_priv(struct net_device *netdev)
 
 	unic_uninit_channels(priv);
 	unic_uninit_channels_attr(priv);
+	unic_uninit_mac(priv);
 	unic_uninit_vport(priv);
 	mutex_destroy(&priv->act_info.mutex);
 }
@@ -869,6 +905,13 @@ void unic_remove_period_task(struct unic_dev *unic_dev)
 		cancel_delayed_work_sync(&unic_dev->service_task);
 }
 
+bool unic_rss_vl_num_changed(struct unic_dev *unic_dev, u8 vl_num)
+{
+	struct unic_channels *channels = &unic_dev->channels;
+
+	return channels->rss_vl_num != unic_get_rss_vl_num(unic_dev, vl_num);
+}
+
 int unic_change_rss_size(struct unic_dev *unic_dev, u32 new_rss_size,
 			 u32 org_rss_size)
 {
@@ -894,6 +937,21 @@ int unic_change_rss_size(struct unic_dev *unic_dev, u32 new_rss_size,
 	mutex_unlock(&channels->mutex);
 
 	return ret;
+}
+
+int unic_update_channels(struct unic_dev *unic_dev, u8 vl_num)
+{
+	struct auxiliary_device *adev = unic_dev->comdev.adev;
+	struct unic_channels *channels = &unic_dev->channels;
+	u32 new_rss_size, old_rss_size = channels->rss_size;
+
+	channels->rss_vl_num = unic_get_rss_vl_num(unic_dev, vl_num);
+	if (old_rss_size * channels->rss_vl_num > unic_channels_max_num(adev))
+		new_rss_size = unic_get_max_rss_size(unic_dev);
+	else
+		new_rss_size = old_rss_size;
+
+	return unic_change_rss_size(unic_dev, new_rss_size, old_rss_size);
 }
 
 static struct net_device *unic_alloc_netdev(struct auxiliary_device *adev)

@@ -10,8 +10,11 @@
 #include <ub/ubase/ubase_comm_cmd.h>
 #include <ub/ubase/ubase_comm_mbx.h>
 
+#include "unic_ctx_debugfs.h"
 #include "unic_dev.h"
 #include "unic_hw.h"
+#include "unic_qos_debugfs.h"
+#include "unic_entry_debugfs.h"
 #include "unic_debugfs.h"
 
 static int unic_dbg_dump_dev_info(struct seq_file *s, void *data)
@@ -190,6 +193,63 @@ static int unic_dbg_dump_promisc_cfg_hw(struct seq_file *s, void *data)
 	return 0;
 }
 
+static int unic_dbg_query_link_record(struct seq_file *s, void *data)
+{
+	struct unic_dev *unic_dev = dev_get_drvdata(s->private);
+	struct unic_link_stats *record = &unic_dev->stats.link_record;
+	u8 cnt = 1, stats_cnt;
+	u64 total, idx;
+
+	mutex_lock(&record->lock);
+
+	seq_puts(s, "current time        : ");
+	ubase_dbg_format_time(ktime_get_real_seconds(), s);
+	seq_printf(s, "\nlink up count       : %llu\n", record->link_up_cnt);
+	seq_printf(s, "link down count     : %llu\n", record->link_down_cnt);
+
+	total = record->link_up_cnt + record->link_down_cnt;
+	if (!total) {
+		seq_puts(s, "link change records : NA\n");
+		mutex_unlock(&record->lock);
+
+		return 0;
+	}
+
+	seq_puts(s, "link change records :\n");
+	seq_puts(s, "\tNo.\tTIME\t\t\t\tSTATUS\n");
+
+	stats_cnt = min(total, LINK_STAT_MAX_IDX);
+	while (cnt <= stats_cnt) {
+		total--;
+		idx = total % LINK_STAT_MAX_IDX;
+		seq_printf(s, "\t%-2d\t", cnt);
+		ubase_dbg_format_time(ktime_get_real_seconds(), s);
+		seq_printf(s, "\t%s\n",
+			   record->stats[idx].link_status ? "LINK UP" : "LINK DOWN");
+		cnt++;
+	}
+
+	mutex_unlock(&record->lock);
+
+	return 0;
+}
+
+static int unic_dbg_clear_link_record(struct seq_file *s, void *data)
+{
+	struct unic_dev *unic_dev = dev_get_drvdata(s->private);
+	struct unic_link_stats *record = &unic_dev->stats.link_record;
+
+	mutex_lock(&record->lock);
+	record->link_up_cnt = 0;
+	record->link_down_cnt = 0;
+	memset(record->stats, 0, sizeof(record->stats));
+	mutex_unlock(&record->lock);
+
+	seq_puts(s, "Link status records have been cleared!\n");
+
+	return 0;
+}
+
 static bool unic_dbg_dentry_support(struct device *dev, u32 property)
 {
 	struct unic_dev *unic_dev = dev_get_drvdata(dev);
@@ -198,6 +258,19 @@ static bool unic_dbg_dentry_support(struct device *dev, u32 property)
 }
 
 static struct ubase_dbg_dentry_info unic_dbg_dentry[] = {
+	{
+		.name = "ip_tbl",
+		.property = UBASE_SUP_UNIC | UBASE_SUP_UBL,
+		.support = unic_dbg_dentry_support,
+	}, {
+		.name = "context",
+		.property = UBASE_SUP_UNIC | UBASE_SUP_UBL,
+		.support = unic_dbg_dentry_support,
+	}, {
+		.name = "qos",
+		.property = UBASE_SUP_UNIC | UBASE_SUP_UBL,
+		.support = unic_dbg_dentry_support,
+	},
 	/* keep unic at the bottom and add new directory above */
 	{
 		.name = "unic",
@@ -208,6 +281,48 @@ static struct ubase_dbg_dentry_info unic_dbg_dentry[] = {
 
 static struct ubase_dbg_cmd_info unic_dbg_cmd[] = {
 	{
+		.name = "ip_tbl_spec",
+		.dentry_index = UNIC_DBG_DENTRY_IP,
+		.property = UBASE_SUP_UNIC | UBASE_SUP_UBL,
+		.support = unic_dbg_dentry_support,
+		.init = ubase_dbg_seq_file_init,
+		.read_func = unic_dbg_dump_ip_tbl_spec,
+	}, {
+		.name = "ip_tbl_list",
+		.dentry_index = UNIC_DBG_DENTRY_IP,
+		.property = UBASE_SUP_UNIC | UBASE_SUP_UBL,
+		.support = unic_dbg_dentry_support,
+		.init = ubase_dbg_seq_file_init,
+		.read_func = unic_dbg_dump_ip_tbl_list,
+	}, {
+		.name = "jfs_context",
+		.dentry_index = UNIC_DBG_DENTRY_CONTEXT,
+		.property = UBASE_SUP_UNIC | UBASE_SUP_UBL,
+		.support = unic_dbg_dentry_support,
+		.init = ubase_dbg_seq_file_init,
+		.read_func = unic_dbg_dump_jfs_ctx_sw,
+	}, {
+		.name = "jfr_context",
+		.dentry_index = UNIC_DBG_DENTRY_CONTEXT,
+		.property = UBASE_SUP_UNIC | UBASE_SUP_UBL,
+		.support = unic_dbg_dentry_support,
+		.init = ubase_dbg_seq_file_init,
+		.read_func = unic_dbg_dump_jfr_ctx_sw,
+	}, {
+		.name = "sq_jfc_context",
+		.dentry_index = UNIC_DBG_DENTRY_CONTEXT,
+		.property = UBASE_SUP_UNIC | UBASE_SUP_UBL,
+		.support = unic_dbg_dentry_support,
+		.init = ubase_dbg_seq_file_init,
+		.read_func = unic_dbg_dump_sq_jfc_ctx_sw,
+	}, {
+		.name = "rq_jfc_context",
+		.dentry_index = UNIC_DBG_DENTRY_CONTEXT,
+		.property = UBASE_SUP_UNIC | UBASE_SUP_UBL,
+		.support = unic_dbg_dentry_support,
+		.init = ubase_dbg_seq_file_init,
+		.read_func = unic_dbg_dump_rq_jfc_ctx_sw,
+	}, {
 		.name = "dev_info",
 		.dentry_index = UNIC_DBG_DENTRY_ROOT,
 		.property = UBASE_SUP_UNIC | UBASE_SUP_UBL,
@@ -229,6 +344,41 @@ static struct ubase_dbg_cmd_info unic_dbg_cmd[] = {
 		.init = ubase_dbg_seq_file_init,
 		.read_func = unic_dbg_dump_page_pool_info,
 	}, {
+		.name = "jfs_context_hw",
+		.dentry_index = UNIC_DBG_DENTRY_CONTEXT,
+		.property = UBASE_SUP_UNIC | UBASE_SUP_UBL,
+		.support = unic_dbg_dentry_support,
+		.init = ubase_dbg_seq_file_init,
+		.read_func = unic_dbg_dump_jfs_context_hw,
+	}, {
+		.name = "jfr_context_hw",
+		.dentry_index = UNIC_DBG_DENTRY_CONTEXT,
+		.property = UBASE_SUP_UNIC | UBASE_SUP_UBL,
+		.support = unic_dbg_dentry_support,
+		.init = ubase_dbg_seq_file_init,
+		.read_func = unic_dbg_dump_jfr_context_hw,
+	}, {
+		.name = "sq_jfc_context_hw",
+		.dentry_index = UNIC_DBG_DENTRY_CONTEXT,
+		.property = UBASE_SUP_UNIC | UBASE_SUP_UBL,
+		.support = unic_dbg_dentry_support,
+		.init = ubase_dbg_seq_file_init,
+		.read_func = unic_dbg_dump_sq_jfc_context_hw,
+	}, {
+		.name = "rq_jfc_context_hw",
+		.dentry_index = UNIC_DBG_DENTRY_CONTEXT,
+		.property = UBASE_SUP_UNIC | UBASE_SUP_UBL,
+		.support = unic_dbg_dentry_support,
+		.init = ubase_dbg_seq_file_init,
+		.read_func = unic_dbg_dump_rq_jfc_context_hw,
+	}, {
+		.name = "vl_queue",
+		.dentry_index = UNIC_DBG_DENTRY_QOS,
+		.property = UBASE_SUP_UNIC | UBASE_SUP_UBL,
+		.support = unic_dbg_dentry_support,
+		.init = ubase_dbg_seq_file_init,
+		.read_func = unic_dbg_dump_vl_queue,
+	}, {
 		.name = "rss_cfg_hw",
 		.dentry_index = UNIC_DBG_DENTRY_ROOT,
 		.property = UBASE_SUP_UNIC | UBASE_SUP_UBL,
@@ -242,6 +392,41 @@ static struct ubase_dbg_cmd_info unic_dbg_cmd[] = {
 		.support = unic_dbg_dentry_support,
 		.init = ubase_dbg_seq_file_init,
 		.read_func = unic_dbg_dump_promisc_cfg_hw,
+	}, {
+		.name = "dscp_vl_map",
+		.dentry_index = UNIC_DBG_DENTRY_QOS,
+		.property = UBASE_SUP_UNIC | UBASE_SUP_UBL,
+		.support = unic_dbg_dentry_support,
+		.init = ubase_dbg_seq_file_init,
+		.read_func = unic_dbg_dump_dscp_vl_map,
+	}, {
+		.name = "prio_vl_map",
+		.dentry_index = UNIC_DBG_DENTRY_QOS,
+		.property = UBASE_SUP_UNIC | UBASE_SUP_UBL,
+		.support = unic_dbg_dentry_support,
+		.init = ubase_dbg_seq_file_init,
+		.read_func = unic_dbg_dump_prio_vl_map,
+	}, {
+		.name = "dscp_prio",
+		.dentry_index = UNIC_DBG_DENTRY_QOS,
+		.property = UBASE_SUP_UNIC | UBASE_SUP_UBL,
+		.support = unic_dbg_dentry_support,
+		.init = ubase_dbg_seq_file_init,
+		.read_func = unic_dbg_dump_dscp_prio,
+	}, {
+		.name = "link_status_record",
+		.dentry_index = UNIC_DBG_DENTRY_ROOT,
+		.property = UBASE_SUP_UNIC | UBASE_SUP_UBL,
+		.support = unic_dbg_dentry_support,
+		.init = ubase_dbg_seq_file_init,
+		.read_func = unic_dbg_query_link_record,
+	}, {
+		.name = "clear_link_status_record",
+		.dentry_index = UNIC_DBG_DENTRY_ROOT,
+		.property = UBASE_SUP_UNIC | UBASE_SUP_UBL,
+		.support = unic_dbg_dentry_support,
+		.init = ubase_dbg_seq_file_init,
+		.read_func = unic_dbg_clear_link_record,
 	}
 };
 
