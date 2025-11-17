@@ -90,11 +90,12 @@ DECLARE_STATIC_KEY_FALSE(xcall_enable);
 
 struct xcall_info {
 	/* Must be first! */
-	DECLARE_BITMAP(xcall_enable, __NR_syscalls);
+	u8 xcall_enable[__NR_syscalls + 1];
 };
 
 #define TASK_XINFO(p)	((struct xcall_info *)p->xinfo)
 
 int xcall_init_task(struct task_struct *p, struct task_struct *orig);
 void xcall_task_free(struct task_struct *p);
+void xcall_info_switch(struct task_struct *p);
 #endif /* __ASM_XCALL_H */

@@ -55,6 +55,7 @@
 #include <asm/stacktrace.h>
 #include <asm/switch_to.h>
 #include <asm/system_misc.h>
+#include <asm/xcall.h>
 
 #if defined(CONFIG_STACKPROTECTOR) && !defined(CONFIG_STACKPROTECTOR_PER_TASK)
 #include <linux/stackprotector.h>
@@ -472,6 +473,10 @@ DEFINE_PER_CPU(struct task_struct *, __entry_task);
 static void entry_task_switch(struct task_struct *next)
 {
 	__this_cpu_write(__entry_task, next);
+#ifdef CONFIG_FAST_SYSCALL
+	if (static_branch_unlikely(&xcall_enable))
+		xcall_info_switch(next);
+#endif
 }
 
 /*

@@ -207,7 +207,7 @@ static __always_inline void fast_enter_from_user_mode(struct pt_regs *regs)
 	mte_disable_tco_entry(current);
 #endif
 }
-#endif
+#endif /* CONFIG_FAST_SYSCALL || CONFIG_FAST_IRQ */
 
 /*
  * Handle IRQ/context state management when entering an NMI from user/kernel
@@ -818,8 +818,8 @@ static void noinstr el0_fpac(struct pt_regs *regs, unsigned long esr)
 }
 
 #ifdef CONFIG_FAST_SYSCALL
-/* Copy from el0_sync */
-static void noinstr el0_xcall(struct pt_regs *regs)
+/* dynamically load syscall handler */
+asmlinkage void noinstr el0_xcall_syscall(struct pt_regs *regs)
 {
 	fast_enter_from_user_mode(regs);
 #ifndef CONFIG_SECURITY_FEATURE_BYPASS
@@ -831,11 +831,21 @@ static void noinstr el0_xcall(struct pt_regs *regs)
 	fast_exit_to_user_mode(regs);
 }
 
-asmlinkage void noinstr el0t_64_fast_syscall_handler(struct pt_regs *regs)
+/* low-overhead syscall handler */
+asmlinkage void noinstr el0_fast_syscall(struct pt_regs *regs)
 {
-	el0_xcall(regs);
-}
+	fast_enter_from_user_mode(regs);
+#ifndef CONFIG_SECURITY_FEATURE_BYPASS
+	cortex_a76_erratum_1463225_svc_handler();
 #endif
+	fp_user_discard();
+	local_daif_restore(DAIF_PROCCTX);
+	do_el0_svc(regs);
+	fast_exit_to_user_mode(regs);
+}
+
+asmlinkage void el0_slow_syscall(struct pt_regs *regs) __alias(el0_svc);
+#endif /* CONFIG_FAST_SYSCALL */
 
 asmlinkage void noinstr el0t_64_sync_handler(struct pt_regs *regs)
 {
@@ -1052,10 +1062,6 @@ UNHANDLED(el0t, 32, error)
 #endif /* CONFIG_AARCH32_EL0 */
 
 #ifdef CONFIG_ACTLR_XCALL_XINT
-asmlinkage void noinstr el0t_64_xcall_handler(struct pt_regs *regs)
-{
-	el0_xcall(regs);
-}
 asmlinkage void noinstr el0t_64_xint_handler(struct pt_regs *regs)
 {
 	el0_interrupt(regs, ISR_EL1_IS, handle_arch_irq, handle_arch_nmi_irq);
