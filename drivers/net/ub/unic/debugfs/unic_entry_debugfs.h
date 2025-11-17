@@ -58,7 +58,7 @@ struct unic_dbg_comm_addr_node {
 	u32			ue_bitmap[UNIC_BITMAP_LEN];
 	u32			port_bitmap;
 	union {
-		u8		guid[UNIC_ADDR_LEN];
+		u8		guid[UBL_ALEN];
 		struct {
 			struct	in6_addr ip_addr;
 			u32	extend_info;
@@ -71,6 +71,9 @@ struct unic_dbg_comm_addr_node {
 };
 
 int unic_dbg_dump_ip_tbl_spec(struct seq_file *s, void *data);
+int unic_dbg_dump_mac_tbl_spec(struct seq_file *s, void *data);
+int unic_dbg_dump_mc_mac_tbl_list(struct seq_file *s, void *data);
+int unic_dbg_dump_uc_mac_tbl_list(struct seq_file *s, void *data);
 int unic_dbg_dump_ip_tbl_list(struct seq_file *s, void *data);
 int unic_dbg_dump_vlan_tbl_list_hw(struct seq_file *s, void *data);
 int unic_dbg_dump_mac_tbl_list_hw(struct seq_file *s, void *data);
