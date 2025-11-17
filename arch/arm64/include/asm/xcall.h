@@ -7,9 +7,33 @@
 #include <linux/percpu.h>
 #include <linux/sched.h>
 #include <linux/types.h>
+#include <linux/xcall.h>
 
 #include <asm/actlr.h>
 #include <asm/cpufeature.h>
+
+struct xcall_comm {
+	char *name;
+	char *binary;
+	struct path binary_path;
+	char *module;
+	struct list_head list;
+};
+
+struct xcall {
+	/* used for xcall_attach */
+	struct list_head	list;
+	refcount_t		ref;
+	/* file attached xcall */
+	struct inode		*binary;
+	struct xcall_prog	*program;
+	char			*name;
+};
+
+#ifdef CONFIG_DYNAMIC_XCALL
+extern int xcall_attach(struct xcall_comm *info);
+extern int xcall_detach(struct xcall_comm *info);
+#endif /* CONFIG_DYNAMIC_XCALL */
 
 DECLARE_STATIC_KEY_FALSE(xcall_enable);
 
@@ -93,4 +117,4 @@ static inline void cpu_switch_xcall_entry(struct task_struct *tsk)
 }
 #endif /* CONFIG_ACTLR_XCALL_XINT */
 
-#endif /*__ASM_XCALL_H*/
+#endif /* __ASM_XCALL_H */
