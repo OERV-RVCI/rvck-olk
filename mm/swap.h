@@ -107,8 +107,8 @@ static inline void show_swap_cache_info(void)
 {
 }
 
-static inline struct folio *swap_cluster_readahead(swp_entry_t entry,
-				gfp_t gfp_mask, struct vm_fault *vmf)
+static inline struct folio *swap_cluster_readahead(swp_entry_t entry, gfp_t flag,
+				    struct mempolicy *mpol, pgoff_t ilx)
 {
 	return NULL;
 }
