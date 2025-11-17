@@ -6,6 +6,7 @@
 #include <linux/ptrace.h>
 #include <linux/uprobes.h>
 #include <asm/cacheflush.h>
+#include <asm/xcall.h>
 
 #include "decode-insn.h"
 
@@ -170,6 +171,11 @@ static int uprobe_breakpoint_handler(struct pt_regs *regs,
 {
 	if (uprobe_pre_sstep_notifier(regs))
 		return DBG_HOOK_HANDLED;
+
+#ifdef CONFIG_DYNAMIC_XCALL
+	if (xcall_pre_sstep_check(regs))
+		return DBG_HOOK_HANDLED;
+#endif
 
 	return DBG_HOOK_ERROR;
 }

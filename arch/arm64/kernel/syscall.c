@@ -14,6 +14,7 @@
 #include <asm/syscall.h>
 #include <asm/thread_info.h>
 #include <asm/unistd.h>
+#include <asm/xcall.h>
 
 long a32_arm_syscall(struct pt_regs *regs, int scno);
 long sys_ni_syscall(void);
@@ -162,6 +163,15 @@ static inline void delouse_pt_regs(struct pt_regs *regs)
 }
 #endif
 
+#ifdef CONFIG_FAST_SYSCALL
+void do_el0_xcall(struct pt_regs *regs)
+{
+	const syscall_fn_t *t = real_syscall_table();
+
+	el0_svc_common(regs, regs->regs[8], __NR_syscalls, t);
+}
+#endif
+
 void do_el0_svc(struct pt_regs *regs)
 {
 	const syscall_fn_t *t = sys_call_table;
@@ -173,6 +183,10 @@ void do_el0_svc(struct pt_regs *regs)
 	}
 #endif
 
+#ifdef CONFIG_DYNAMIC_XCALL
+	if (!hijack_syscall(regs))
+		return;
+#endif
 	el0_svc_common(regs, regs->regs[8], __NR_syscalls, t);
 }
 

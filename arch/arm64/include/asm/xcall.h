@@ -15,6 +15,9 @@
 #include <asm/cpufeature.h>
 #include <asm/syscall.h>
 
+#define SVC_0000	0xd4000001
+#define SVC_FFFF	0xd41fffe1
+
 struct xcall_comm {
 	char *name;
 	char *binary;
@@ -44,13 +47,48 @@ struct xcall_area {
 	void			*sys_call_data[NR_syscalls];
 };
 
+extern const syscall_fn_t *default_sys_call_table(void);
 #ifdef CONFIG_DYNAMIC_XCALL
 extern int xcall_attach(struct xcall_comm *info);
 extern int xcall_detach(struct xcall_comm *info);
+extern int xcall_pre_sstep_check(struct pt_regs *regs);
+extern int set_xcall_insn(struct mm_struct *mm, unsigned long vaddr,
+			  uprobe_opcode_t opcode);
 
 #define mm_xcall_area(mm)	((struct xcall_area *)((mm)->xcall))
+
+static inline long hijack_syscall(struct pt_regs *regs)
+{
+	struct xcall_area *area = mm_xcall_area(current->mm);
+	unsigned int scno = (unsigned int)regs->regs[8];
+	syscall_fn_t syscall_fn;
+
+	if (likely(!area))
+		return -EINVAL;
+
+	if (unlikely(scno >= __NR_syscalls))
+		return -EINVAL;
+
+	syscall_fn = (syscall_fn_t)area->sys_call_table[scno];
+	return syscall_fn(regs);
+}
+
+static inline const syscall_fn_t *real_syscall_table(void)
+{
+	struct xcall_area *area = mm_xcall_area(current->mm);
+
+	if (likely(!area))
+		return default_sys_call_table();
+
+	return (syscall_fn_t *)(&(area->sys_call_table[__NR_syscalls]));
+}
 #else
 #define mm_xcall_area(mm)	(NULL)
+#define hijack_syscall(regs)	(NULL)
+static inline const syscall_fn_t *real_syscall_table(void)
+{
+	return sys_call_table;
+}
 #endif /* CONFIG_DYNAMIC_XCALL */
 
 DECLARE_STATIC_KEY_FALSE(xcall_enable);

@@ -74,6 +74,7 @@ config ACTLR_XCALL_XINT
 config DYNAMIC_XCALL
 	bool "Support dynamically replace and load system call"
 	depends on FAST_SYSCALL
+	depends on UPROBES
 	default n
 	help
 	  Xcall 2.0 add "/proc/xcall/comm" interface to

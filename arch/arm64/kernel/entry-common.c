@@ -827,7 +827,7 @@ static void noinstr el0_xcall(struct pt_regs *regs)
 #endif
 	fp_user_discard();
 	local_daif_restore(DAIF_PROCCTX);
-	do_el0_svc(regs);
+	do_el0_xcall(regs);
 	fast_exit_to_user_mode(regs);
 }
 

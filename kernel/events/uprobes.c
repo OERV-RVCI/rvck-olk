@@ -606,6 +606,29 @@ set_orig_insn(struct arch_uprobe *auprobe, struct mm_struct *mm, unsigned long v
 			*(uprobe_opcode_t *)&auprobe->insn);
 }
 
+#ifdef CONFIG_DYNAMIC_XCALL
+/*
+ * Force to patch any instruction without checking the old instruction
+ * is UPROBE_BRK.
+ */
+int set_xcall_insn(struct mm_struct *mm, unsigned long vaddr, uprobe_opcode_t opcode)
+{
+	struct uprobe uprobe = { .ref_ctr_offset = 0 };
+	int ret;
+
+	/* Use the UPROBE_SWBP_INSN to occupy the vaddr avoid uprobe writes it */
+	ret = uprobe_write_opcode(&uprobe.arch, mm, vaddr, UPROBE_SWBP_INSN);
+	if (ret)
+		return 1;
+
+	ret = uprobe_write_opcode(&uprobe.arch, mm, vaddr, opcode);
+	if (ret)
+		return -1;
+
+	return 0;
+}
+#endif
+
 static struct uprobe *get_uprobe(struct uprobe *uprobe)
 {
 	refcount_inc(&uprobe->ref);
