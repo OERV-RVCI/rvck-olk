@@ -1144,7 +1144,7 @@ static ssize_t ioinf_qos_write(struct kernfs_open_file *of, char *input,
 			params.enabled = !!v;
 			continue;
 		case INF_INFLIGHT:
-			if (match_u64(&args[0], &v) || v == 0)
+			if (match_u64(&args[0], &v) || v == 0 || v > UINT_MAX)
 				goto einval;
 			params.inflight = v;
 			continue;
