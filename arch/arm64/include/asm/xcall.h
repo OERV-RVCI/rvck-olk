@@ -13,6 +13,14 @@
 #define SVC_0000	0xd4000001
 #define SVC_FFFF	0xd41fffe1
 
+/*
+ * Only can switch by cmdline 'xcall=debug',
+ * By default xcall init with XCALL_MODE_TASK.
+ */
+#define XCALL_MODE_TASK		0
+#define XCALL_MODE_SYSTEM	1
+extern int sw_xcall_mode;
+
 struct xcall_comm {
 	char *name;
 	char *binary;

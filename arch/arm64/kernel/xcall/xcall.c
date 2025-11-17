@@ -10,17 +10,25 @@
 #include <linux/slab.h>
 #include <asm/xcall.h>
 
+// Only can switch by cmdline 'xcall=debug'
+int sw_xcall_mode = XCALL_MODE_TASK;
+
 static inline int sw_xcall_init_task(struct task_struct *p, struct task_struct *orig)
 {
 	p->xinfo = kzalloc(sizeof(struct xcall_info), GFP_KERNEL);
 	if (!p->xinfo)
 		return -ENOMEM;
 
-	if (orig->xinfo) {
+	if (!orig->xinfo)
+		return 0;
+
+	/* In xcall debug mode, all syscalls are enabled by default! */
+	if (sw_xcall_mode == XCALL_MODE_SYSTEM)
+		memset(TASK_XINFO(p)->xcall_enable, 1, (__NR_syscalls + 1) * sizeof(u8));
+	else
 		memcpy(TASK_XINFO(p)->xcall_enable,
 		       TASK_XINFO(orig)->xcall_enable,
 		       (__NR_syscalls + 1) * sizeof(u8));
-	}
 
 	return 0;
 }

@@ -2448,6 +2448,11 @@ static int __init xcall_setup(char *str)
 {
 	static_branch_enable(&xcall_enable);
 
+	if (str && !strcmp(str, "=debug")) {
+		sw_xcall_mode = XCALL_MODE_SYSTEM;
+		pr_warn("Enable xcall across the entire system, for debugging only!\n");
+	}
+
 	return 1;
 }
 __setup("xcall", xcall_setup);
