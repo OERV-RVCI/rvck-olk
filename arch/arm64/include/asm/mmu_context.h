@@ -24,9 +24,6 @@
 #include <asm/cputype.h>
 #include <asm/sysreg.h>
 #include <asm/tlbflush.h>
-#ifdef CONFIG_ACTLR_XCALL_XINT
-#include <asm/xcall.h>
-#endif
 
 extern bool rodata_full;
 
@@ -266,10 +263,6 @@ switch_mm(struct mm_struct *prev, struct mm_struct *next,
 {
 	if (prev != next)
 		__switch_mm(next);
-
-#ifdef CONFIG_ACTLR_XCALL_XINT
-	cpu_switch_xcall_entry(tsk);
-#endif
 
 	/*
 	 * Update the saved TTBR0_EL1 of the scheduled-in task as the previous

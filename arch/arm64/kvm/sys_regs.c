@@ -17,6 +17,7 @@
 #include <linux/printk.h>
 #include <linux/uaccess.h>
 
+#include <asm/actlr.h>
 #include <asm/cacheflush.h>
 #include <asm/cputype.h>
 #include <asm/debug-monitors.h>

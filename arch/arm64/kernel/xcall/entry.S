@@ -151,32 +151,12 @@ alternative_else_nop_endif
 	sb
 	.endm /* .macro hw_xcal_restore_base_regs */
 
-SYM_CODE_START(no_xcall_entry)
-	ldp	x20, x21, [sp, #0]
-	kernel_entry 0, 64
-	mov	x0, sp
-	bl	el0t_64_sync_handler
-	b	ret_to_user
-SYM_CODE_END(no_xcall_entry)
-
 SYM_CODE_START(xcall_entry)
-	ldp	x20, x21, [sp, #0]
 	hw_xcall_save_base_regs
 	mov	x0, sp
 	bl	el0t_64_xcall_handler
 	hw_xcal_restore_base_regs
 SYM_CODE_END(xcall_entry)
-
-SYM_CODE_START_LOCAL(el0t_64_hw_xcall)
-	stp	x20, x21, [sp, #0]
-	ldr_this_cpu	x21, __cpu_xcall_entry, x20
-	mov	x20, __NR_syscalls
-	/* x8 >= __NR_syscalls */
-	cmp	x8, __NR_syscalls
-	csel	x20, x8, x20, lt
-	ldr	x21, [x21, x20, lsl #3]
-	br	x21
-SYM_CODE_END(el0t_64_hw_xcall)
 
 	.macro xcall_ventry
 	.align 7
@@ -190,6 +170,6 @@ SYM_CODE_END(el0t_64_hw_xcall)
 	msr	tpidrro_el0, xzr
 .Lskip_tramp_vectors_cleanup\@:
 	sub	sp, sp, #PT_REGS_SIZE
-	b	el0t_64_hw_xcall
+	b	xcall_entry
 .org .Lventry_start\@ + 128	// Did we overflow the ventry slot?
 	.endm

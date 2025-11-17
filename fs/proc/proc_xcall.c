@@ -4,56 +4,10 @@
  *
  * Copyright (C) 2025 Huawei Ltd.
  */
-#include <linux/cpufeature.h>
 #include <linux/sched.h>
 #include <linux/seq_file.h>
 #include <asm/xcall.h>
 #include "internal.h"
-
-#ifdef CONFIG_ACTLR_XCALL_XINT
-static void proc_hw_xcall_show(struct task_struct *p, struct seq_file *m)
-{
-	struct hw_xcall_info *hw_xinfo = TASK_HW_XINFO(p);
-	unsigned int i, start = 0, end = 0;
-	bool in_range = false;
-
-	if (!hw_xinfo)
-		return;
-
-	for (i = 0; i < __NR_syscalls; i++) {
-		bool scno_xcall_enable = is_xcall_entry(hw_xinfo, i);
-
-		if (scno_xcall_enable && !in_range) {
-			in_range = true;
-			start = i;
-		}
-
-		if ((!scno_xcall_enable || i == __NR_syscalls - 1) && in_range) {
-			in_range = false;
-			end = scno_xcall_enable ? i : i - 1;
-			if (i == start + 1)
-				seq_printf(m, "%u,", start);
-			else
-				seq_printf(m, "%u-%u,", start, end);
-		}
-	}
-	seq_puts(m, "\n");
-}
-
-static int proc_set_hw_xcall(struct task_struct *p, unsigned int sc_no,
-			     bool is_clear)
-{
-	struct hw_xcall_info *hw_xinfo = TASK_HW_XINFO(p);
-
-	if (!is_clear)
-		return set_hw_xcall_entry(hw_xinfo, sc_no, true);
-
-	if (is_clear)
-		return set_hw_xcall_entry(hw_xinfo, sc_no, false);
-
-	return -EINVAL;
-}
-#endif
 
 static int xcall_show(struct seq_file *m, void *v)
 {
@@ -62,19 +16,12 @@ static int xcall_show(struct seq_file *m, void *v)
 	unsigned int rs, re;
 	struct xcall_info *xinfo;
 
-	if (!system_uses_xcall_xint() && !static_key_enabled(&xcall_enable))
+	if (!static_key_enabled(&xcall_enable))
 		return -EACCES;
 
 	p = get_proc_task(inode);
 	if (!p)
 		return -ESRCH;
-
-#ifdef CONFIG_ACTLR_XCALL_XINT
-	if (system_uses_xcall_xint()) {
-		proc_hw_xcall_show(p, m);
-		goto out;
-	}
-#endif
 
 	xinfo = TASK_XINFO(p);
 	if (!xinfo)
@@ -124,7 +71,7 @@ static ssize_t xcall_write(struct file *file, const char __user *buf,
 	int is_clear = 0;
 	struct xcall_info *xinfo;
 
-	if (!system_uses_xcall_xint() && !static_key_enabled(&xcall_enable))
+	if (!static_key_enabled(&xcall_enable))
 		return -EACCES;
 
 	memset(buffer, 0, sizeof(buffer));
@@ -147,13 +94,6 @@ static ssize_t xcall_write(struct file *file, const char __user *buf,
 		ret = -EINVAL;
 		goto out;
 	}
-
-#ifdef CONFIG_ACTLR_XCALL_XINT
-	if (system_uses_xcall_xint()) {
-		ret = proc_set_hw_xcall(p, sc_no, is_clear);
-		goto out;
-	}
-#endif
 
 	xinfo = TASK_XINFO(p);
 	if (!is_clear && !test_bit(sc_no, xinfo->xcall_enable))

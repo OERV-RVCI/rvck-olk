@@ -2444,6 +2444,39 @@ static void mpam_extra_caps(void)
 #include <asm/xcall.h>
 DEFINE_STATIC_KEY_FALSE(xcall_enable);
 
+static int __init xcall_setup(char *str)
+{
+	static_branch_enable(&xcall_enable);
+
+	return 1;
+}
+__setup("xcall", xcall_setup);
+
+static bool has_xcall_support(const struct arm64_cpu_capabilities *entry, int __unused)
+{
+	return static_key_enabled(&xcall_enable);
+}
+#endif
+
+#ifdef CONFIG_FAST_IRQ
+bool is_xint_support;
+static int __init xint_setup(char *str)
+{
+	if (!cpus_have_cap(ARM64_HAS_GIC_CPUIF_SYSREGS))
+		return 1;
+
+	is_xint_support = true;
+	return 1;
+}
+__setup("xint", xint_setup);
+
+static bool has_xint_support(const struct arm64_cpu_capabilities *entry, int __unused)
+{
+	return is_xint_support;
+}
+#endif
+
+#ifdef CONFIG_ACTLR_XCALL_XINT
 #define AIDR_ELx_XCALL_SHIFT		32
 #define AIDR_ELx_XCALL			(UL(1) << AIDR_ELx_XCALL_SHIFT)
 
@@ -2478,42 +2511,11 @@ static bool is_arch_xcall_xint_support(void)
 	return false;
 }
 
-static int __init xcall_setup(char *str)
-{
-	if (!is_arch_xcall_xint_support())
-		static_branch_enable(&xcall_enable);
-
-	return 1;
-}
-__setup("xcall", xcall_setup);
-
-static bool has_xcall_support(const struct arm64_cpu_capabilities *entry, int __unused)
-{
-	return static_key_enabled(&xcall_enable);
-}
-#endif
-
-#ifdef CONFIG_FAST_IRQ
-bool is_xint_support;
-static int __init xint_setup(char *str)
-{
-	if (!cpus_have_cap(ARM64_HAS_GIC_CPUIF_SYSREGS))
-		return 1;
-
-	is_xint_support = true;
-	return 1;
-}
-__setup("xint", xint_setup);
-
-static bool has_xint_support(const struct arm64_cpu_capabilities *entry, int __unused)
-{
-	return is_xint_support;
-}
-#endif
-
-#ifdef CONFIG_ACTLR_XCALL_XINT
 static bool has_arch_xcall_xint_support(const struct arm64_cpu_capabilities *entry, int scope)
 {
+	if (!static_key_enabled(&xcall_enable))
+		return false;
+
 	return is_arch_xcall_xint_support();
 }
 
@@ -2555,14 +2557,14 @@ static void cpu_enable_arch_xcall_xint(const struct arm64_cpu_capabilities *__un
 	el = read_sysreg(CurrentEL);
 	if (el == CurrentEL_EL2) {
 		actlr_el2 = read_sysreg(actlr_el2);
-		actlr_el2 |= ACTLR_ELx_XINT;
+		actlr_el2 |= (ACTLR_ELx_XINT | ACTLR_ELx_XCALL);
 		write_sysreg(actlr_el2, actlr_el2);
 		isb();
 		actlr_el2 = read_sysreg(actlr_el2);
 		pr_info("actlr_el2: %llx, cpu:%d\n", actlr_el2, cpu);
 	} else {
 		actlr_el1 = read_sysreg(actlr_el1);
-		actlr_el1 |= ACTLR_ELx_XINT;
+		actlr_el1 |= (ACTLR_ELx_XINT | ACTLR_ELx_XCALL);
 		write_sysreg(actlr_el1, actlr_el1);
 		isb();
 		actlr_el1 = read_sysreg(actlr_el1);
