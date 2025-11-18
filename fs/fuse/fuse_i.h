@@ -896,6 +896,9 @@ struct fuse_conn {
 	/* write reques is aligned on max_write boundary */
 	unsigned int write_alignment:1;
 
+	/* Use io_uring for communication */
+	unsigned int io_uring;
+
 	/** Maximum stack depth for passthrough backing files */
 	int max_stack_depth;
 
