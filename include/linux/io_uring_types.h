@@ -204,8 +204,8 @@ struct io_submit_state {
 
 	bool			plug_started;
 	bool			need_plug;
-	bool			cq_flush;
 	unsigned short		submit_nr;
+	KABI_REPLACE(unsigned int cqes_count, bool cq_flush)
 	struct blk_plug		plug;
 };
 
