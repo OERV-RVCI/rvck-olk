@@ -174,7 +174,7 @@ struct io_submit_state {
 	bool			plug_started;
 	bool			need_plug;
 	unsigned short		submit_nr;
-	unsigned int		cqes_count;
+	KABI_REPLACE(unsigned int cqes_count, bool cq_flush)
 	struct blk_plug		plug;
 };
 
@@ -300,7 +300,7 @@ struct io_ring_ctx {
 		unsigned		cq_last_tm_flush;
 	} ____cacheline_aligned_in_smp;
 
-	struct io_uring_cqe	completion_cqes[16];
+	KABI_REPLACE(struct io_uring_cqe completion_cqes[16], struct hlist_head cancelable_uring_cmd)
 
 	spinlock_t		completion_lock;
 
@@ -381,8 +381,7 @@ struct io_ring_ctx {
 };
 
 struct io_tw_state {
-	/* ->uring_lock is taken, callbacks can use io_tw_lock to lock it */
-	bool locked;
+	KABI_DEPRECATE(bool, locked)
 };
 
 enum {
