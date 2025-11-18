@@ -1025,7 +1025,11 @@ struct mm_struct {
 #else
 	KABI_RESERVE(2)
 #endif
+#ifdef CONFIG_DYNAMIC_XCALL
+	KABI_USE(3, void *xcall)
+#else
 	KABI_RESERVE(3)
+#endif
 	KABI_RESERVE(4)
 	KABI_RESERVE(5)
 	/*

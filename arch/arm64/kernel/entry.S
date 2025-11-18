@@ -552,6 +552,10 @@ tsk	.req	x28		// current thread_info
 
 	.text
 
+#ifdef CONFIG_FAST_SYSCALL
+#include "xcall/entry.S"
+#endif
+
 /*
  * Exception vectors.
  */
@@ -569,7 +573,11 @@ SYM_CODE_START(vectors)
 	kernel_ventry	1, h, 64, fiq		// FIQ EL1h
 	kernel_ventry	1, h, 64, error		// Error EL1h
 
+#ifdef CONFIG_FAST_SYSCALL
+	sync_ventry				// Synchronous 64-bit EL0
+#else
 	kernel_ventry	0, t, 64, sync		// Synchronous 64-bit EL0
+#endif
 	kernel_ventry	0, t, 64, irq		// IRQ 64-bit EL0
 	kernel_ventry	0, t, 64, fiq		// FIQ 64-bit EL0
 	kernel_ventry	0, t, 64, error		// Error 64-bit EL0
@@ -581,8 +589,6 @@ SYM_CODE_START(vectors)
 SYM_CODE_END(vectors)
 
 #ifdef CONFIG_ACTLR_XCALL_XINT
-#include "xcall/entry.S"
-
 	.align	11
 SYM_CODE_START(vectors_xcall_xint)
 	kernel_ventry	1, t, 64, sync		// Synchronous EL1t
@@ -595,7 +601,11 @@ SYM_CODE_START(vectors_xcall_xint)
 	kernel_ventry	1, h, 64, fiq		// FIQ EL1h
 	kernel_ventry	1, h, 64, error		// Error EL1h
 
+#ifdef CONFIG_FAST_SYSCALL
+	sync_ventry				// Synchronous 64-bit EL0
+#else
 	kernel_ventry	0, t, 64, sync		// Synchronous 64-bit EL0
+#endif
 	kernel_ventry	0, t, 64, irq		// IRQ 64-bit EL0
 	kernel_ventry	0, t, 64, fiq		// FIQ 64-bit EL0
 	kernel_ventry	0, t, 64, error		// Error 64-bit EL0
@@ -605,7 +615,7 @@ SYM_CODE_START(vectors_xcall_xint)
 	kernel_ventry	0, t, 32, fiq		// FIQ 32-bit EL0
 	kernel_ventry	0, t, 32, error		// Error 32-bit EL0
 SYM_CODE_END(vectors_xcall_xint)
-#endif
+#endif /* CONFIG_ACTLR_XCALL_XINT */
 
 #ifdef CONFIG_VMAP_STACK
 SYM_CODE_START_LOCAL(__bad_stack)
@@ -636,65 +646,6 @@ SYM_CODE_START_LOCAL(__bad_stack)
 	ASM_BUG()
 SYM_CODE_END(__bad_stack)
 #endif /* CONFIG_VMAP_STACK */
-
-#ifdef CONFIG_FAST_SYSCALL
-	.macro check_esr_el1_ec_svc64
-	/* Only support SVC64 for now */
-	mrs	x20, esr_el1
-	lsr	w20, w20, #ESR_ELx_EC_SHIFT
-	cmp	x20, #ESR_ELx_EC_SVC64
-	.endm
-
-	.macro check_syscall_nr
-	cmp	x8, __NR_syscalls
-	.endm
-
-	.macro check_xcall_enable
-	/* x21 = task_struct->xinfo->xcall_enable */
-	ldr_this_cpu	x20, __entry_task, x21
-	ldr	x21, [x20, #TSK_XCALL]
-	/* x20 = sc_no / 8 */
-	lsr	x20, x8, 3
-	ldr	x21, [x21, x20]
-	/* x8 = sc_no % 8 */
-	and	x8, x8, 7
-	mov	x20, 1
-	lsl	x20, x20, x8
-	and	x21, x21, x20
-	cmp	x21, 0
-	.endm
-
-	.macro check_xcall_pre_kernel_entry
-	stp	x20, x21, [sp, #0]
-	/* is ESR_ELx_EC_SVC64 */
-	check_esr_el1_ec_svc64
-	bne	.Lskip_xcall\@
-	/* x8 >= __NR_syscalls */
-	check_syscall_nr
-	bhs	.Lskip_xcall\@
-	str	x8, [sp, #16]
-	/* is xcall enabled */
-	check_xcall_enable
-	ldr	x8, [sp, #16]
-	beq	.Lskip_xcall\@
-	ldp	x20, x21, [sp, #0]
-	/* do xcall */
-#ifdef CONFIG_SECURITY_FEATURE_BYPASS
-	kernel_entry 0, 64, xcall
-#else
-	kernel_entry 0, 64
-#endif
-	mov	x0, sp
-	bl	el0t_64_fast_syscall_handler
-#ifdef CONFIG_SECURITY_FEATURE_BYPASS
-	kernel_exit 0, xcall
-#else
-	b	ret_to_user
-#endif
-.Lskip_xcall\@:
-	ldp	x20, x21, [sp, #0]
-	.endm
-#endif
 
 #ifdef CONFIG_FAST_IRQ
 .macro check_xint_pre_kernel_entry
@@ -748,16 +699,6 @@ SYM_CODE_END(__bad_stack)
 
 	.macro entry_handler el:req, ht:req, regsize:req, label:req
 SYM_CODE_START_LOCAL(el\el\ht\()_\regsize\()_\label)
-#ifdef CONFIG_FAST_SYSCALL
-	.if \el == 0 && \regsize == 64 && \label == sync
-	/* Only support el0 aarch64 sync exception */
-	alternative_if_not ARM64_HAS_XCALL
-		b .Lret_to_kernel_entry\@
-	alternative_else_nop_endif
-		check_xcall_pre_kernel_entry
-	.Lret_to_kernel_entry\@:
-	.endif
-#endif
 #ifdef CONFIG_FAST_IRQ
 	.if \regsize == 64 && \label == irq && \el == 0 && \ht == t
 	alternative_if_not ARM64_HAS_XINT
@@ -797,7 +738,6 @@ SYM_CODE_END(el\el\ht\()_\regsize\()_\label)
 	entry_handler	0, t, 64, error
 
 #ifdef CONFIG_ACTLR_XCALL_XINT
-	entry_handler	0, t, 64, xcall
 	entry_handler	0, t, 64, xint
 #endif
 	entry_handler	0, t, 32, sync

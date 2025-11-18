@@ -75,11 +75,13 @@ void do_el1_fpac(struct pt_regs *regs, unsigned long esr);
 void do_el0_mops(struct pt_regs *regs, unsigned long esr);
 void do_serror(struct pt_regs *regs, unsigned long esr);
 void do_notify_resume(struct pt_regs *regs, unsigned long thread_flags);
+#ifdef CONFIG_FAST_SYSCALL
+void do_el0_xcall(struct pt_regs *regs);
+#endif
 
 void __noreturn panic_bad_stack(struct pt_regs *regs, unsigned long esr, unsigned long far);
 
 #ifdef CONFIG_ACTLR_XCALL_XINT
 asmlinkage void el0t_64_xint_handler(struct pt_regs *regs);
-asmlinkage void el0t_64_xcall_handler(struct pt_regs *regs);
 #endif
 #endif	/* __ASM_EXCEPTION_H */

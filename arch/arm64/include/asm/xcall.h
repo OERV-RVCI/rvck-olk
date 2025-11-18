@@ -2,95 +2,108 @@
 #ifndef __ASM_XCALL_H
 #define __ASM_XCALL_H
 
-#include <linux/atomic.h>
 #include <linux/jump_label.h>
-#include <linux/percpu.h>
+#include <linux/mm_types.h>
 #include <linux/sched.h>
-#include <linux/types.h>
+#include <linux/xcall.h>
+#include <linux/refcount.h>
 
-#include <asm/actlr.h>
-#include <asm/cpufeature.h>
+#include <asm/syscall.h>
+
+#define SVC_0000	0xd4000001
+#define SVC_FFFF	0xd41fffe1
+
+/*
+ * Only can switch by cmdline 'xcall=debug',
+ * By default xcall init with XCALL_MODE_TASK.
+ */
+#define XCALL_MODE_TASK		0
+#define XCALL_MODE_SYSTEM	1
+extern int sw_xcall_mode;
+
+struct xcall_comm {
+	char *name;
+	char *binary;
+	struct path binary_path;
+	char *module;
+	struct list_head list;
+};
+
+struct xcall {
+	/* used for xcall_attach */
+	struct list_head	list;
+	refcount_t		ref;
+	/* file attached xcall */
+	struct inode		*binary;
+	struct xcall_prog	*program;
+	char			*name;
+};
+
+struct xcall_area {
+	/*
+	 * 0...NR_syscalls - 1: function pointers to hijack default syscall
+	 * NR_syscalls...NR_syscalls * 2 - 1: function pointers in kernel module
+	 */
+	unsigned long		sys_call_table[NR_syscalls * 2];
+	refcount_t		ref;
+	struct xcall		*xcall;
+	void			*sys_call_data[NR_syscalls];
+};
+
+extern const syscall_fn_t *default_sys_call_table(void);
+#ifdef CONFIG_DYNAMIC_XCALL
+extern int xcall_attach(struct xcall_comm *info);
+extern int xcall_detach(struct xcall_comm *info);
+extern int xcall_pre_sstep_check(struct pt_regs *regs);
+extern int set_xcall_insn(struct mm_struct *mm, unsigned long vaddr,
+			  uprobe_opcode_t opcode);
+
+#define mm_xcall_area(mm)	((struct xcall_area *)((mm)->xcall))
+
+static inline long hijack_syscall(struct pt_regs *regs)
+{
+	struct xcall_area *area = mm_xcall_area(current->mm);
+	unsigned int scno = (unsigned int)regs->regs[8];
+	syscall_fn_t syscall_fn;
+
+	if (likely(!area))
+		return -EINVAL;
+
+	if (unlikely(scno >= __NR_syscalls))
+		return -EINVAL;
+
+	syscall_fn = (syscall_fn_t)area->sys_call_table[scno];
+	return syscall_fn(regs);
+}
+
+static inline const syscall_fn_t *real_syscall_table(void)
+{
+	struct xcall_area *area = mm_xcall_area(current->mm);
+
+	if (likely(!area))
+		return default_sys_call_table();
+
+	return (syscall_fn_t *)(&(area->sys_call_table[__NR_syscalls]));
+}
+#else
+#define mm_xcall_area(mm)	(NULL)
+#define hijack_syscall(regs)	(NULL)
+static inline const syscall_fn_t *real_syscall_table(void)
+{
+	return sys_call_table;
+}
+#endif /* CONFIG_DYNAMIC_XCALL */
 
 DECLARE_STATIC_KEY_FALSE(xcall_enable);
 
 struct xcall_info {
 	/* Must be first! */
-	DECLARE_BITMAP(xcall_enable, __NR_syscalls);
+	u8 xcall_enable[__NR_syscalls + 1];
 };
 
 #define TASK_XINFO(p)	((struct xcall_info *)p->xinfo)
 
 int xcall_init_task(struct task_struct *p, struct task_struct *orig);
 void xcall_task_free(struct task_struct *p);
-
-#ifdef CONFIG_ACTLR_XCALL_XINT
-struct hw_xcall_info {
-	/* Must be first! */
-	void *xcall_entry[__NR_syscalls + 1];
-	atomic_t xcall_scno_count;
-	/* keep xcall_entry and xcall scno count consistent */
-	spinlock_t lock;
-};
-
-#define TASK_HW_XINFO(p)	((struct hw_xcall_info *)p->xinfo)
-#define XCALL_ENTRY_SIZE	(sizeof(unsigned long) * (__NR_syscalls + 1))
-
-DECLARE_PER_CPU(void *, __cpu_xcall_entry);
-extern void xcall_entry(void);
-extern void no_xcall_entry(void);
-
-static inline bool is_xcall_entry(struct hw_xcall_info *xinfo, unsigned int sc_no)
-{
-	return xinfo->xcall_entry[sc_no] == xcall_entry;
-}
-
-static inline int set_hw_xcall_entry(struct hw_xcall_info *xinfo,
-				     unsigned int sc_no, bool enable)
-{
-	spin_lock(&xinfo->lock);
-	if (enable && !is_xcall_entry(xinfo, sc_no)) {
-		xinfo->xcall_entry[sc_no] = xcall_entry;
-		atomic_inc(&xinfo->xcall_scno_count);
-	}
-
-	if (!enable && is_xcall_entry(xinfo, sc_no)) {
-		xinfo->xcall_entry[sc_no] = no_xcall_entry;
-		atomic_dec(&xinfo->xcall_scno_count);
-	}
-	spin_unlock(&xinfo->lock);
-
-	return 0;
-}
-
-static inline void cpu_set_arch_xcall(bool enable)
-{
-	u64 el = read_sysreg(CurrentEL);
-	u64 val;
-
-	if (el == CurrentEL_EL2) {
-		val = read_sysreg(actlr_el2);
-		val = enable ? (val | ACTLR_ELx_XCALL) : (val & ~ACTLR_ELx_XCALL);
-		write_sysreg(val, actlr_el2);
-	} else {
-		val = read_sysreg(actlr_el1);
-		val = enable ? (val | ACTLR_ELx_XCALL) : (val & ~ACTLR_ELx_XCALL);
-		write_sysreg(val, actlr_el1);
-	}
-}
-
-static inline void cpu_switch_xcall_entry(struct task_struct *tsk)
-{
-	struct hw_xcall_info *xinfo = tsk->xinfo;
-
-	if (!system_uses_xcall_xint() || !tsk->xinfo)
-		return;
-
-	if (unlikely(atomic_read(&xinfo->xcall_scno_count) > 0)) {
-		__this_cpu_write(__cpu_xcall_entry, xinfo->xcall_entry);
-		cpu_set_arch_xcall(true);
-	} else
-		cpu_set_arch_xcall(false);
-}
-#endif /* CONFIG_ACTLR_XCALL_XINT */
-
-#endif /*__ASM_XCALL_H*/
+void xcall_info_switch(struct task_struct *p);
+#endif /* __ASM_XCALL_H */
