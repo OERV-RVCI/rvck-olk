@@ -295,12 +295,6 @@ struct io_ring_ctx {
 		 */
 		struct io_wq_work_list	iopoll_list;
 		bool			poll_multi_queue;
-
-		/*
-		 * Any cancelable uring_cmd is added to this list in
-		 * ->uring_cmd() by io_uring_cmd_insert_cancelable()
-		 */
-		struct hlist_head	cancelable_uring_cmd;
 	} ____cacheline_aligned_in_smp;
 
 	struct {
@@ -336,6 +330,8 @@ struct io_ring_ctx {
 		struct list_head	ltimeout_list;
 		unsigned		cq_last_tm_flush;
 	} ____cacheline_aligned_in_smp;
+
+	KABI_REPLACE(struct io_uring_cqe completion_cqes[16], struct hlist_head cancelable_uring_cmd)
 
 	spinlock_t		completion_lock;
 
