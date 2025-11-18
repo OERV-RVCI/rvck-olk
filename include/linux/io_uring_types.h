@@ -416,6 +416,7 @@ struct io_ring_ctx {
 };
 
 struct io_tw_state {
+	KABI_DEPRECATE(bool, locked)
 };
 
 enum {
