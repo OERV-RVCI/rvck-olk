@@ -12,6 +12,8 @@
 #define FUSE_INT_REQ_BIT (1ULL << 0)
 #define FUSE_REQ_ID_STEP (1ULL << 1)
 
+#define DEFAULT_BG_QUEUE	READ
+
 struct fuse_arg;
 struct fuse_args;
 struct fuse_pqueue;
