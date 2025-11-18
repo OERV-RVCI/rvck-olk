@@ -3,11 +3,41 @@
 #define _LINUX_IO_URING_CMD_H
 
 #include <uapi/linux/io_uring.h>
-#include <linux/io_uring_types.h>
 
 /* only top 8 bits of sqe->uring_cmd_flags for kernel internal use */
 #define IORING_URING_CMD_CANCELABLE	(1U << 30)
 #define IORING_URING_CMD_POLLED		(1U << 31)
+
+enum {
+	/*
+	 * A hint to not wake right away but delay until there are enough of
+	 * tw's queued to match the number of CQEs the task is waiting for.
+	 *
+	 * Must not be used wirh requests generating more than one CQE.
+	 * It's also ignored unless IORING_SETUP_DEFER_TASKRUN is set.
+	 */
+	IOU_F_TWQ_LAZY_WAKE			= 1,
+};
+
+enum io_uring_cmd_flags {
+	IO_URING_F_COMPLETE_DEFER	= 1,
+	IO_URING_F_UNLOCKED		= 2,
+	/* the request is executed from poll, it should not be freed */
+	IO_URING_F_MULTISHOT		= 4,
+	/* executed by io-wq */
+	IO_URING_F_IOWQ			= 8,
+	/* int's last bit, sign checks are usually faster than a bit test */
+	IO_URING_F_NONBLOCK		= INT_MIN,
+
+	/* ctx state flags, for URING_CMD */
+	IO_URING_F_SQE128		= (1 << 8),
+	IO_URING_F_CQE32		= (1 << 9),
+	IO_URING_F_IOPOLL		= (1 << 10),
+
+	/* set when uring wants to cancel a previously issued command */
+	IO_URING_F_CANCEL		= (1 << 11),
+	IO_URING_F_TASK_DEAD		= (1 << 13),
+};
 
 struct io_uring_cmd {
 	struct file	*file;
