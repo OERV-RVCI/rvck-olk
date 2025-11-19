@@ -1978,7 +1978,8 @@ static int hclge_dbg_dump_mng_table(struct seq_file *s, void *data)
 
 
 static int hclge_dbg_fd_tcam_read(struct hclge_dev *hdev, bool sel_x,
-				  struct seq_file *s, u8 stage, u32 loc)
+				  struct seq_file *s,
+				  struct hclge_dbg_tcam_msg tcam_msg)
 {
 	struct hclge_fd_tcam_config_1_cmd *req1;
 	struct hclge_fd_tcam_config_2_cmd *req2;
@@ -1997,15 +1998,15 @@ static int hclge_dbg_fd_tcam_read(struct hclge_dev *hdev, bool sel_x,
 	req2 = (struct hclge_fd_tcam_config_2_cmd *)desc[1].data;
 	req3 = (struct hclge_fd_tcam_config_3_cmd *)desc[2].data;
 
-	req1->stage  = stage;
+	req1->stage  = tcam_msg.stage;
 	req1->xy_sel = sel_x ? 1 : 0;
-	req1->index  = cpu_to_le32(loc);
+	req1->index  = cpu_to_le32(tcam_msg.loc);
 
 	ret = hclge_cmd_send(&hdev->hw, desc, 3);
 	if (ret)
 		return ret;
 
-	seq_printf(s, "read result tcam key %s(%u):\n", sel_x ? "x" : "y", loc);
+	seq_printf(s, "read result tcam key %s(%u):\n", sel_x ? "x" : "y", tcam_msg.loc);
 
 	/* tcam_data0 ~ tcam_data1 */
 	req = (__le32 *)req1->tcam_data;
@@ -2044,11 +2045,13 @@ static int hclge_dbg_get_rules_location(struct hclge_dev *hdev, u16 *rule_locs)
 	return cnt;
 }
 
-static int hclge_dbg_dump_fd_tcam(struct hclge_dev *hdev, struct seq_file *s)
+static int hclge_dbg_dump_fd_tcam(struct seq_file *s, void *data)
 {
-	u32 rule_num = hdev->fd_cfg.rule_num[HCLGE_FD_STAGE_1];
+	struct hclge_dev *hdev = hclge_seq_file_to_hdev(s);
+	struct hclge_dbg_tcam_msg tcam_msg;
 	int i, ret, rule_cnt;
 	u16 *rule_locs;
+	u32 rule_num;
 
 	if (!hnae3_ae_dev_fd_supported(hdev->ae_dev)) {
 		dev_err(&hdev->pdev->dev,
@@ -2056,6 +2059,7 @@ static int hclge_dbg_dump_fd_tcam(struct hclge_dev *hdev, struct seq_file *s)
 		return -EOPNOTSUPP;
 	}
 
+	rule_num = hdev->fd_cfg.rule_num[HCLGE_FD_STAGE_1];
 	if (!hdev->hclge_fd_rule_num || !rule_num)
 		return 0;
 
@@ -2073,14 +2077,17 @@ static int hclge_dbg_dump_fd_tcam(struct hclge_dev *hdev, struct seq_file *s)
 
 	ret = 0;
 	for (i = 0; i < rule_cnt; i++) {
-		ret = hclge_dbg_fd_tcam_read(hdev, true, s, HCLGE_FD_STAGE_1, rule_locs[i]);
+		tcam_msg.stage = HCLGE_FD_STAGE_1;
+		tcam_msg.loc = rule_locs[i];
+
+		ret = hclge_dbg_fd_tcam_read(hdev, true, s, tcam_msg);
 		if (ret) {
 			dev_err(&hdev->pdev->dev,
 				"failed to get fd tcam key x, ret = %d\n", ret);
 			goto out;
 		}
 
-		ret = hclge_dbg_fd_tcam_read(hdev, false, s, HCLGE_FD_STAGE_1, rule_locs[i]);
+		ret = hclge_dbg_fd_tcam_read(hdev, false, s, tcam_msg);
 		if (ret) {
 			dev_err(&hdev->pdev->dev,
 				"failed to get fd tcam key y, ret = %d\n", ret);
@@ -2091,73 +2098,6 @@ static int hclge_dbg_dump_fd_tcam(struct hclge_dev *hdev, struct seq_file *s)
 out:
 	kfree(rule_locs);
 	return ret;
-}
-
-static int hclge_query_rules_valid(struct hclge_dev *hdev, u8 stage, u32 loc)
-{
-#define HCLGE_TCAM_SELECTION_X	1
-	struct hclge_fd_tcam_config_1_cmd *req1;
-	struct hclge_fd_tcam_config_2_cmd *req2;
-	struct hclge_fd_tcam_config_3_cmd *req3;
-	struct hclge_desc desc[3];
-	int ret;
-
-	hclge_cmd_setup_basic_desc(&desc[0], HCLGE_OPC_FD_TCAM_OP, true);
-	desc[0].flag |= cpu_to_le16(HCLGE_COMM_CMD_FLAG_NEXT);
-	hclge_cmd_setup_basic_desc(&desc[1], HCLGE_OPC_FD_TCAM_OP, true);
-	desc[1].flag |= cpu_to_le16(HCLGE_COMM_CMD_FLAG_NEXT);
-	hclge_cmd_setup_basic_desc(&desc[2], HCLGE_OPC_FD_TCAM_OP, true);
-
-	req1 = (struct hclge_fd_tcam_config_1_cmd *)desc[0].data;
-	req2 = (struct hclge_fd_tcam_config_2_cmd *)desc[1].data;
-	req3 = (struct hclge_fd_tcam_config_3_cmd *)desc[2].data;
-
-	req1->stage = stage;
-	req1->xy_sel = HCLGE_TCAM_SELECTION_X;
-	req1->index = cpu_to_le32(loc);
-
-	ret = hclge_cmd_send(&hdev->hw, desc, 3);
-	if (ret) {
-		dev_err(&hdev->pdev->dev,
-			"failed to read tcam status, ret = %d\n", ret);
-		return ret;
-	}
-
-	return req1->entry_vld;
-}
-
-static int hclge_dbg_dump_qb_tcam(struct hclge_dev *hdev, struct seq_file *s)
-{
-	int ret = 0;
-	u32 i;
-
-	if (!hnae3_ae_dev_fd_supported(hdev->ae_dev)) {
-		dev_err(&hdev->pdev->dev,
-			"Only FD-supported dev supports dump fd tcam\n");
-		return -EOPNOTSUPP;
-	}
-
-	for (i = 0; i < hdev->fd_cfg.rule_num[HCLGE_FD_STAGE_1]; i++) {
-		if (hclge_query_rules_valid(hdev, HCLGE_FD_STAGE_1, i) <= 0)
-			continue;
-
-		ret = hclge_dbg_fd_tcam_read(hdev, true, s,
-					     HCLGE_FD_STAGE_1, i);
-		if (ret) {
-			dev_err(&hdev->pdev->dev,
-				"failed to get qb tcam key x, ret = %d\n", ret);
-			return ret;
-		}
-
-		ret = hclge_dbg_fd_tcam_read(hdev, false, s,
-					     HCLGE_FD_STAGE_1, i);
-		if (ret) {
-			dev_err(&hdev->pdev->dev,
-				"failed to get qb tcam key y, ret = %d\n", ret);
-			return ret;
-		}
-	}
-	return 0;
 }
 
 static int hclge_dbg_dump_fd_counter(struct seq_file *s, void *data)
@@ -2847,16 +2787,6 @@ static int hclge_dbg_dump_ptp_info(struct seq_file *s, void *data)
 	return 0;
 }
 
-static int hclge_dbg_dump_tcam(struct seq_file *s, void *data)
-{
-	struct hclge_dev *hdev = hclge_seq_file_to_hdev(s);
-
-	if (test_bit(HCLGE_STATE_HW_QB_ENABLE, &hdev->state))
-		return hclge_dbg_dump_qb_tcam(hdev, s);
-	else
-		return hclge_dbg_dump_fd_tcam(hdev, s);
-};
-
 static int hclge_dbg_dump_mac_uc(struct seq_file *s, void *data)
 {
 	hclge_dbg_dump_mac_list(s, true);
@@ -3002,7 +2932,7 @@ static const struct hclge_dbg_func hclge_dbg_cmd_func[] = {
 	},
 	{
 		.cmd = HNAE3_DBG_CMD_FD_TCAM,
-		.dbg_read_func = hclge_dbg_dump_tcam,
+		.dbg_read_func = hclge_dbg_dump_fd_tcam,
 	},
 	{
 		.cmd = HNAE3_DBG_CMD_SERV_INFO,
