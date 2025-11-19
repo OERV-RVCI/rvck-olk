@@ -1289,18 +1289,16 @@ static void ioinf_pd_init(struct blkg_policy_data *pd)
 	struct blkcg_gq *parent = blkg->parent;
 
 	infg->inf = q_to_inf(blkg->q);
-	if (!parent || parent->blkcg->css.cgroup->level == 0) {
-		infcg->dfl_user_weight = 0;
-		return;
-	}
-
-	infg->user_weight = blkg_to_infg(parent)->user_weight;
+	if (parent)
+		infg->user_weight = blkg_to_infg(parent)->user_weight;
 
 	/* Inherit the parent cgroup's dfl_user_weight if it was not set. */
 	if (infcg->dfl_user_weight == IOINFG_WEIGHT_UNINIT) {
-		struct ioinf_cgrp *parent_cgrp = blkcg_to_infcg(parent->blkcg);
-
-		infcg->dfl_user_weight = parent_cgrp->dfl_user_weight;
+		if (!parent || parent->blkcg->css.cgroup->level == 0)
+			infcg->dfl_user_weight = 0;
+		else
+			infcg->dfl_user_weight =
+				blkcg_to_infcg(parent->blkcg)->dfl_user_weight;
 	}
 
 	infg->dfl_user_weight = infcg->dfl_user_weight;
