@@ -66,6 +66,7 @@ static ssize_t xcall_write(struct file *file, const char __user *ubuf,
 {
 	unsigned int sc_no = __NR_syscalls;
 	struct task_struct *p;
+	int is_clear = 0;
 	char buf[5];
 	int ret = 0;
 
@@ -82,7 +83,8 @@ static ssize_t xcall_write(struct file *file, const char __user *ubuf,
 		goto out;
 	}
 
-	if (kstrtouint((buf + (int)(buf[0] == '!')), 10, &sc_no)) {
+	is_clear = (buf[0] == '!');
+	if (kstrtouint((buf + is_clear), 10, &sc_no)) {
 		ret = -EINVAL;
 		goto out;
 	}
@@ -92,9 +94,12 @@ static ssize_t xcall_write(struct file *file, const char __user *ubuf,
 		goto out;
 	}
 
-	(TASK_XINFO(p))->xcall_enable[sc_no] = (int)(buf[0] != '!');
-	ret = 0;
-
+	if (!is_clear && !(TASK_XINFO(p))->xcall_enable[sc_no])
+		(TASK_XINFO(p))->xcall_enable[sc_no] = 1;
+	else if (is_clear && (TASK_XINFO(p))->xcall_enable[sc_no])
+		(TASK_XINFO(p))->xcall_enable[sc_no] = 0;
+	else
+		ret = -EINVAL;
 out:
 	put_task_struct(p);
 
