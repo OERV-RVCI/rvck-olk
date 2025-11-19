@@ -1003,6 +1003,7 @@ logic_ummu_viommu_alloc_domain_nested(struct iommufd_viommu *viommu,
 		if (!domain->pgsize_bitmap)
 			domain->pgsize_bitmap = drv_ops->pgsize_bitmap;
 		nested_base_domain = to_ummu_base_domain(domain);
+		nested_base_domain->core_dev = &ummu->core_dev;
 		nested_base_domain->parent = logic_vummu->parent;
 		if (!domain->ops) {
 			ret = -EOPNOTSUPP;
@@ -1286,6 +1287,7 @@ static int logic_ummu_def_domain_type(struct device *dev)
 	return ops->def_domain_type(dev);
 }
 
+#ifdef CONFIG_UB_UMMU_SVA
 static void logic_ummu_remove_dev_pasid(struct device *dev, ioasid_t pasid,
 					struct iommu_domain *domain)
 {
@@ -1321,6 +1323,7 @@ static void logic_ummu_remove_dev_pasid(struct device *dev, ioasid_t pasid,
 	/* release the tid */
 	ummu_core_free_tid(&logic_ummu.core_dev, tid);
 }
+#endif
 
 static int logic_ummu_set_group_qos_params(struct iommu_group *group,
 					   u16 partid,
