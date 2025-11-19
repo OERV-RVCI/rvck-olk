@@ -56,3 +56,35 @@ int xsched_xcu_init(struct xsched_cu *xcu, struct xcu_group *group, int xcu_id)
 	}
 	return 0;
 }
+
+int xsched_init_entity(struct xsched_context *ctx, struct vstream_info *vs)
+{
+	int err = 0;
+	struct xsched_entity *xse = &ctx->xse;
+
+	xse->fd = ctx->fd;
+	xse->tgid = ctx->tgid;
+
+	err = ctx_bind_to_xcu(vs, ctx);
+	if (err) {
+		XSCHED_ERR(
+			"Couldn't find valid xcu for vstream %u dev_id %u @ %s\n",
+			vs->id, vs->dev_id, __func__);
+		return -EINVAL;
+	}
+
+	xse->ctx = ctx;
+
+	if (vs->xcu == NULL) {
+		WARN_ON(vs->xcu == NULL);
+		return -EINVAL;
+	}
+
+	xse->xcu = vs->xcu;
+
+	WRITE_ONCE(xse->on_rq, false);
+
+	spin_lock_init(&xse->xse_lock);
+	return err;
+}
+
