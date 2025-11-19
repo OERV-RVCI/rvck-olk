@@ -5,6 +5,7 @@ config XCU_SCHEDULER
     default n
     select XCU_VSTREAM
     select XCU_SCHED_RT
+    select XCU_SCHED_CFS
     help
       This option enables the XSched scheduler, a custom scheduling mechanism
       designed for heterogeneous compute units (e.g., XPUs). It provides:
@@ -49,3 +50,21 @@ config XCU_SCHED_RT
 
       Unless you are using RT workloads that rely on strict priority-based
       scheduling within XCU, it is recommended to keep the default setting.
+
+config XCU_SCHED_CFS
+    bool "XCU CFS scheduling class"
+    default n
+    depends on XCU_SCHEDULER
+    help
+      Enable support for the CFS scheduling class in the XCU scheduler.
+
+      This option allows the XCU scheduler to manage tasks using a fair-share
+      scheduling model similar to the Completely Fair Scheduler (CFS).
+      XCU-CFS provides proportional CPU sharing based on weights and supports
+      hierarchical control through cgroups.
+
+      Enable this option if you want to run workloads that rely on fair,
+      weight-based CPU distribution within the XCU scheduling framework.
+      If your workload does not require proportional sharing or uses only the
+      RT scheduling class, you may leave this disabled.
+

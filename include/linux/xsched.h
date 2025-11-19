@@ -38,15 +38,24 @@
 
 #define MAX_VSTREAM_NUM 512
 
+#define RUNTIME_INF ((u64)~0ULL)
+#define XSCHED_TIME_INF RUNTIME_INF
+#define XSCHED_CFS_WEIGHT_DFLT 1
+
 /*
  * A default kick slice for RT class XSEs.
  */
 #define XSCHED_RT_KICK_SLICE 2
+/*
+ * A default kick slice for CFS class XSEs.
+ */
+#define XSCHED_CFS_KICK_SLICE 10
 
 extern struct xsched_cu *xsched_cu_mgr[XSCHED_NR_CUS];
 
 enum xcu_sched_type {
 	XSCHED_TYPE_RT = 0,
+	XSCHED_TYPE_CFS = 1,
 	XSCHED_TYPE_NUM,
 	XSCHED_TYPE_DFLT = XSCHED_TYPE_RT
 };
@@ -59,6 +68,7 @@ enum xse_prio {
 };
 
 extern struct xsched_class rt_xsched_class;
+extern struct xsched_class fair_xsched_class;
 
 #define xsched_first_class \
 	list_first_entry(&(xsched_class_list), struct xsched_class, node)
@@ -83,6 +93,14 @@ struct xsched_rq_rt {
 	unsigned int nr_running;
 };
 
+/* Manages xsched CFS-like class rbtree based runqueue. */
+struct xsched_rq_cfs {
+	unsigned int nr_running;
+	unsigned int load;
+	u64 min_xruntime;
+	struct rb_root_cached ctx_timeline;
+};
+
 /* Base XSched runqueue object structure that contains both mutual and
  * individual parameters for different scheduling classes.
  */
@@ -94,6 +112,8 @@ struct xsched_rq {
 	int nr_running;
 	/* RT class run queue.*/
 	struct xsched_rq_rt rt;
+	/* CFS class run queue.*/
+	struct xsched_rq_cfs cfs;
 };
 
 enum xsched_cu_status {
@@ -148,6 +168,21 @@ struct xsched_entity_rt {
 	ktime_t timeslice;
 };
 
+struct xsched_entity_cfs {
+	struct rb_node run_node;
+
+	/* Rq on which this entity is (to be) queued. */
+	struct xsched_rq_cfs *cfs_rq;
+
+	/* Value of "virtual" runtime to sort entities in rbtree */
+	u64 xruntime;
+	u32 weight;
+
+	/* Execution time of scheduling entity */
+	u64 exec_start;
+	u64 sum_exec_runtime;
+};
+
 struct xsched_entity {
 	uint32_t task_type;
 
@@ -176,6 +211,8 @@ struct xsched_entity {
 
 	/* RT class entity. */
 	struct xsched_entity_rt rt;
+	/* CFS class entity. */
+	struct xsched_entity_cfs cfs;
 
 	/* Pointer to context object. */
 	struct xsched_context *ctx;

@@ -193,6 +193,10 @@ int xsched_xse_set_class(struct xsched_entity *xse)
 		xse->class = &rt_xsched_class;
 		XSCHED_DEBUG("Context is in RT class %s\n", __func__);
 		break;
+	case XSCHED_TYPE_CFS:
+		xse->class = &fair_xsched_class;
+		XSCHED_DEBUG("Context is in CFS class %s\n", __func__);
+		break;
 	default:
 		XSCHED_ERR("Xse has incorrect class @ %s\n", __func__);
 		return -EINVAL;
@@ -362,7 +366,7 @@ int xsched_schedule(void *input_xcu)
 	while (!kthread_should_stop()) {
 		mutex_unlock(&xcu->xcu_lock);
 		wait_event_interruptible(xcu->wq_xcu_idle,
-			xcu->xrq.rt.nr_running);
+			xcu->xrq.rt.nr_running || xcu->xrq.cfs.nr_running || kthread_should_stop());
 
 		mutex_lock(&xcu->xcu_lock);
 		if (kthread_should_stop()) {
@@ -499,6 +503,10 @@ __init int xsched_sched_init(void)
 	INIT_LIST_HEAD(&xsched_class_list);
 #ifdef CONFIG_XCU_SCHED_RT
 	xsched_register_sched_class(&rt_xsched_class);
+#endif
+
+#ifdef CONFIG_XCU_SCHED_CFS
+	xsched_register_sched_class(&fair_xsched_class);
 #endif
 
 	return 0;
