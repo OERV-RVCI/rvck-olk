@@ -188,9 +188,16 @@ int delete_ctx(struct xsched_context *ctx)
 
 int xsched_xse_set_class(struct xsched_entity *xse)
 {
-	struct xsched_class *sched = xsched_first_class;
+	switch (xse->task_type) {
+	case XSCHED_TYPE_RT:
+		xse->class = &rt_xsched_class;
+		XSCHED_DEBUG("Context is in RT class %s\n", __func__);
+		break;
+	default:
+		XSCHED_ERR("Xse has incorrect class @ %s\n", __func__);
+		return -EINVAL;
+	}
 
-	xse->class = sched;
 	return 0;
 }
 
@@ -354,7 +361,8 @@ int xsched_schedule(void *input_xcu)
 
 	while (!kthread_should_stop()) {
 		mutex_unlock(&xcu->xcu_lock);
-		wait_event_interruptible(xcu->wq_xcu_idle, 1);
+		wait_event_interruptible(xcu->wq_xcu_idle,
+			xcu->xrq.rt.nr_running);
 
 		mutex_lock(&xcu->xcu_lock);
 		if (kthread_should_stop()) {
@@ -480,4 +488,20 @@ int xsched_init_entity(struct xsched_context *ctx, struct vstream_info *vs)
 	spin_lock_init(&xse->xse_lock);
 	return err;
 }
+
+static void xsched_register_sched_class(struct xsched_class *sched)
+{
+	list_add_tail(&sched->node, &xsched_class_list);
+}
+
+__init int xsched_sched_init(void)
+{
+	INIT_LIST_HEAD(&xsched_class_list);
+#ifdef CONFIG_XCU_SCHED_RT
+	xsched_register_sched_class(&rt_xsched_class);
+#endif
+
+	return 0;
+}
+late_initcall(xsched_sched_init);
 

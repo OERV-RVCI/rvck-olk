@@ -20,7 +20,7 @@
 #include <linux/xcu_group.h>
 #include <linux/xsched.h>
 
-static int num_active_xcu;
+int num_active_xcu;
 static DEFINE_SPINLOCK(xcu_mgr_lock);
 struct xsched_cu *xsched_cu_mgr[XSCHED_NR_CUS];
 static DECLARE_RWSEM(xcu_group_rwsem);

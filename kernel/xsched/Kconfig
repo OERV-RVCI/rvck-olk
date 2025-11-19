@@ -4,6 +4,7 @@ config XCU_SCHEDULER
     bool "Enable XSched functionality"
     default n
     select XCU_VSTREAM
+    select XCU_SCHED_RT
     help
       This option enables the XSched scheduler, a custom scheduling mechanism
       designed for heterogeneous compute units (e.g., XPUs). It provides:
@@ -34,3 +35,17 @@ config XSCHED_NR_CUS
       This option defines the maximum number of Compute Units (CUs) that can be
       managed by the XSched scheduler, consider changing this value proportionally
       to the number of available XCU cores.
+
+config XCU_SCHED_RT
+    bool "XCU RT scheduling class"
+    default y
+    depends on XCU_SCHEDULER
+    help
+      Enable support for the RT scheduling class in the XCU scheduler.
+
+      This option allows XCU to schedule tasks using real-time priorities
+      (XSCHED_TYPE_RT). When enabled, tasks in RT cgroups can be assigned
+      deterministic priorities and will be scheduled ahead of CFS tasks.
+
+      Unless you are using RT workloads that rely on strict priority-based
+      scheduling within XCU, it is recommended to keep the default setting.

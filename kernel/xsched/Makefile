@@ -3,4 +3,5 @@ obj-y += vstream.o
 
 ifdef CONFIG_XCU_SCHEDULER
 obj-y += core.o
+obj-$(CONFIG_XCU_SCHED_RT) += rt.o
 endif

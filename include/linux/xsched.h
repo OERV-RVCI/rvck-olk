@@ -38,9 +38,27 @@
 
 #define MAX_VSTREAM_NUM 512
 
+/*
+ * A default kick slice for RT class XSEs.
+ */
+#define XSCHED_RT_KICK_SLICE 2
+
+extern struct xsched_cu *xsched_cu_mgr[XSCHED_NR_CUS];
+
 enum xcu_sched_type {
-	XSCHED_TYPE_NUM
+	XSCHED_TYPE_RT = 0,
+	XSCHED_TYPE_NUM,
+	XSCHED_TYPE_DFLT = XSCHED_TYPE_RT
 };
+
+enum xse_prio {
+	XSE_PRIO_HIGH = 0,
+	XSE_PRIO_LOW = 4,
+	NR_XSE_PRIO,
+	XSE_PRIO_DFLT = XSE_PRIO_LOW
+};
+
+extern struct xsched_class rt_xsched_class;
 
 #define xsched_first_class \
 	list_first_entry(&(xsched_class_list), struct xsched_class, node)
@@ -48,8 +66,22 @@ enum xcu_sched_type {
 #define for_each_xsched_class(class)                                           \
 	list_for_each_entry((class), &(xsched_class_list), node)
 
+#define for_each_xse_prio(prio)                                                \
+	for (prio = XSE_PRIO_HIGH; prio < NR_XSE_PRIO; prio++)
 #define for_each_vstream_in_ctx(vs, ctx)                                       \
 	list_for_each_entry((vs), &((ctx)->vstream_list), ctx_node)
+
+
+/* Manages xsched RT-like class linked list based runqueue.
+ *
+ * Now RT-like class runqueue structs is identical
+ * but will most likely grow different in the
+ * future as the Xsched evolves.
+ */
+struct xsched_rq_rt {
+	struct list_head rq[NR_XSE_PRIO];
+	unsigned int nr_running;
+};
 
 /* Base XSched runqueue object structure that contains both mutual and
  * individual parameters for different scheduling classes.
@@ -60,6 +92,8 @@ struct xsched_rq {
 
 	int state;
 	int nr_running;
+	/* RT class run queue.*/
+	struct xsched_rq_rt rt;
 };
 
 enum xsched_cu_status {
@@ -102,6 +136,18 @@ struct xsched_cu {
 	wait_queue_head_t wq_xcu_idle;
 };
 
+extern int num_active_xcu;
+#define for_each_active_xcu(xcu, id)                                           \
+	for ((id) = 0, xcu = xsched_cu_mgr[(id)];                                  \
+	     (id) < num_active_xcu && (xcu = xsched_cu_mgr[(id)]); (id)++)
+
+struct xsched_entity_rt {
+	struct list_head list_node;
+	enum xse_prio prio;
+
+	ktime_t timeslice;
+};
+
 struct xsched_entity {
 	uint32_t task_type;
 
@@ -127,6 +173,9 @@ struct xsched_entity {
 
 	/* Xsched class for this xse. */
 	const struct xsched_class *class;
+
+	/* RT class entity. */
+	struct xsched_entity_rt rt;
 
 	/* Pointer to context object. */
 	struct xsched_context *ctx;
@@ -279,6 +328,7 @@ int xsched_init_entity(struct xsched_context *ctx, struct vstream_info *vs);
 int ctx_bind_to_xcu(vstream_info_t *vstream_info, struct xsched_context *ctx);
 int xsched_vsm_add_tail(struct vstream_info *vs, vstream_args_t *arg);
 struct vstream_metadata *xsched_vsm_fetch_first(struct vstream_info *vs);
+int xsched_rt_prio_set(pid_t tgid, unsigned int prio);
 void enqueue_ctx(struct xsched_entity *xse, struct xsched_cu *xcu);
 void dequeue_ctx(struct xsched_entity *xse, struct xsched_cu *xcu);
 int delete_ctx(struct xsched_context *ctx);
