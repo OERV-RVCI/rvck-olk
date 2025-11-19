@@ -18,7 +18,7 @@
 #include <linux/vstream.h>
 #include <linux/xsched.h>
 
-#if defined(CONFIG_XCU_VSTREAM)
+#if defined(CONFIG_XCU_SCHEDULER) && defined(CONFIG_XCU_VSTREAM)
 
 int vstream_alloc(struct vstream_args *arg)
 {

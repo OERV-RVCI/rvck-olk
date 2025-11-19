@@ -25,3 +25,12 @@ config XCU_VSTREAM
 
       Requires XCU_SCHEDULER to be enabled. May increase kernel memory usage.
       Recommended for high-throughput XPU workloads. If unsure, say N.
+
+config XSCHED_NR_CUS
+    int "Number of CUs (a.k.a. XCUs) available to XSched mechanism"
+    default 128
+    depends on XCU_SCHEDULER
+    help
+      This option defines the maximum number of Compute Units (CUs) that can be
+      managed by the XSched scheduler, consider changing this value proportionally
+      to the number of available XCU cores.
