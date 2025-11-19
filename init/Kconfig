@@ -488,6 +488,7 @@ source "kernel/time/Kconfig"
 source "kernel/bpf/Kconfig"
 source "kernel/bpf-rvi/Kconfig"
 source "kernel/Kconfig.preempt"
+source "kernel/xsched/Kconfig"
 
 menu "CPU/Task time and stats accounting"
 

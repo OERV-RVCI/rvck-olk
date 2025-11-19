@@ -826,8 +826,9 @@ __SYSCALL(__NR_fchmodat2, sys_fchmodat2)
 #define __NR_map_shadow_stack 453
 __SYSCALL(__NR_map_shadow_stack, sys_map_shadow_stack)
 
-#define __NR_kabi_reserved454 454
-__SYSCALL(__NR_kabi_reserved454, sys_ni_syscall)
+#define __NR_vstream_manage 454
+__SYSCALL(__NR_vstream_manage, sys_vstream_manage)
+
 #define __NR_kabi_reserved455 455
 __SYSCALL(__NR_kabi_reserved455, sys_ni_syscall)
 #define __NR_kabi_reserved456 456

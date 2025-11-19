@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: GPL-2.0
+
+config XCU_SCHEDULER
+    bool "Enable XSched functionality"
+    default n
+    select XCU_VSTREAM
+    help
+      This option enables the XSched scheduler, a custom scheduling mechanism
+      designed for heterogeneous compute units (e.g., XPUs). It provides:
+      - Priority-based task scheduling with latency-sensitive optimizations.
+      - Integration with cgroups (via CGROUP_XCU) for resource isolation.
+
+      Enable this only if your system requires advanced scheduling for XPU workloads.
+      If unsure, say N.
+
+config XCU_VSTREAM
+    bool "Enable vstream SQ/CQ buffers maintaining for XPU"
+    default n
+    depends on XCU_SCHEDULER
+    help
+      This option enables virtual stream (vstream) support for XPUs, managing
+      submission queues (SQ) and completion queues (CQ) in kernel space. Key features:
+      - Zero-copy buffer management between user and kernel space.
+      - Batch processing of XPU commands to reduce MMIO overhead.
+
+      Requires XCU_SCHEDULER to be enabled. May increase kernel memory usage.
+      Recommended for high-throughput XPU workloads. If unsure, say N.
