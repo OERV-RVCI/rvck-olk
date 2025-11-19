@@ -191,7 +191,7 @@ void __init setup_per_cpu_areas(void)
 #endif
 
 #define DISTANCE_MAX		(1 << DISTANCE_BITS)
-int __init node_reclaim_distance_setup(char *str)
+static int __init node_reclaim_distance_setup(char *str)
 {
 	int val;
 
