@@ -628,7 +628,7 @@ static int attach_page_range(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 		trace_attach_extent_start(dst_mm, src_mm, dst_addr, src_addr, dst_pmd,
 					src_pmd, extent);
 		ret = attach_pte_range(dst_vma, src_vma, dst_addr, src_addr, dst_pmd,
-					src_pmd, PMD_SIZE);
+					src_pmd, extent);
 		trace_attach_extent_end(dst_mm, src_mm, dst_addr, src_addr, dst_pmd,
 					src_pmd, ret);
 		if (ret < 0)
