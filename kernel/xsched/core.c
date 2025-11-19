@@ -400,6 +400,11 @@ int xsched_schedule(void *input_xcu)
 		if (!atomic_read(&curr_xse->kicks_pending_ctx_cnt))
 			dequeue_ctx(curr_xse, xcu);
 
+#ifdef CONFIG_CGROUP_XCU
+		if (xsched_quota_exceed(curr_xse->parent_grp))
+			dequeue_ctx(&curr_xse->parent_grp->perxcu_priv[xcu->id].xse, xcu);
+#endif
+
 		xcu->xrq.curr_xse = NULL;
 	}
 

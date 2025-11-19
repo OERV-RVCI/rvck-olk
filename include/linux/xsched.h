@@ -42,6 +42,7 @@
 #define RUNTIME_INF ((u64)~0ULL)
 #define XSCHED_TIME_INF RUNTIME_INF
 #define XSCHED_CFS_WEIGHT_DFLT 1
+#define XSCHED_CFS_QUOTA_PERIOD_MS (100 * NSEC_PER_MSEC)
 #define XSCHED_CFG_SHARE_DFLT 1024
 
 /*
@@ -257,6 +258,16 @@ struct xsched_group_xcu_priv {
 	struct xsched_entity xse; /* xse of this group on runqueue */
 	struct xsched_rq_cfs *cfs_rq; /* cfs runqueue "owned" by this group */
 	struct xsched_rq_rt *rt_rq; /* rt runqueue "owned" by this group */
+	/* Statistics */
+	int nr_throttled;
+	u64 throttled_time;
+};
+
+enum xcu_file_type {
+	XCU_FILE_PERIOD_MS,
+	XCU_FILE_QUOTA_MS,
+	XCU_FILE_SHARES,
+	NR_XCU_FILE_TYPES,
 };
 
 /* Xsched scheduling control group */
@@ -274,6 +285,14 @@ struct xsched_group {
 	u32 weight;
 	u64 children_shares_sum;
 
+	/* Bandwidth setting: maximal quota in period */
+	s64 quota;
+	/* record the runtime of operators during the period */
+	s64 runtime;
+	s64 period;
+	struct hrtimer quota_timeout;
+	struct work_struct refill_work;
+
 	struct xsched_group_xcu_priv perxcu_priv[XSCHED_NR_CUS];
 
 	/* Groups hierarchcy */
@@ -285,6 +304,10 @@ struct xsched_group {
 
 	/* for XSE to move in perxcu */
 	struct list_head members;
+
+	/* to control the xcu.{period, quota, shares} files shown or not */
+	struct cgroup_file xcu_file[NR_XCU_FILE_TYPES];
+	struct work_struct file_show_work;
 };
 
 #define XSCHED_RQ_OF(xse)                                                      \
@@ -456,6 +479,7 @@ static inline void xsched_init_vsm(struct vstream_metadata *vsm,
 				struct vstream_info *vs, vstream_args_t *arg)
 {
 	vsm->sq_id = arg->sq_id;
+	vsm->exec_time = arg->vk_args.exec_time;
 	vsm->sqe_num = arg->vk_args.sqe_num;
 	vsm->timeout = arg->vk_args.timeout;
 	memcpy(vsm->sqe, arg->vk_args.sqe, XCU_SQE_SIZE_MAX);
@@ -480,4 +504,11 @@ void xcu_cg_subsys_init(void);
 void xcu_cfs_root_cg_init(struct xsched_cu *xcu);
 void xcu_grp_shares_update(struct xsched_group *parent);
 void xsched_group_xse_detach(struct xsched_entity *xse);
+
+void xsched_quota_init(void);
+void xsched_quota_timeout_init(struct xsched_group *xg);
+void xsched_quota_timeout_update(struct xsched_group *xg);
+void xsched_quota_account(struct xsched_group *xg, s64 exec_time);
+bool xsched_quota_exceed(struct xsched_group *xg);
+void xsched_quota_refill(struct work_struct *work);
 #endif /* !__LINUX_XSCHED_H__ */

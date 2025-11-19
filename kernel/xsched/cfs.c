@@ -204,6 +204,7 @@ static void put_prev_ctx_fair(struct xsched_entity *xse)
 {
 	struct xsched_entity_cfs *prev = &xse->cfs;
 
+	xsched_quota_account(xse->parent_grp, (s64)xse->last_exec_runtime);
 	xs_update(prev, xse->last_exec_runtime);
 }
 
