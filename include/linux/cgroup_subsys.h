@@ -61,6 +61,10 @@ SUBSYS(pids)
 SUBSYS(rdma)
 #endif
 
+#if IS_ENABLED(CONFIG_CGROUP_XCU)
+SUBSYS(xcu)
+#endif
+
 #if IS_ENABLED(CONFIG_CGROUP_MISC)
 SUBSYS(misc)
 #endif

@@ -2,6 +2,7 @@
 #ifndef __LINUX_XSCHED_H__
 #define __LINUX_XSCHED_H__
 
+#include <linux/cgroup.h>
 #include <linux/kref.h>
 #include <linux/vstream.h>
 #include <linux/xcu_group.h>
@@ -41,6 +42,7 @@
 #define RUNTIME_INF ((u64)~0ULL)
 #define XSCHED_TIME_INF RUNTIME_INF
 #define XSCHED_CFS_WEIGHT_DFLT 1
+#define XSCHED_CFG_SHARE_DFLT 1024
 
 /*
  * A default kick slice for RT class XSEs.
@@ -226,9 +228,95 @@ struct xsched_entity {
 	 */
 	struct xsched_cu *xcu;
 
+	/* Link to list of xsched_group items */
+	struct list_head group_node;
+	struct xsched_group *parent_grp;
+	bool is_group;
+
 	/* General purpose xse lock. */
 	spinlock_t xse_lock;
 };
+
+struct xcg_attach_entry {
+	struct task_struct *task;
+	struct xsched_group *old_xcg;
+	struct xsched_group *new_xcg;
+
+	struct list_head node;
+};
+
+/* xsched_group's xcu related stuff */
+struct xsched_group_xcu_priv {
+	/* Owner of this group */
+	struct xsched_group *self;
+
+	/* xcu id */
+	int xcu_id;
+
+	/* Link to scheduler */
+	struct xsched_entity xse; /* xse of this group on runqueue */
+	struct xsched_rq_cfs *cfs_rq; /* cfs runqueue "owned" by this group */
+	struct xsched_rq_rt *rt_rq; /* rt runqueue "owned" by this group */
+};
+
+/* Xsched scheduling control group */
+struct xsched_group {
+	/* Cgroups controller structure */
+	struct cgroup_subsys_state css;
+
+	/* Control group settings: */
+	int sched_class;
+	int prio;
+
+	/* Bandwidth setting: shares value set by user */
+	u64 shares_cfg;
+	u64 shares_cfg_red;
+	u32 weight;
+	u64 children_shares_sum;
+
+	struct xsched_group_xcu_priv perxcu_priv[XSCHED_NR_CUS];
+
+	/* Groups hierarchcy */
+	struct xsched_group *parent;
+	struct list_head children_groups;
+	struct list_head group_node;
+
+	spinlock_t lock;
+
+	/* for XSE to move in perxcu */
+	struct list_head members;
+};
+
+#define XSCHED_RQ_OF(xse)                                                      \
+	(container_of(((xse)->cfs.cfs_rq), struct xsched_rq, cfs))
+
+#define XSCHED_RQ_OF_CFS_XSE(cfs_xse)                                          \
+	(container_of(((cfs_xse)->cfs_rq), struct xsched_rq, cfs))
+
+#define XSCHED_SE_OF(cfs_xse)                                                  \
+	(container_of((cfs_xse), struct xsched_entity, cfs))
+
+#define xcg_parent_grp_xcu(xcg)                                                \
+	((xcg)->self->parent->perxcu_priv[(xcg)->xcu_id])
+
+#define xse_parent_grp_xcu(xse_cfs)                                            \
+	(&((XSCHED_SE_OF(xse_cfs)                                                  \
+		    ->parent_grp->perxcu_priv[(XSCHED_SE_OF(xse_cfs))->xcu->id])))
+
+static inline struct xsched_group_xcu_priv *
+xse_this_grp_xcu(struct xsched_entity_cfs *xse_cfs)
+{
+	struct xsched_entity *xse;
+
+	xse = xse_cfs ? container_of(xse_cfs, struct xsched_entity, cfs) : NULL;
+	return xse ? container_of(xse, struct xsched_group_xcu_priv, xse) : NULL;
+}
+
+static inline struct xsched_group *
+xse_this_grp(struct xsched_entity_cfs *xse_cfs)
+{
+	return xse_cfs ? xse_this_grp_xcu(xse_cfs)->self : NULL;
+}
 
 /* Increments pending kicks counter for an XCU that the given
  * xsched entity is attached to and for xsched entity's xsched
@@ -315,6 +403,22 @@ ctx_find_by_tgid_and_xcu(pid_t tgid, struct xsched_cu *xcu)
 	return ret;
 }
 
+static inline u64 gcd(u64 a, u64 b)
+{
+	u64 rem;
+
+	while (a != 0 && b != 0) {
+		if (a > b) {
+			div64_u64_rem(a, b, &rem);
+			a = rem;
+		} else {
+			div64_u64_rem(b, a, &rem);
+			b = rem;
+		}
+	}
+	return (a) ? a : b;
+}
+
 struct xsched_class {
 	enum xcu_sched_type class_id;
 	size_t kick_slice;
@@ -369,4 +473,11 @@ int xsched_rt_prio_set(pid_t tgid, unsigned int prio);
 void enqueue_ctx(struct xsched_entity *xse, struct xsched_cu *xcu);
 void dequeue_ctx(struct xsched_entity *xse, struct xsched_cu *xcu);
 int delete_ctx(struct xsched_context *ctx);
+
+/* Xsched group manage functions */
+void xsched_group_inherit(struct task_struct *tsk, struct xsched_entity *xse);
+void xcu_cg_subsys_init(void);
+void xcu_cfs_root_cg_init(struct xsched_cu *xcu);
+void xcu_grp_shares_update(struct xsched_group *parent);
+void xsched_group_xse_detach(struct xsched_entity *xse);
 #endif /* !__LINUX_XSCHED_H__ */

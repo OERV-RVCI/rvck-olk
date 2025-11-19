@@ -6,6 +6,7 @@ config XCU_SCHEDULER
     select XCU_VSTREAM
     select XCU_SCHED_RT
     select XCU_SCHED_CFS
+    select CGROUP_XCU
     help
       This option enables the XSched scheduler, a custom scheduling mechanism
       designed for heterogeneous compute units (e.g., XPUs). It provides:
@@ -68,3 +69,17 @@ config XCU_SCHED_CFS
       If your workload does not require proportional sharing or uses only the
       RT scheduling class, you may leave this disabled.
 
+config CGROUP_XCU
+    bool "XCU bandwidth control and group scheduling for xsched_cfs"
+    default n
+    depends on XCU_SCHEDULER
+    help
+      This option enables the extended Compute Unit (XCU) resource controller for
+      CFS task groups, providing hierarchical scheduling and fine-grained bandwidth
+      allocation capabilities. Key features include:
+      - Proportional XCU time distribution across cgroups based on shares/quotas
+      - Nested group scheduling with latency isolation
+      - Integration with xsched_cfs for fair CPU resource management
+
+      Required for systems requiring fine-grained resource control in cgroups.
+      If unsure, say N.

@@ -183,25 +183,27 @@ int delete_ctx(struct xsched_context *ctx)
 		atomic_read(&xse->kicks_pending_ctx_cnt), __func__);
 
 	xse->class->xse_deinit(xse);
+
+#ifdef CONFIG_CGROUP_XCU
+	xsched_group_xse_detach(xse);
+#endif
+
 	return 0;
 }
 
 int xsched_xse_set_class(struct xsched_entity *xse)
 {
-	switch (xse->task_type) {
-	case XSCHED_TYPE_RT:
-		xse->class = &rt_xsched_class;
-		XSCHED_DEBUG("Context is in RT class %s\n", __func__);
-		break;
-	case XSCHED_TYPE_CFS:
-		xse->class = &fair_xsched_class;
-		XSCHED_DEBUG("Context is in CFS class %s\n", __func__);
-		break;
-	default:
-		XSCHED_ERR("Xse has incorrect class @ %s\n", __func__);
-		return -EINVAL;
-	}
+	struct xsched_class *sched = xsched_first_class;
 
+#ifdef CONFIG_CGROUP_XCU
+	xsched_group_inherit(current, xse);
+	for_each_xsched_class(sched) {
+		if (sched->class_id == xse->parent_grp->sched_class)
+			break;
+	}
+#endif
+
+	xse->class = sched;
 	return 0;
 }
 
@@ -507,6 +509,10 @@ __init int xsched_sched_init(void)
 
 #ifdef CONFIG_XCU_SCHED_CFS
 	xsched_register_sched_class(&fair_xsched_class);
+#endif
+
+#ifdef CONFIG_CGROUP_XCU
+	xcu_cg_subsys_init();
 #endif
 
 	return 0;

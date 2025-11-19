@@ -327,6 +327,8 @@ int xsched_xcu_register(struct xcu_group *group, uint32_t phys_id)
 		return ret;
 	}
 
+	xcu_cfs_root_cg_init(xcu);
+
 	return 0;
 }
 EXPORT_SYMBOL(xsched_xcu_register);
