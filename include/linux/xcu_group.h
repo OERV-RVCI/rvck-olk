@@ -17,6 +17,11 @@ enum xcu_type {
 	XCU_TYPE_XPU,
 };
 
+enum xcu_sqe_op_type {
+	SQE_SET_NOTIFY,
+	SQE_IS_NOTIFY,
+};
+
 struct xcu_op_handler_params {
 	int fd;
 	struct xcu_group *group;
@@ -45,6 +50,7 @@ struct xcu_operation {
 	xcu_op_handler_fn_t alloc;
 	xcu_op_handler_fn_t logic_alloc;
 	xcu_op_handler_fn_t logic_free;
+	xcu_op_handler_fn_t sqe_op;
 };
 
 struct xcu_group {
@@ -83,6 +89,7 @@ extern int xcu_finish(struct xcu_op_handler_params *params);
 extern int xcu_alloc(struct xcu_op_handler_params *params);
 extern int xcu_logic_alloc(struct xcu_op_handler_params *params);
 extern int xcu_logic_free(struct xcu_op_handler_params *params);
+extern int xcu_sqe_op(struct xcu_op_handler_params *params);
 
 int xsched_xcu_register(struct xcu_group *group, uint32_t phys_id);
 int xsched_xcu_unregister(struct xcu_group *group, uint32_t phys_id);

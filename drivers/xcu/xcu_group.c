@@ -221,6 +221,22 @@ int xcu_logic_free(struct xcu_op_handler_params *params)
 	return params->group->opt->logic_free(params);
 }
 
+/* This function runs a "sqe_op" callback for a given xcu_group
+ * and a given vstream that are passed within
+ * xcu_op_handler_params object.
+ *
+ * This handler provides an interface to set or get sqe info.
+ */
+int xcu_sqe_op(struct xcu_op_handler_params *params)
+{
+	if (!params->group->opt || !params->group->opt->sqe_op) {
+		XSCHED_ERR("No function [sqe_op] called.\n");
+		return -EINVAL;
+	}
+
+	return params->group->opt->sqe_op(params);
+}
+
 static struct xcu_group __xcu_group_root = {
 	.id = 0,
 	.type = XCU_TYPE_ROOT,

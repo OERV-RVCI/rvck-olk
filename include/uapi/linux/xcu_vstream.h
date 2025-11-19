@@ -6,6 +6,9 @@
 
 #define PAYLOAD_SIZE_MAX 512
 #define XCU_SQE_SIZE_MAX 64
+#define XCU_CQE_SIZE_MAX 32
+#define XCU_CQE_REPORT_NUM 4
+#define XCU_CQE_BUF_SIZE (XCU_CQE_REPORT_NUM * XCU_CQE_SIZE_MAX)
 
 #define KABI_RESERVE_BYTES(idx, n) \
 	__u8 __kabi_reserved_##idx[n]

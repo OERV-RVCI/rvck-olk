@@ -85,6 +85,7 @@ static void xsched_task_free(struct kref *kref)
 		kfree(vs);
 	}
 
+	delete_ctx(ctx);
 	list_del(&ctx->ctx_node);
 	mutex_unlock(&xcu->ctx_list_lock);
 
@@ -237,6 +238,7 @@ static int alloc_ctx_from_vstream(struct vstream_info *vstream_info,
 	}
 
 	list_add(&(*ctx)->ctx_node, &xcu->ctx_list);
+	++xcu->nr_ctx;
 
 	return 0;
 }
@@ -570,7 +572,64 @@ int vstream_free(struct vstream_args *arg)
 
 int vstream_kick(struct vstream_args *arg)
 {
-	return 0;
+	vstream_info_t *vstream;
+	struct xsched_cu *xcu = NULL;
+	struct xsched_entity *xse;
+	int err = 0;
+	uint32_t vstream_id = arg->sq_id;
+	uint32_t type = XCU_TYPE_XPU;
+
+	xcu = xcu_find(type, arg->dev_id, arg->channel_id);
+	if (!xcu)
+		return -EINVAL;
+
+	/* Get vstream. */
+	vstream = vstream_get(xcu, vstream_id);
+	if (!vstream || !vstream->ctx) {
+		XSCHED_ERR("Vstream NULL or doesn't have a context. vstream_id=%u, dev_id=%u\n",
+			vstream_id, arg->dev_id);
+		return -EINVAL;
+	}
+
+	xse = &vstream->ctx->xse;
+	XSCHED_DEBUG("New kick on xse %d @ %s\n", xse->tgid, __func__);
+
+	do {
+		mutex_lock(&xcu->xcu_lock);
+		spin_lock(&vstream->stream_lock);
+
+		/* Adding kick metadata. */
+		err = xsched_vsm_add_tail(vstream, arg);
+		if (err == -EBUSY) {
+			spin_unlock(&vstream->stream_lock);
+			mutex_unlock(&xcu->xcu_lock);
+
+			/* Retry after a while */
+			usleep_range(100, 200);
+			continue;
+		}
+
+		/* Don't forget to unlock */
+		if (err) {
+			XSCHED_ERR("Fail to add kick metadata to vs %u @ %s\n",
+				vstream->id, __func__);
+			break;
+		}
+
+		enqueue_ctx(xse, xcu);
+
+		/* Increasing a total amount of kicks on an CU to which this
+		 * context is attached to based on sched_class.
+		 */
+		xsched_inc_pending_kicks_xse(&vstream->ctx->xse);
+	} while (err == -EBUSY);
+
+	spin_unlock(&vstream->stream_lock);
+	mutex_unlock(&xcu->xcu_lock);
+	if (!err)
+		wake_up_interruptible(&xcu->wq_xcu_idle);
+
+	return err;
 }
 
 /*

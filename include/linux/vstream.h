@@ -3,6 +3,38 @@
 #define _LINUX_VSTREAM_H
 
 #include <uapi/linux/xcu_vstream.h>
+#include <linux/ktime.h>
+
+#define MAX_VSTREAM_SIZE 2048
+
+/* Vstream metadata describes each incoming kick
+ * that gets stored into a list of pending kicks
+ * inside a vstream to keep track of what is left
+ * to be processed by a driver.
+ */
+typedef struct vstream_metadata {
+	uint32_t exec_time;
+	/* A value of SQ tail that has been passed with the
+	 * kick that is described by this exact metadata object.
+	 */
+	uint32_t sq_tail;
+	uint32_t sqe_num;
+	uint32_t sq_id;
+	uint8_t sqe[XCU_SQE_SIZE_MAX];
+
+	/* Report buffer for fake read. */
+	int8_t cqe[XCU_CQE_BUF_SIZE];
+	uint32_t cqe_num;
+	int32_t timeout;
+
+	/* A node for metadata list */
+	struct list_head node;
+
+	struct vstream_info *parent;
+
+	/* Time of list insertion */
+	ktime_t add_time;
+} vstream_metadata_t;
 
 typedef int vstream_manage_t(struct vstream_args *arg);
 
