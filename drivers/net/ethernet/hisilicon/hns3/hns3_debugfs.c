@@ -709,7 +709,7 @@ static void hns3_dump_tx_bd_info(struct hns3_desc *desc, struct seq_file *s,
 		   le16_to_cpu(desc->tx.outer_vlan_tag),
 		   le16_to_cpu(desc->tx.tv),
 		   le32_to_cpu(desc->tx.ol_type_vlan_len_msec),
-		   le32_to_cpu(desc->tx.paylen_fdop_ol4cs),
+		   le32_to_cpu(desc->tx.paylen_ol4cs),
 		   le16_to_cpu(desc->tx.bdtp_fe_sc_vld_ra_ri),
 		   le16_to_cpu(desc->tx.mss_hw_csum));
 }
@@ -734,7 +734,7 @@ static int hns3_dbg_tx_bd_info(struct seq_file *s, void *private)
 	seq_printf(s, "Queue %u tx bd info:\n", data->qid);
 	seq_puts(s, "BD_IDX  ADDRESS             VLAN_TAG  SIZE  ");
 	seq_puts(s, "T_CS_VLAN_TSO  OT_VLAN_TAG   TV     OLT_VLAN_LEN  ");
-	seq_puts(s, "PAYLEN_FDOP_OL4CS  BD_FE_SC_VLD   MSS_HW_CSUM\n");
+	seq_puts(s, "PAYLEN_OL4CS  BD_FE_SC_VLD   MSS_HW_CSUM\n");
 
 	ring = &priv->ring[data->qid];
 	for (i = 0; i < ring->desc_num; i++) {
