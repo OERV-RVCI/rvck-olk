@@ -4874,8 +4874,7 @@ static int hclge_sync_vf_qb_mode(struct hclge_vport *vport)
 	ret = hclge_set_fd_qb(hdev, vport->vport_id, request_enable);
 	if (ret)
 		set_bit(HCLGE_VPORT_STATE_QB_CHANGE, &vport->state);
-	else
-		vport->vf_info.qb_en = request_enable ? 1 : 0;
+	vport->vf_info.qb_en = request_enable ? 1 : 0;
 
 	return ret;
 }
