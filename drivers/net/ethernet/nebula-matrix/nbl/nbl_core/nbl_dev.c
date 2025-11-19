@@ -2066,6 +2066,16 @@ nbl_dev_netdev_set_vf_vlan(struct net_device *netdev, int vf_id, u16 vlan, u8 pr
 }
 
 static int
+nbl_dev_netdev_set_vf_trust(struct net_device *netdev, int vf_id, bool trusted)
+{
+	struct nbl_adapter *adapter = NBL_NETDEV_TO_ADAPTER(netdev);
+	struct nbl_dev_mgt *dev_mgt = NBL_ADAPTER_TO_DEV_MGT(adapter);
+	struct nbl_service_ops *serv_ops = NBL_DEV_MGT_TO_SERV_OPS(dev_mgt);
+
+	return serv_ops->set_vf_trust(netdev, vf_id, trusted);
+}
+
+static int
 nbl_dev_netdev_setup_tc(struct net_device *netdev, enum tc_setup_type type, void *type_data)
 {
 	struct nbl_adapter *adapter = NBL_NETDEV_TO_ADAPTER(netdev);
@@ -2216,6 +2226,7 @@ static const struct net_device_ops netdev_ops_leonis_pf = {
 	.ndo_get_vf_stats = nbl_dev_netdev_get_vf_stats,
 	.ndo_select_queue = nbl_dev_netdev_select_queue,
 	.ndo_set_vf_vlan = nbl_dev_netdev_set_vf_vlan,
+	.ndo_set_vf_trust = nbl_dev_netdev_set_vf_trust,
 	.ndo_setup_tc = nbl_dev_netdev_setup_tc,
 	.ndo_change_mtu = nbl_dev_netdev_change_mtu,
 	.ndo_get_phys_port_name = nbl_dev_ndo_get_phys_port_name,
