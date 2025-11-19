@@ -342,10 +342,10 @@ static int nbl_route_lookup_ipv6(const struct nbl_common_info *common,
 	}
 
 	dev_hold(real_out_dev);
-
+#ifdef CONFIG_IPV6
 	if (!tun_route_info->ttl)
 		tun_route_info->ttl = (u8)ip6_dst_hoplimit(dst);
-
+#endif
 	n = dst_neigh_lookup(dst, &tun_route_info->fl.fl6.daddr);
 	if (!n) {
 		ret = -ENONET;
