@@ -1,0 +1,526 @@
+// SPDX-License-Identifier: GPL-2.0+
+/*
+ * Core kernel scheduler code for XPU device
+ *
+ * Copyright (C) 2025-2026 Huawei Technologies Co., Ltd
+ *
+ * Author: Konstantin Meskhidze <konstantin.meskhidze@huawei.com>
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms and conditions of the GNU General Public License,
+ * version 2, as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ *
+ */
+#include <linux/delay.h>
+#include <linux/kthread.h>
+#include <linux/slab.h>
+#include <linux/spinlock_types.h>
+#include <linux/types.h>
+#include <linux/xsched.h>
+
+/* List of scheduling classes available */
+struct list_head xsched_class_list;
+
+static void put_prev_ctx(struct xsched_entity *xse)
+{
+	struct xsched_cu *xcu = xse->xcu;
+
+	lockdep_assert_held(&xcu->xcu_lock);
+	xse->class->put_prev_ctx(xse);
+	xse->last_exec_runtime = 0;
+	atomic_set(&xse->submitted_one_kick, 0);
+	XSCHED_DEBUG("Put current xse %d @ %s\n", xse->tgid, __func__);
+}
+
+static size_t select_work_def(struct xsched_cu *xcu, struct xsched_entity *xse)
+{
+	int kick_count, scheduled = 0, not_empty;
+	struct vstream_info *vs;
+	struct xcu_op_handler_params params;
+	struct vstream_metadata *vsm;
+	size_t kick_slice = xse->class->kick_slice;
+
+	kick_count = atomic_read(&xse->kicks_pending_ctx_cnt);
+	XSCHED_DEBUG("Before decrement XSE kick_count=%d @ %s\n",
+		kick_count, __func__);
+
+	if (kick_count == 0) {
+		XSCHED_WARN("Try to select xse that has 0 kicks @ %s\n",
+			__func__);
+		return 0;
+	}
+
+	do {
+		not_empty = 0;
+		for_each_vstream_in_ctx(vs, xse->ctx) {
+			spin_lock(&vs->stream_lock);
+			vsm = xsched_vsm_fetch_first(vs);
+			spin_unlock(&vs->stream_lock);
+			if (!vsm)
+				continue;
+			list_add_tail(&vsm->node, &xcu->vsm_list);
+			scheduled++;
+			xsched_dec_pending_kicks_xse(xse);
+			not_empty++;
+		}
+	} while ((scheduled < kick_slice) && (not_empty));
+
+	/*
+	 * Iterate over all vstreams in context:
+	 * Set wr_cqe bit in last computing task in vsm_list
+	 */
+	for_each_vstream_in_ctx(vs, xse->ctx) {
+		list_for_each_entry_reverse(vsm, &xcu->vsm_list, node) {
+			if (vsm->parent == vs) {
+				params.group = vsm->parent->xcu->group;
+				params.param_1 = &(int){SQE_SET_NOTIFY};
+				params.param_2 = &vsm->sqe;
+				xcu_sqe_op(&params);
+				break;
+			}
+		}
+	}
+
+	kick_count = atomic_read(&xse->kicks_pending_ctx_cnt);
+	XSCHED_DEBUG("After decrement XSE kick_count=%d @ %s\n",
+		    kick_count, __func__);
+
+	xse->total_scheduled += scheduled;
+	return scheduled;
+}
+
+static struct xsched_entity *__raw_pick_next_ctx(struct xsched_cu *xcu)
+{
+	const struct xsched_class *class;
+	struct xsched_entity *next = NULL;
+	size_t scheduled;
+
+	lockdep_assert_held(&xcu->xcu_lock);
+	for_each_xsched_class(class) {
+		next = class->pick_next_ctx(xcu);
+		if (next) {
+			scheduled = class->select_work ?
+				class->select_work(xcu, next) : select_work_def(xcu, next);
+
+			XSCHED_DEBUG("xse %d scheduled=%zu total=%zu @ %s\n",
+				next->tgid, scheduled, next->total_scheduled, __func__);
+			break;
+		}
+	}
+
+	return next;
+}
+
+void enqueue_ctx(struct xsched_entity *xse, struct xsched_cu *xcu)
+{
+	lockdep_assert_held(&xcu->xcu_lock);
+
+	if (xse_integrity_check(xse)) {
+		XSCHED_ERR("Fail to check xse integrity @ %s\n", __func__);
+		return;
+	}
+
+	if (!xse->on_rq) {
+		xse->on_rq = true;
+		xse->class->enqueue_ctx(xse, xcu);
+		XSCHED_DEBUG("Enqueue xse %d @ %s\n", xse->tgid, __func__);
+	}
+}
+
+void dequeue_ctx(struct xsched_entity *xse, struct xsched_cu *xcu)
+{
+	lockdep_assert_held(&xcu->xcu_lock);
+
+	if (xse_integrity_check(xse)) {
+		XSCHED_ERR("Fail to check xse integrity @ %s\n", __func__);
+		return;
+	}
+
+	if (xse->on_rq) {
+		xse->class->dequeue_ctx(xse);
+		xse->on_rq = false;
+		XSCHED_DEBUG("Dequeue xse %d @ %s\n", xse->tgid, __func__);
+	}
+}
+
+int delete_ctx(struct xsched_context *ctx)
+{
+	struct xsched_cu *xcu = ctx->xse.xcu;
+	struct xsched_entity *curr_xse = xcu->xrq.curr_xse;
+	struct xsched_entity *xse = &ctx->xse;
+
+	if (xse_integrity_check(xse)) {
+		XSCHED_ERR("Fail to check xse integrity @ %s\n", __func__);
+		return -EINVAL;
+	}
+
+	if (!xse->xcu) {
+		XSCHED_ERR("Try to delete ctx that is not attached to xcu @ %s\n",
+			__func__);
+		return -EINVAL;
+	}
+
+	/* Wait till context has been submitted. */
+	while (atomic_read(&xse->kicks_pending_ctx_cnt)) {
+		XSCHED_DEBUG("Deleting ctx %d, xse->kicks_pending_ctx_cnt=%d @ %s\n",
+			xse->tgid, atomic_read(&xse->kicks_pending_ctx_cnt),
+			__func__);
+		usleep_range(100, 200);
+	}
+
+	mutex_lock(&xcu->xcu_lock);
+	if (curr_xse == xse)
+		xcu->xrq.curr_xse = NULL;
+	dequeue_ctx(xse, xcu);
+	--xcu->nr_ctx;
+	mutex_unlock(&xcu->xcu_lock);
+	XSCHED_DEBUG("Deleting ctx %d, pending kicks left=%d @ %s\n", xse->tgid,
+		atomic_read(&xse->kicks_pending_ctx_cnt), __func__);
+
+	xse->class->xse_deinit(xse);
+
+#ifdef CONFIG_CGROUP_XCU
+	xsched_group_xse_detach(xse);
+#endif
+
+	return 0;
+}
+
+int xsched_xse_set_class(struct xsched_entity *xse)
+{
+	struct xsched_class *sched = xsched_first_class;
+
+#ifdef CONFIG_CGROUP_XCU
+	xsched_group_inherit(current, xse);
+	for_each_xsched_class(sched) {
+		if (sched->class_id == xse->parent_grp->sched_class)
+			break;
+	}
+#endif
+
+	xse->class = sched;
+	return 0;
+}
+
+static void submit_kick(struct vstream_metadata *vsm)
+{
+	struct vstream_info *vs = vsm->parent;
+	struct xcu_op_handler_params params;
+
+	params.group = vs->xcu->group;
+	params.fd = vs->fd;
+	params.param_1 = &vs->id;
+	params.param_2 = &vs->channel_id;
+	params.param_3 = vsm->sqe;
+	params.param_4 = &vsm->sqe_num;
+	params.param_5 = &vsm->timeout;
+	params.param_6 = &vs->sqcq_type;
+	params.param_7 = vs->drv_ctx;
+	params.param_8 = &vs->logic_vcq_id;
+
+	/* Send vstream on a device for processing. */
+	if (xcu_run(&params) != 0)
+		XSCHED_ERR(
+			"Fail to send Vstream id %u tasks to a device for processing.\n",
+			vs->id);
+
+	XSCHED_DEBUG("Vstream id %u submit vsm: sq_tail %u\n", vs->id, vsm->sq_tail);
+}
+
+static void submit_wait(struct vstream_metadata *vsm)
+{
+	struct vstream_info *vs = vsm->parent;
+	struct xcu_op_handler_params params;
+	/* Wait timeout in ms. */
+	int32_t timeout = 500;
+
+	params.group = vs->xcu->group;
+	params.param_1 = &vs->channel_id;
+	params.param_2 = &vs->logic_vcq_id;
+	params.param_3 = &vs->user_stream_id;
+	params.param_4 = &vsm->sqe;
+	params.param_5 = vsm->cqe;
+	params.param_6 = vs->drv_ctx;
+	params.param_7 = &timeout;
+
+	/* Wait for a device to complete processing. */
+	if (xcu_wait(&params)) {
+		XSCHED_ERR("Fail to wait Vstream id %u tasks, logic_cq_id %u.\n",
+			vs->id, vs->logic_vcq_id);
+	}
+
+	XSCHED_DEBUG("Vstream id %u wait finish, logic_cq_id %u\n",
+		vs->id, vs->logic_vcq_id);
+}
+
+static int __xsched_submit(struct xsched_cu *xcu, struct xsched_entity *xse)
+{
+	struct vstream_metadata *vsm, *tmp;
+	int submitted = 0;
+	long submit_exec_time = 0;
+	ktime_t t_start = 0;
+	struct xcu_op_handler_params params;
+
+	XSCHED_DEBUG("%s called for xse %d on xcu %u\n",
+		__func__, xse->tgid, xcu->id);
+	list_for_each_entry_safe(vsm, tmp, &xcu->vsm_list, node) {
+		submit_kick(vsm);
+		XSCHED_DEBUG("Xse %d vsm %u sched_delay: %lld ns\n",
+			xse->tgid, vsm->sq_id, ktime_to_ns(ktime_sub(ktime_get(), vsm->add_time)));
+
+		params.group = vsm->parent->xcu->group;
+		params.param_1 = &(int){SQE_IS_NOTIFY};
+		params.param_2 = &vsm->sqe;
+		if (xcu_sqe_op(&params)) {
+			mutex_unlock(&xcu->xcu_lock);
+			t_start = ktime_get();
+			submit_wait(vsm);
+			submit_exec_time += ktime_to_ns(ktime_sub(ktime_get(), t_start));
+			mutex_lock(&xcu->xcu_lock);
+		}
+		submitted++;
+		list_del(&vsm->node);
+		kfree(vsm);
+	}
+
+	xse->last_exec_runtime += submit_exec_time;
+	xse->total_submitted += submitted;
+	atomic_add(submitted, &xse->submitted_one_kick);
+	INIT_LIST_HEAD(&xcu->vsm_list);
+	XSCHED_DEBUG("Xse %d submitted=%d total=%zu, exec_time=%ld @ %s\n",
+		xse->tgid, submitted, xse->total_submitted,
+		submit_exec_time, __func__);
+
+	return submitted;
+}
+
+static inline bool should_preempt(struct xsched_entity *xse)
+{
+	return xse->class->check_preempt(xse);
+}
+
+int xsched_vsm_add_tail(struct vstream_info *vs, vstream_args_t *arg)
+{
+	struct vstream_metadata *new_vsm;
+
+	new_vsm = kmalloc(sizeof(struct vstream_metadata), GFP_KERNEL);
+	if (!new_vsm) {
+		XSCHED_ERR("Fail to alloc kick metadata for vs %u @ %s\n",
+			vs->id, __func__);
+		return -ENOMEM;
+	}
+
+	if (vs->kicks_count > MAX_VSTREAM_SIZE) {
+		kfree(new_vsm);
+		return -EBUSY;
+	}
+
+	xsched_init_vsm(new_vsm, vs, arg);
+	list_add_tail(&new_vsm->node, &vs->metadata_list);
+	new_vsm->add_time = ktime_get();
+	vs->kicks_count += 1;
+
+	return 0;
+}
+
+/* Fetch the first vstream metadata from vstream metadata list
+ * and removes it from that list. Returned vstream metadata pointer
+ * to be freed after.
+ */
+struct vstream_metadata *xsched_vsm_fetch_first(struct vstream_info *vs)
+{
+	struct vstream_metadata *vsm;
+
+	if (list_empty(&vs->metadata_list)) {
+		XSCHED_DEBUG("No metadata to fetch from vs %u @ %s\n",
+			vs->id, __func__);
+		return NULL;
+	}
+
+	vsm = list_first_entry(&vs->metadata_list, struct vstream_metadata, node);
+	if (!vsm) {
+		XSCHED_ERR("Corrupted metadata list in vs %u @ %s\n",
+			vs->id, __func__);
+		return NULL;
+	}
+
+	list_del(&vsm->node);
+	if (vs->kicks_count == 0)
+		XSCHED_WARN("kicks_count underflow in vs %u @ %s\n",
+			vs->id, __func__);
+	else
+		vs->kicks_count -= 1;
+
+	return vsm;
+}
+
+int xsched_schedule(void *input_xcu)
+{
+	struct xsched_cu *xcu = input_xcu;
+	struct xsched_entity *curr_xse = NULL;
+	struct xsched_entity *next_xse = NULL;
+
+	while (!kthread_should_stop()) {
+		mutex_unlock(&xcu->xcu_lock);
+		wait_event_interruptible(xcu->wq_xcu_idle,
+			xcu->xrq.rt.nr_running || xcu->xrq.cfs.nr_running || kthread_should_stop());
+
+		mutex_lock(&xcu->xcu_lock);
+		if (kthread_should_stop()) {
+			mutex_unlock(&xcu->xcu_lock);
+			break;
+		}
+
+		if (!xsched_check_pending_kicks_xcu(xcu)) {
+			XSCHED_WARN("%s: No pending kicks on xcu %u\n", __func__, xcu->id);
+			continue;
+		}
+
+		next_xse = __raw_pick_next_ctx(xcu);
+		if (!next_xse) {
+			XSCHED_WARN("%s: Couldn't find next xse on xcu %u\n", __func__, xcu->id);
+			continue;
+		}
+
+		xcu->xrq.curr_xse = next_xse;
+		if (__xsched_submit(xcu, next_xse) == 0)
+			continue;
+
+		curr_xse = xcu->xrq.curr_xse;
+		if (!curr_xse)
+			continue;
+
+		/* if not deleted yet */
+		put_prev_ctx(curr_xse);
+		if (!atomic_read(&curr_xse->kicks_pending_ctx_cnt))
+			dequeue_ctx(curr_xse, xcu);
+
+#ifdef CONFIG_CGROUP_XCU
+		if (xsched_quota_exceed(curr_xse->parent_grp))
+			dequeue_ctx(&curr_xse->parent_grp->perxcu_priv[xcu->id].xse, xcu);
+#endif
+
+		xcu->xrq.curr_xse = NULL;
+	}
+
+	return 0;
+}
+
+
+/* Initializes all xsched XCU objects.
+ * Should only be called from xsched_xcu_register function.
+ */
+int xsched_xcu_init(struct xsched_cu *xcu, struct xcu_group *group, int xcu_id)
+{
+	struct xsched_class *sched;
+	int err;
+
+	xcu->id = xcu_id;
+	xcu->state = XSCHED_XCU_NONE;
+	xcu->group = group;
+
+	xcu->nr_ctx = 0;
+	xcu->xrq.curr_xse = NULL;
+
+	atomic_set(&xcu->pending_kicks, 0);
+	INIT_LIST_HEAD(&xcu->vsm_list);
+	INIT_LIST_HEAD(&xcu->ctx_list);
+	init_waitqueue_head(&xcu->wq_xcu_idle);
+	mutex_init(&xcu->ctx_list_lock);
+	mutex_init(&xcu->vs_array_lock);
+	mutex_init(&xcu->xcu_lock);
+
+	/* Initialize current XCU's runqueue. */
+	for_each_xsched_class(sched)
+		sched->rq_init(xcu);
+
+	/* This worker should set XCU to XSCHED_XCU_WAIT_IDLE.
+	 * If after initialization XCU still has XSCHED_XCU_NONE
+	 * status then we can assume that there was a problem
+	 * with XCU kthread job.
+	 */
+	xcu->worker = kthread_run(xsched_schedule, xcu, "xcu_%u", xcu->id);
+
+	if (IS_ERR(xcu->worker)) {
+		err = PTR_ERR(xcu->worker);
+		xcu->worker = NULL;
+		XSCHED_DEBUG("Fail to run the worker to schedule for xcu[%u].", xcu->id);
+		return err;
+	}
+	return 0;
+}
+
+int xsched_init_entity(struct xsched_context *ctx, struct vstream_info *vs)
+{
+	int err = 0;
+	struct xsched_entity *xse = &ctx->xse;
+
+	atomic_set(&xse->kicks_pending_ctx_cnt, 0);
+	atomic_set(&xse->submitted_one_kick, 0);
+
+	xse->total_scheduled = 0;
+	xse->total_submitted = 0;
+	xse->last_exec_runtime = 0;
+
+	xse->fd = ctx->fd;
+	xse->tgid = ctx->tgid;
+
+	err = ctx_bind_to_xcu(vs, ctx);
+	if (err) {
+		XSCHED_ERR(
+			"Couldn't find valid xcu for vstream %u dev_id %u @ %s\n",
+			vs->id, vs->dev_id, __func__);
+		return -EINVAL;
+	}
+
+	xse->ctx = ctx;
+
+	if (vs->xcu == NULL) {
+		WARN_ON(vs->xcu == NULL);
+		return -EINVAL;
+	}
+
+	xse->xcu = vs->xcu;
+
+	err = xsched_xse_set_class(xse);
+	if (err) {
+		XSCHED_ERR("Fail to set xse class @ %s\n", __func__);
+		return err;
+	}
+	xse->class->xse_init(xse);
+
+	WRITE_ONCE(xse->on_rq, false);
+
+	spin_lock_init(&xse->xse_lock);
+	return err;
+}
+
+static void xsched_register_sched_class(struct xsched_class *sched)
+{
+	list_add_tail(&sched->node, &xsched_class_list);
+}
+
+__init int xsched_sched_init(void)
+{
+	INIT_LIST_HEAD(&xsched_class_list);
+#ifdef CONFIG_XCU_SCHED_RT
+	xsched_register_sched_class(&rt_xsched_class);
+#endif
+
+#ifdef CONFIG_XCU_SCHED_CFS
+	xsched_register_sched_class(&fair_xsched_class);
+#endif
+
+#ifdef CONFIG_CGROUP_XCU
+	xcu_cg_subsys_init();
+#endif
+
+	return 0;
+}
+late_initcall(xsched_sched_init);
+

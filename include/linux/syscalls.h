@@ -74,6 +74,7 @@ struct landlock_ruleset_attr;
 enum landlock_rule_type;
 struct cachestat_range;
 struct cachestat;
+struct vstream_args;
 
 #include <linux/types.h>
 #include <linux/aio_abi.h>
@@ -948,6 +949,7 @@ asmlinkage long sys_cachestat(unsigned int fd,
 		struct cachestat __user *cstat, unsigned int flags);
 asmlinkage long sys_map_shadow_stack(unsigned long addr, unsigned long size, unsigned int flags);
 
+asmlinkage long sys_vstream_manage(struct vstream_args __user *arg, int cmd);
 /*
  * Architecture-specific system calls
  */
