@@ -19,6 +19,9 @@
 #include "udma_dev.h"
 #include "udma_eq.h"
 #include "udma_segment.h"
+#include "udma_jfs.h"
+#include "udma_jfc.h"
+#include "udma_jfr.h"
 #include "udma_cmd.h"
 #include "udma_ctx.h"
 #include "udma_rct.h"
@@ -29,8 +32,10 @@
 #include "udma_common.h"
 #include "udma_ctrlq_tp.h"
 
+bool cqe_mode = true;
 bool is_rmmod;
 static DEFINE_MUTEX(udma_reset_mutex);
+uint32_t jfr_sleep_time = 1000;
 uint32_t jfc_arm_mode;
 bool dump_aux_info;
 
@@ -173,6 +178,24 @@ static struct ubcore_ops g_dev_ops = {
 	.unregister_seg = udma_unregister_seg,
 	.import_seg = udma_import_seg,
 	.unimport_seg = udma_unimport_seg,
+	.create_jfc = udma_create_jfc,
+	.modify_jfc = udma_modify_jfc,
+	.destroy_jfc = udma_destroy_jfc,
+	.create_jfs = udma_create_jfs,
+	.modify_jfs = udma_modify_jfs,
+	.query_jfs = udma_query_jfs,
+	.destroy_jfs = udma_destroy_jfs,
+	.create_jfr = udma_create_jfr,
+	.modify_jfr = udma_modify_jfr,
+	.query_jfr = udma_query_jfr,
+	.destroy_jfr = udma_destroy_jfr,
+	.destroy_jfr_batch = udma_destroy_jfr_batch,
+	.create_jetty = udma_create_jetty,
+	.modify_jetty = udma_modify_jetty,
+	.query_jetty = udma_query_jetty,
+	.destroy_jetty = udma_destroy_jetty,
+	.create_jetty_grp = udma_create_jetty_grp,
+	.delete_jetty_grp = udma_delete_jetty_grp,
 };
 
 static void udma_uninit_group_table(struct udma_dev *dev, struct udma_group_table *table)
@@ -1083,6 +1106,12 @@ static void __exit udma_exit(void)
 module_init(udma_init);
 module_exit(udma_exit);
 MODULE_LICENSE("GPL");
+
+module_param(cqe_mode, bool, 0444);
+MODULE_PARM_DESC(cqe_mode, "Set cqe reporting mode, default: 1 (0:BY_COUNT, 1:BY_CI_PI_GAP)");
+
+module_param(jfr_sleep_time, uint, 0444);
+MODULE_PARM_DESC(jfr_sleep_time, "Set the destroy jfr sleep time, default: 1000 us.\n");
 
 module_param(jfc_arm_mode, uint, 0444);
 MODULE_PARM_DESC(jfc_arm_mode,
