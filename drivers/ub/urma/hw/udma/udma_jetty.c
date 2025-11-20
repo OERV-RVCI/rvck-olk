@@ -66,6 +66,7 @@ static int udma_get_user_jetty_cmd(struct udma_dev *dev, struct udma_jetty *jett
 	}
 
 	uctx = to_udma_context(udata->uctx);
+	jetty->sq.udma_ctx = uctx;
 	jetty->sq.tid = uctx->tid;
 	jetty->jetty_addr = ucmd->jetty_addr;
 	jetty->pi_type = ucmd->pi_type;
@@ -170,6 +171,112 @@ static void udma_init_jettyc(struct udma_dev *dev, struct ubcore_jetty_cfg *cfg,
 	ctx->sqe_pld_tokenid = jetty->sq.tid & (uint32_t)SQE_PLD_TOKEN_ID_MASK;
 	ctx->next_send_ssn = get_random_u16();
 	ctx->next_rcv_ssn = ctx->next_send_ssn;
+}
+
+static int update_jetty_grp_ctx_valid(struct udma_dev *udma_dev,
+				      struct udma_jetty_grp *jetty_grp)
+{
+	struct udma_jetty_grp_ctx ctx[UDMA_CTX_NUM];
+	struct ubase_mbx_attr mbox_attr = {};
+	int ret;
+
+	ctx[0].valid = jetty_grp->valid;
+	/* jetty number indicates the location of the jetty with the largest ID. */
+	ctx[0].jetty_number = fls(jetty_grp->valid) - 1;
+	memset(ctx + 1, 0xff, sizeof(ctx[1]));
+	ctx[1].valid = 0;
+	ctx[1].jetty_number = 0;
+
+	mbox_attr.tag = jetty_grp->jetty_grp_id;
+	mbox_attr.op = UDMA_CMD_MODIFY_JETTY_GROUP_CONTEXT;
+	ret = post_mailbox_update_ctx(udma_dev, ctx, sizeof(ctx), &mbox_attr);
+	if (ret)
+		dev_err(udma_dev->dev,
+			"post mailbox update jetty grp ctx failed, ret = %d.\n",
+			ret);
+
+	return ret;
+}
+
+static uint32_t udma_get_jetty_grp_jetty_id(uint32_t *valid, uint32_t *next)
+{
+	uint32_t bit_idx;
+
+	bit_idx = find_next_zero_bit((unsigned long *)valid, UDMA_BITS_PER_INT, *next);
+	if (bit_idx >= UDMA_BITS_PER_INT)
+		bit_idx = find_next_zero_bit((unsigned long *)valid, UDMA_BITS_PER_INT, 0);
+
+	*next = (*next + 1) >= UDMA_BITS_PER_INT ? 0 : *next + 1;
+
+	return bit_idx;
+}
+
+static int add_jetty_to_grp(struct udma_dev *udma_dev, struct ubcore_jetty_group *jetty_grp,
+			    struct udma_jetty_queue *sq, uint32_t cfg_id)
+{
+	struct udma_jetty_grp *udma_jetty_grp = to_udma_jetty_grp(jetty_grp);
+	uint32_t bit_idx = cfg_id - udma_jetty_grp->start_jetty_id;
+	int ret = 0;
+
+	mutex_lock(&udma_jetty_grp->valid_lock);
+
+	if (cfg_id == 0)
+		bit_idx = udma_get_jetty_grp_jetty_id(&udma_jetty_grp->valid,
+						      &udma_jetty_grp->next_jetty_id);
+
+	if (bit_idx >= UDMA_BITS_PER_INT || (udma_jetty_grp->valid & BIT(bit_idx))) {
+		dev_err(udma_dev->dev,
+			"jg(%u.%u) vallid %u is full or user id(%u) error",
+			udma_jetty_grp->jetty_grp_id, udma_jetty_grp->start_jetty_id,
+			udma_jetty_grp->valid, cfg_id);
+		ret = -ENOMEM;
+		goto out;
+	}
+
+	udma_jetty_grp->valid |= BIT(bit_idx);
+	sq->id = udma_jetty_grp->start_jetty_id + bit_idx;
+	sq->jetty_grp = udma_jetty_grp;
+
+	ret = update_jetty_grp_ctx_valid(udma_dev, udma_jetty_grp);
+	if (ret) {
+		dev_err(udma_dev->dev,
+			"update jetty grp ctx valid failed, jetty_grp id is %u.\n",
+			udma_jetty_grp->jetty_grp_id);
+
+		udma_jetty_grp->valid &= ~BIT(bit_idx);
+	}
+out:
+	mutex_unlock(&udma_jetty_grp->valid_lock);
+
+	return ret;
+}
+
+static void remove_jetty_from_grp(struct udma_dev *udma_dev,
+				  struct udma_jetty *jetty)
+{
+	struct udma_jetty_grp *jetty_grp = jetty->sq.jetty_grp;
+	uint32_t bit_idx;
+	int ret;
+
+	bit_idx = jetty->sq.id - jetty_grp->start_jetty_id;
+	if (bit_idx >= UDMA_BITS_PER_INT) {
+		dev_err(udma_dev->dev,
+			"jetty_id(%u) is not in jetty grp, start_jetty_id(%u).\n",
+			jetty->sq.id, jetty_grp->start_jetty_id);
+		return;
+	}
+
+	mutex_lock(&jetty_grp->valid_lock);
+	jetty_grp->valid &= ~BIT(bit_idx);
+	jetty->sq.jetty_grp = NULL;
+
+	ret = update_jetty_grp_ctx_valid(udma_dev, jetty_grp);
+	if (ret)
+		dev_err(udma_dev->dev,
+			"update jetty grp ctx valid failed, jetty_grp id is %u.\n",
+			jetty_grp->jetty_grp_id);
+
+	mutex_unlock(&jetty_grp->valid_lock);
 }
 
 static int udma_specify_rsvd_jetty_id(struct udma_dev *udma_dev, uint32_t cfg_id)
@@ -391,6 +498,13 @@ int alloc_jetty_id(struct udma_dev *udma_dev, struct udma_jetty_queue *sq,
 			return ret;
 
 		sq->id = cfg_id;
+	} else if (jetty_grp) {
+		ret = add_jetty_to_grp(udma_dev, jetty_grp, sq, cfg_id);
+		if (ret) {
+			dev_err(udma_dev->dev,
+				"add jetty to grp failed, ret = %d.\n", ret);
+			return ret;
+		}
 	} else {
 		ret = udma_alloc_jetty_id_own(udma_dev, &sq->id, sq->jetty_type);
 	}
@@ -403,6 +517,8 @@ static void free_jetty_id(struct udma_dev *udma_dev,
 {
 	if (udma_jetty->sq.id < udma_dev->caps.jetty.start_idx)
 		udma_id_free(&udma_dev->rsvd_jetty_ida_table, udma_jetty->sq.id);
+	else if (is_grp)
+		remove_jetty_from_grp(udma_dev, udma_jetty);
 	else
 		udma_adv_id_free(&udma_dev->jetty_table.bitmap_table,
 				 udma_jetty->sq.id, false);
@@ -653,6 +769,19 @@ static int udma_query_jetty_ctx(struct udma_dev *dev,
 	return 0;
 }
 
+void udma_clean_cqe_for_jetty(struct udma_dev *dev, struct udma_jetty_queue *sq,
+			      struct ubcore_jfc *send_jfc,
+			      struct ubcore_jfc *recv_jfc)
+{
+	if (sq->buf.kva) {
+		if (send_jfc)
+			udma_clean_jfc(send_jfc, sq->id, dev);
+
+		if (recv_jfc && recv_jfc != send_jfc)
+			udma_clean_jfc(recv_jfc, sq->id, dev);
+	}
+}
+
 static bool udma_wait_timeout(uint32_t *sum_times, uint32_t times, uint32_t ta_timeout)
 {
 	uint32_t wait_time;
@@ -791,6 +920,9 @@ static void udma_free_jetty(struct ubcore_jetty *jetty)
 	struct udma_dev *udma_dev = to_udma_dev(jetty->ub_dev);
 	struct udma_jetty *udma_jetty = to_udma_jetty(jetty);
 
+	udma_clean_cqe_for_jetty(udma_dev, &udma_jetty->sq, jetty->jetty_cfg.send_jfc,
+				 jetty->jetty_cfg.recv_jfc);
+
 	if (dfx_switch)
 		udma_dfx_delete_id(udma_dev, &udma_dev->dfx_info->jetty,
 				   udma_jetty->sq.id);
@@ -828,6 +960,347 @@ int udma_destroy_jetty(struct ubcore_jetty *jetty)
 
 	udma_free_jetty(jetty);
 	udma_open_ue_rx(udma_dev, true, true, false, 0);
+
+	return 0;
+}
+
+static int udma_batch_jetty_get_ack(struct udma_dev *dev,
+				    struct udma_jetty_queue **sq_list,
+				    uint32_t jetty_cnt, bool *jetty_flag,
+				    int *bad_jetty_index)
+{
+	struct udma_jetty_ctx ctx = {};
+	struct udma_jetty_queue *sq;
+	uint16_t rcv_send_diff = 0;
+	uint32_t i;
+	int ret;
+
+	for (i = 0; i < jetty_cnt; i++) {
+		sq = sq_list[i];
+		if (sq->state != UBCORE_JETTY_STATE_READY &&
+		    sq->state != UBCORE_JETTY_STATE_SUSPENDED)
+			continue;
+
+		if (jetty_flag[i])
+			continue;
+
+		ret = udma_query_jetty_ctx(dev, &ctx, sq->id);
+		if (ret) {
+			dev_err(dev->dev,
+				"query jetty ctx failed, id = %u, ret = %d.\n",
+				sq->id, ret);
+			*bad_jetty_index = 0;
+			return ret;
+		}
+
+		rcv_send_diff = ctx.next_rcv_ssn - ctx.next_send_ssn;
+		if (ctx.PI == ctx.CI && rcv_send_diff < UDMA_RCV_SEND_MAX_DIFF &&
+		    ctx.state == JETTY_READY) {
+			jetty_flag[i] = true;
+			continue;
+		}
+
+		if (rcv_send_diff < UDMA_RCV_SEND_MAX_DIFF &&
+		    ctx.state == JETTY_ERROR) {
+			jetty_flag[i] = true;
+			continue;
+		}
+
+		*bad_jetty_index = 0;
+		break;
+	}
+
+	return (i == jetty_cnt) ? 0 : -EAGAIN;
+}
+
+static uint32_t get_max_jetty_ta_timeout(struct udma_jetty_queue **sq_list,
+					 uint32_t jetty_cnt)
+{
+	uint32_t max_timeout = 0;
+	uint32_t i;
+
+	for (i = 0; i < jetty_cnt; i++) {
+		if (sq_list[i]->ta_timeout > max_timeout)
+			max_timeout = sq_list[i]->ta_timeout;
+	}
+
+	return max_timeout;
+}
+
+static bool udma_batch_query_jetty_fd(struct udma_dev *dev,
+				      struct udma_jetty_queue **sq_list,
+				      uint32_t jetty_cnt, int *bad_jetty_index)
+{
+	uint32_t ta_timeout = get_max_jetty_ta_timeout(sq_list, jetty_cnt);
+	struct udma_jetty_ctx ctx = {};
+	struct udma_jetty_queue *sq;
+	uint16_t rcv_send_diff = 0;
+	uint32_t sum_times = 0;
+	uint32_t flush_cnt = 0;
+	bool all_query_done;
+	uint32_t times = 0;
+	bool *jetty_flag;
+	uint32_t i;
+
+	jetty_flag = kcalloc(jetty_cnt, sizeof(bool), GFP_KERNEL);
+	if (!jetty_flag) {
+		*bad_jetty_index = 0;
+		return false;
+	}
+
+	while (true) {
+		for (i = 0; i < jetty_cnt; i++) {
+			if (jetty_flag[i])
+				continue;
+
+			sq = sq_list[i];
+			if (udma_query_jetty_ctx(dev, &ctx, sq->id)) {
+				kfree(jetty_flag);
+				*bad_jetty_index = 0;
+				return false;
+			}
+
+			if (!ctx.flush_cqe_done)
+				continue;
+
+			flush_cnt++;
+			jetty_flag[i] = true;
+		}
+
+		if (flush_cnt == jetty_cnt) {
+			kfree(jetty_flag);
+			return true;
+		}
+
+		if (udma_wait_timeout(&sum_times, times, ta_timeout))
+			break;
+
+		times++;
+	}
+
+	all_query_done = true;
+
+	for (i = 0; i < jetty_cnt; i++) {
+		if (jetty_flag[i])
+			continue;
+
+		sq = sq_list[i];
+		if (udma_query_jetty_ctx(dev, &ctx, sq->id)) {
+			kfree(jetty_flag);
+			*bad_jetty_index = 0;
+			return false;
+		}
+
+		rcv_send_diff = ctx.next_rcv_ssn - ctx.next_send_ssn;
+		if (ctx.flush_cqe_done || (ctx.flush_ssn_vld &&
+		    rcv_send_diff < UDMA_RCV_SEND_MAX_DIFF))
+			continue;
+
+		*bad_jetty_index = 0;
+		all_query_done = false;
+		udma_dfx_ctx_print(dev, "Flush Failed Jetty", sq->id,
+				   sizeof(ctx) / sizeof(uint32_t), (uint32_t *)&ctx);
+		break;
+	}
+
+	kfree(jetty_flag);
+
+	return all_query_done;
+}
+
+static int batch_modify_jetty_to_error(struct udma_dev *dev,
+				       struct udma_jetty_queue **sq_list,
+				       uint32_t jetty_cnt, int *bad_jetty_index)
+{
+	struct udma_jetty_queue *sq;
+	uint32_t i;
+	int ret;
+
+	for (i = 0; i < jetty_cnt; i++) {
+		sq = sq_list[i];
+		if (sq->state == UBCORE_JETTY_STATE_ERROR ||
+		    sq->state == UBCORE_JETTY_STATE_RESET)
+			continue;
+
+		ret = udma_set_jetty_state(dev, sq->id, JETTY_ERROR);
+		if (ret) {
+			dev_err(dev->dev, "modify jetty to error failed, id: %u.\n",
+				sq->id);
+			*bad_jetty_index = 0;
+			return ret;
+		}
+
+		sq->state = UBCORE_JETTY_STATE_ERROR;
+	}
+
+	return 0;
+}
+
+static int udma_batch_modify_jetty_precondition(struct udma_dev *dev,
+						struct udma_jetty_queue **sq_list,
+						uint32_t jetty_cnt, int *bad_jetty_index)
+{
+	uint32_t ta_timeout = get_max_jetty_ta_timeout(sq_list, jetty_cnt);
+	uint32_t sum_times = 0;
+	uint32_t times = 0;
+	bool *jetty_flag;
+	int ret;
+
+	jetty_flag = kcalloc(jetty_cnt, sizeof(bool), GFP_KERNEL);
+	if (!jetty_flag) {
+		*bad_jetty_index = 0;
+		return -ENOMEM;
+	}
+
+	while (true) {
+		ret = udma_batch_jetty_get_ack(dev, sq_list, jetty_cnt,
+					       jetty_flag, bad_jetty_index);
+		if (ret != -EAGAIN) {
+			kfree(jetty_flag);
+			return ret;
+		}
+
+		if (udma_wait_timeout(&sum_times, times, ta_timeout)) {
+			dev_warn(dev->dev,
+				 "timeout after %u ms, not all jetty get ack.\n",
+				 sum_times);
+			break;
+		}
+		times++;
+	}
+
+	kfree(jetty_flag);
+
+	return 0;
+}
+
+static bool udma_batch_destroy_jetty_precondition(struct udma_dev *dev,
+						  struct udma_jetty_queue **sq_list,
+						  uint32_t jetty_cnt, int *bad_jetty_index)
+{
+	if (!(dev->caps.feature & UDMA_CAP_FEATURE_UE_RX_CLOSE) &&
+	    udma_batch_modify_jetty_precondition(dev, sq_list, jetty_cnt, bad_jetty_index))
+		return false;
+
+	if (batch_modify_jetty_to_error(dev, sq_list, jetty_cnt, bad_jetty_index)) {
+		dev_err(dev->dev, "batch md jetty err failed.\n");
+		return false;
+	}
+
+	if (!udma_batch_query_jetty_fd(dev, sq_list, jetty_cnt, bad_jetty_index))
+		return false;
+
+	udelay(UDMA_DESTROY_JETTY_DELAY_TIME);
+
+	return true;
+}
+
+int udma_batch_modify_and_destroy_jetty(struct udma_dev *dev,
+					struct udma_jetty_queue **sq_list,
+					uint32_t jetty_cnt, int *bad_jetty_index)
+{
+	uint32_t i;
+	int ret;
+
+	if (!udma_batch_destroy_jetty_precondition(dev, sq_list, jetty_cnt, bad_jetty_index))
+		return -EFAULT;
+
+	for (i = 0; i < jetty_cnt; i++) {
+		if (sq_list[i]->state != UBCORE_JETTY_STATE_RESET) {
+			ret = udma_destroy_hw_jetty_ctx(dev, sq_list[i]->id);
+			if (ret) {
+				dev_err(dev->dev,
+					"jetty destroyed failed, id: %u.\n",
+					sq_list[i]->id);
+				*bad_jetty_index = 0;
+				return ret;
+			}
+
+			sq_list[i]->state = UBCORE_JETTY_STATE_RESET;
+		}
+	}
+
+	return 0;
+}
+
+int udma_destroy_jetty_batch(struct ubcore_jetty **jetty, int jetty_cnt, int *bad_jetty_index)
+{
+	struct udma_jetty_queue **sq_list;
+	struct udma_dev *udma_dev;
+	uint32_t i;
+	int ret;
+
+	if (!jetty) {
+		pr_err("jetty array is null.\n");
+		return -EINVAL;
+	}
+
+	if (!jetty_cnt) {
+		pr_err("jetty cnt is 0.\n");
+		return -EINVAL;
+	}
+
+	udma_dev = to_udma_dev(jetty[0]->ub_dev);
+
+	sq_list = kcalloc(1, sizeof(*sq_list) * jetty_cnt, GFP_KERNEL);
+	if (!sq_list) {
+		*bad_jetty_index = 0;
+		return -ENOMEM;
+	}
+
+	for (i = 0; i < jetty_cnt; i++)
+		sq_list[i] = &(to_udma_jetty(jetty[i])->sq);
+
+	ret = udma_batch_modify_and_destroy_jetty(udma_dev, sq_list, jetty_cnt, bad_jetty_index);
+
+	kfree(sq_list);
+
+	if (ret) {
+		dev_err(udma_dev->dev,
+			 "udma batch modify error and destroy jetty failed.\n");
+		return ret;
+	}
+
+	for (i = 0; i < jetty_cnt; i++)
+		udma_free_jetty(jetty[i]);
+
+	return 0;
+}
+
+static int udma_check_jetty_grp_info(struct ubcore_tjetty_cfg *cfg, struct udma_dev *dev)
+{
+	if (cfg->type == UBCORE_JETTY_GROUP) {
+		if (cfg->trans_mode != UBCORE_TP_RM) {
+			dev_err(dev->dev, "import jg only support RM, transmode is %u.\n",
+				cfg->trans_mode);
+			return -EINVAL;
+		}
+
+		if (cfg->policy != UBCORE_JETTY_GRP_POLICY_HASH_HINT) {
+			dev_err(dev->dev, "import jg only support hint, policy is %u.\n",
+				cfg->policy);
+			return -EINVAL;
+		}
+	}
+
+	return 0;
+}
+
+int udma_unimport_jetty(struct ubcore_tjetty *tjetty)
+{
+	struct udma_target_jetty *udma_tjetty = to_udma_tjetty(tjetty);
+	struct udma_dev *udma_dev = to_udma_dev(tjetty->ub_dev);
+
+	if (!IS_ERR_OR_NULL(tjetty->vtpn)) {
+		dev_err(udma_dev->dev,
+			"the target jetty is still being used, id = %u.\n",
+			tjetty->cfg.id.id);
+		return -EINVAL;
+	}
+
+	udma_tjetty->token_value = 0;
+	tjetty->cfg.token_value.token = 0;
+	kfree(udma_tjetty);
 
 	return 0;
 }
@@ -1095,3 +1568,121 @@ int udma_delete_jetty_grp(struct ubcore_jetty_group *jetty_grp)
 
 	return ret;
 }
+
+int udma_flush_jetty(struct ubcore_jetty *jetty, int cr_cnt, struct ubcore_cr *cr)
+{
+	struct udma_dev *udma_dev = to_udma_dev(jetty->ub_dev);
+	struct udma_jetty *udma_jetty = to_udma_jetty(jetty);
+	struct udma_jetty_queue *sq = &udma_jetty->sq;
+	int n_flushed;
+
+	if (!sq->flush_flag)
+		return 0;
+
+	if (!sq->lock_free)
+		spin_lock(&sq->lock);
+
+	for (n_flushed = 0; n_flushed < cr_cnt; n_flushed++) {
+		if (sq->ci == sq->pi)
+			break;
+		udma_flush_sq(udma_dev, sq, cr + n_flushed);
+	}
+
+	if (!sq->lock_free)
+		spin_unlock(&sq->lock);
+
+	return n_flushed;
+}
+
+int udma_post_jetty_send_wr(struct ubcore_jetty *jetty, struct ubcore_jfs_wr *wr,
+			    struct ubcore_jfs_wr **bad_wr)
+{
+	struct udma_dev *udma_dev = to_udma_dev(jetty->ub_dev);
+	struct udma_jetty *udma_jetty = to_udma_jetty(jetty);
+	int ret;
+
+	ret = udma_post_sq_wr(udma_dev, &udma_jetty->sq, wr, bad_wr);
+	if (ret)
+		dev_err(udma_dev->dev,
+			"jetty post sq wr failed, ret = %d, jetty id = %u.\n",
+			ret, udma_jetty->sq.id);
+
+	return ret;
+}
+
+int udma_post_jetty_recv_wr(struct ubcore_jetty *jetty, struct ubcore_jfr_wr *wr,
+			    struct ubcore_jfr_wr **bad_wr)
+{
+	struct udma_dev *udma_dev = to_udma_dev(jetty->ub_dev);
+	struct udma_jetty *udma_jetty = to_udma_jetty(jetty);
+	struct ubcore_jfr *jfr;
+	int ret;
+
+	jfr = &udma_jetty->jfr->ubcore_jfr;
+	ret = udma_post_jfr_wr(jfr, wr, bad_wr);
+	if (ret)
+		dev_err(udma_dev->dev,
+			"jetty post jfr wr failed, ret = %d, jetty id = %u.\n",
+			ret, udma_jetty->sq.id);
+
+	return ret;
+}
+
+int udma_unbind_jetty(struct ubcore_jetty *jetty)
+{
+	struct udma_jetty *udma_jetty = to_udma_jetty(jetty);
+
+	udma_jetty->sq.rc_tjetty = NULL;
+
+	return 0;
+}
+
+struct ubcore_tjetty *udma_import_jetty_ex(struct ubcore_device *ub_dev,
+					   struct ubcore_tjetty_cfg *cfg,
+					   struct ubcore_active_tp_cfg *active_tp_cfg,
+					   struct ubcore_udata *udata)
+{
+	struct udma_dev *udma_dev = to_udma_dev(ub_dev);
+	struct udma_target_jetty *tjetty;
+	int ret = 0;
+
+	if (cfg->type != UBCORE_JETTY_GROUP && cfg->type != UBCORE_JETTY) {
+		dev_err(udma_dev->dev,
+			"the jetty of the type %u cannot be imported in exp.\n",
+			cfg->type);
+		return NULL;
+	}
+
+	ret = udma_check_jetty_grp_info(cfg, udma_dev);
+	if (ret)
+		return NULL;
+
+	tjetty = kzalloc(sizeof(*tjetty), GFP_KERNEL);
+	if (!tjetty)
+		return NULL;
+
+	if (cfg->flag.bs.token_policy != UBCORE_TOKEN_NONE) {
+		tjetty->token_value = cfg->token_value.token;
+		tjetty->token_value_valid = true;
+	}
+
+	udma_swap_endian(cfg->id.eid.raw, tjetty->le_eid.raw, UBCORE_EID_SIZE);
+
+	return &tjetty->ubcore_tjetty;
+}
+
+int udma_bind_jetty_ex(struct ubcore_jetty *jetty,
+		       struct ubcore_tjetty *tjetty,
+		       struct ubcore_active_tp_cfg *active_tp_cfg,
+		       struct ubcore_udata *udata)
+{
+	struct udma_jetty *udma_jetty = to_udma_jetty(jetty);
+
+	udma_jetty->sq.rc_tjetty = tjetty;
+
+	return 0;
+}
+
+module_param(well_known_jetty_pgsz_check, bool, 0444);
+MODULE_PARM_DESC(well_known_jetty_pgsz_check,
+		"Whether check the system page size. default: true(true:check; false: not check)");
