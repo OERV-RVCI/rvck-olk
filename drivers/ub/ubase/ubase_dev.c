@@ -454,21 +454,19 @@ static int ubase_handle_ue2ue_ctrlq_req(struct ubase_dev *udev,
 		return -EINVAL;
 	}
 
-	if (cmd->in_size > (len - (sizeof(*cmd) + UBASE_CTRLQ_HDR_LEN))) {
-		ubase_err(udev, "ubase e2e cmd len = %u error.\n", cmd->in_size);
-		return -EINVAL;
-	}
-
 	msg.service_ver = head->service_ver;
 	msg.service_type = head->service_type;
 	msg.opcode = head->opcode;
 	msg.need_resp = cmd->need_resp;
 	msg.is_resp = cmd->is_resp;
+	msg.is_async = cmd->is_async;
 	msg.resp_seq = cmd->seq;
 	msg.in = (u8 *)head + UBASE_CTRLQ_HDR_LEN;
 	msg.in_size = cmd->in_size;
 	msg.out = NULL;
 	msg.out_size = 0;
+	if (ubase_ctrlq_msg_is_sync_req(&msg))
+		msg.is_async = 1;
 
 	ue_info.bus_ue_id = le16_to_cpu(cmd->head.bus_ue_id);
 	ue_info.seq = cmd->seq;
@@ -496,6 +494,11 @@ static int ubase_handle_ue2ue_ctrlq_event(struct ubase_dev *udev, void *data,
 
 	if (ubase_dev_ctrlq_supported(udev))
 		return ubase_handle_ue2ue_ctrlq_req(udev, cmd, len);
+
+	if (!ubase_ctrlq_check_seq(udev, cmd->seq)) {
+		ubase_err(udev, "invalid ue2ue ctrlq seq(%u).\n", cmd->seq);
+		return -EINVAL;
+	}
 
 	head = (struct ubase_ctrlq_base_block *)(cmd + 1);
 	data_len = len - sizeof(*cmd) - UBASE_CTRLQ_HDR_LEN;
@@ -621,6 +624,19 @@ err_reg_event:
 	return ret;
 }
 
+static int ubase_notify_drv_capbilities(struct ubase_dev *udev)
+{
+	struct ubase_notify_drv_cap_cmd req = {0};
+	struct ubase_cmd_buf in;
+
+	set_bit(UBASE_CAP_SUP_ACTIVATE_B, (unsigned long *)req.cap_bits);
+
+	__ubase_fill_inout_buf(&in, UBASE_OPC_NOTIFY_DRV_CAPS, false,
+			       sizeof(req), &req);
+
+	return __ubase_cmd_send_in(udev, &in);
+}
+
 static const struct ubase_init_function ubase_init_func_map[] = {
 	{
 		"init work queue", UBASE_SUP_ALL, 0,
@@ -629,6 +645,10 @@ static const struct ubase_init_function ubase_init_func_map[] = {
 	{
 		"init cmd queue", UBASE_SUP_ALL, 1,
 		ubase_cmd_init, ubase_cmd_uninit
+	},
+	{
+		"notify drv capbilities", UBASE_SUP_ALL, 0,
+		ubase_notify_drv_capbilities, NULL
 	},
 	{
 		"query dev res", UBASE_SUP_ALL, 0,
@@ -1295,6 +1315,14 @@ int ubase_activate_handler(struct ubase_dev *udev, u32 bus_ue_id)
 int ubase_deactivate_handler(struct ubase_dev *udev, u32 bus_ue_id)
 {
 	return ubase_send_activate_dev_req(udev, false, (u16)bus_ue_id);
+}
+
+void ubase_flush_workqueue(struct ubase_dev *udev)
+{
+	flush_workqueue(udev->ubase_wq);
+	flush_workqueue(udev->ubase_async_wq);
+	flush_workqueue(udev->ubase_period_wq);
+	flush_workqueue(udev->ubase_arq_wq);
 }
 
 int ubase_activate_dev(struct auxiliary_device *adev)

@@ -109,6 +109,14 @@ struct unic_cfg_vport_buf_cmd {
 	__le32	buf_addr[UNIC_MAX_VPORT_BUF_NUM * U32S_PER_U64];
 };
 
+#define UNIC_VORT_CTX_DATA_NUM		13
+#define UNIC_VORT_CTX_DATA_ALIGN	4
+struct unic_vport_ctx_cmd {
+	u8	resv[2];
+	__le16	offset;
+	__le32	data[UNIC_VORT_CTX_DATA_NUM];
+};
+
 struct unic_cfg_fec_cmd {
 	__le32	fec_mode;
 	u8	rsv[20];
@@ -150,7 +158,7 @@ struct unic_config_vl_map_cmd {
 };
 
 struct unic_config_vl_speed_cmd {
-	__le16 bus_ue_id;
+	u8 resv0[2];
 	__le16 vl_bitmap;
 	__le32 max_speed[UBASE_MAX_VL_NUM];
 	u8 resv1[20];

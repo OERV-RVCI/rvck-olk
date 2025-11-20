@@ -195,13 +195,10 @@ static int __ubase_config_tm_vl_sch(struct ubase_dev *udev, u16 vl_bitmap,
 	int ret;
 	u8 i;
 
-	/* the configuration takes effect for all entities. */
-	req.bus_ue_id = cpu_to_le16(USHRT_MAX);
-	req.vl_bitmap = cpu_to_le16(vl_bitmap);
-
 	for (i = 0; i < UBASE_MAX_VL_NUM; i++)
 		tsa_bitmap |= vl_tsa[i] ? 1 << i : 0;
 
+	req.vl_bitmap = cpu_to_le16(vl_bitmap);
 	req.vl_tsa = cpu_to_le16(tsa_bitmap);
 	memcpy(req.vl_bw, vl_bw, UBASE_MAX_VL_NUM);
 
@@ -209,7 +206,7 @@ static int __ubase_config_tm_vl_sch(struct ubase_dev *udev, u16 vl_bitmap,
 			     sizeof(req), &req);
 
 	ret = __ubase_cmd_send_in(udev, &in);
-	if (ret)
+	if (ret && ret != -EPERM)
 		ubase_err(udev, "failed to config tm vl sch, ret = %d", ret);
 
 	return ret;
@@ -230,7 +227,7 @@ static int __ubase_config_ets_vl_sch(struct ubase_dev *udev, u16 vl_bitmap,
 			     &req);
 
 	ret = __ubase_cmd_send_in(udev, &in);
-	if (ret)
+	if (ret && ret != -EPERM)
 		ubase_err(udev, "failed to cfg ets vl sch, ret = %d.", ret);
 
 	return ret;
@@ -409,6 +406,36 @@ int ubase_query_fst_fvt_rqmt(struct ubase_dev *udev,
 	return ret;
 }
 
+static unsigned long ubase_get_sl_bitmap(struct ubase_dev *udev)
+{
+	struct ubase_adev_qos *qos = &udev->qos;
+	unsigned long sl_bitmap = 0;
+	u8 i;
+
+	for (i = 0; i < qos->nic_sl_num; i++)
+		sl_bitmap |= 1 << qos->nic_sl[i];
+	for (i = 0; i < qos->sl_num; i++)
+		sl_bitmap |= 1 << qos->sl[i];
+
+	return sl_bitmap;
+}
+
+static int ubase_check_sl_bitmap(struct ubase_dev *udev, unsigned long sl_bitmap)
+{
+	unsigned long sl_bitmap_cap;
+	u8 i;
+
+	sl_bitmap_cap = ubase_get_sl_bitmap(udev);
+	for (i = 0; i < UBASE_MAX_SL_NUM; i++) {
+		if (!test_bit(i, &sl_bitmap))
+			continue;
+		if (!test_bit(i, &sl_bitmap_cap))
+			return -EINVAL;
+	}
+
+	return 0;
+}
+
 int ubase_check_qos_sch_param(struct auxiliary_device *adev, u16 vl_bitmap,
 			      u8 *vl_bw, u8 *vl_tsa, bool is_ets)
 {
@@ -447,6 +474,9 @@ int ubase_set_priqos_info(struct device *dev, struct ubase_sl_priqos *sl_priqos)
 
 	udev = dev_get_drvdata(dev);
 
+	if (ubase_check_sl_bitmap(udev, sl_priqos->sl_bitmap))
+		return -EINVAL;
+
 	if (sl_priqos->port_bitmap)
 		return ubase_set_ets_priqos(udev, sl_priqos);
 
@@ -458,11 +488,12 @@ int ubase_get_priqos_info(struct device *dev, struct ubase_sl_priqos *sl_priqos)
 {
 	struct ubase_dev *udev;
 
-	if (!dev || !sl_priqos || !sl_priqos->sl_bitmap)
+	if (!dev || !sl_priqos)
 		return -EINVAL;
 
 	udev = dev_get_drvdata(dev);
 
+	sl_priqos->sl_bitmap = ubase_get_sl_bitmap(udev);
 	if (sl_priqos->port_bitmap)
 		return ubase_get_ets_priqos(udev, sl_priqos);
 

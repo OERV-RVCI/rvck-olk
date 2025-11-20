@@ -87,6 +87,26 @@ struct ubase_ctrlq_reset_ctrl_req {
 	u8 rsv[3];
 };
 
+static inline bool ubase_ctrlq_msg_is_sync_req(struct ubase_ctrlq_msg *msg)
+{
+	return !msg->is_resp && !msg->is_async && msg->need_resp;
+}
+
+static inline bool ubase_ctrlq_msg_is_async_req(struct ubase_ctrlq_msg *msg)
+{
+	return !msg->is_resp && msg->is_async && msg->need_resp;
+}
+
+static inline bool ubase_ctrlq_msg_is_notify_req(struct ubase_ctrlq_msg *msg)
+{
+	return !msg->is_resp && !msg->is_async && !msg->need_resp;
+}
+
+static inline bool ubase_ctrlq_msg_is_resp(struct ubase_ctrlq_msg *msg)
+{
+	return msg->is_resp && !msg->is_async && !msg->need_resp;
+}
+
 int ubase_ctrlq_init(struct ubase_dev *udev);
 void ubase_ctrlq_uninit(struct ubase_dev *udev);
 void ubase_ctrlq_disable(struct ubase_dev *udev);
@@ -94,6 +114,7 @@ void ubase_ctrlq_disable(struct ubase_dev *udev);
 int __ubase_ctrlq_send(struct ubase_dev *udev, struct ubase_ctrlq_msg *msg,
 		       struct ubase_ctrlq_ue_info *ue_info);
 
+bool ubase_ctrlq_check_seq(struct ubase_dev *udev, u16 seq);
 void ubase_ctrlq_service_task(struct ubase_delay_work *ubase_work);
 void ubase_ctrlq_handle_crq_msg(struct ubase_dev *udev,
 				struct ubase_ctrlq_base_block *head,
