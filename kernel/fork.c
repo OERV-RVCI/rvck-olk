@@ -975,7 +975,6 @@ void __mmdrop(struct mm_struct *mm)
 	mm_free_pgd(mm);
 	destroy_context(mm);
 	mmu_notifier_subscriptions_destroy(mm);
-	clear_xcall_area(mm);
 	check_mm(mm);
 	put_user_ns(mm->user_ns);
 	mm_pasid_drop(mm);
@@ -1434,6 +1433,7 @@ static inline void __mmput(struct mm_struct *mm)
 	ksm_exit(mm);
 	khugepaged_exit(mm); /* must run before exit_mmap */
 	exit_mmap(mm);
+	clear_xcall_area(mm);
 	sp_mm_clean(mm);
 	mm_put_huge_zero_page(mm);
 	set_mm_exe_file(mm, NULL);
