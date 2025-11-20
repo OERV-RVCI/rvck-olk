@@ -280,11 +280,11 @@ static bool access_actlr(struct kvm_vcpu *vcpu,
 			 struct sys_reg_params *p,
 			 const struct sys_reg_desc *r)
 {
-	u64 mask, shift, val;
+	u64 mask, shift;
 
 #ifdef CONFIG_ACTLR_XCALL_XINT
 	if (p->is_write) {
-		val = vcpu_read_sys_reg(vcpu, r->reg);
+		u64 val = vcpu_read_sys_reg(vcpu, r->reg);
 		val &= ~(ACTLR_ELx_XCALL | ACTLR_ELx_XINT);
 		val |= (p->regval & (ACTLR_ELx_XCALL | ACTLR_ELx_XINT));
 		vcpu_write_sys_reg(vcpu, val, r->reg);
