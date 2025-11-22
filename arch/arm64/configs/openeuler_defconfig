@@ -8390,6 +8390,7 @@ CONFIG_FWCTL_UB=m
 
 # UB sentry
 CONFIG_UB_SENTRY=m
+CONFIG_UB_SENTRY_REMOTE=m
 # end of UB sentry
 
 #
