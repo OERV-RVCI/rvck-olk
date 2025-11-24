@@ -83,6 +83,7 @@ struct ubcore_ucontext *udma_alloc_ucontext(struct ubcore_device *ub_dev,
 	return &ctx->base;
 
 err_init_ctx_resp:
+	mutex_destroy(&ctx->hugepage_lock);
 	mutex_destroy(&ctx->pgdir_mutex);
 err_unbind_dev:
 	ummu_sva_unbind_device(ctx->sva);
@@ -380,7 +381,7 @@ void udma_return_u_hugepage(struct udma_context *ctx, void *va)
 			zap_vma_ptes(vma, (unsigned long)priv->va_base, priv->va_len);
 		mmap_write_unlock(current->mm);
 	} else {
-		dev_warn(ctx->dev->dev, "current mm released.\n");
+		dev_warn_ratelimited(ctx->dev->dev, "current mm released.\n");
 	}
 
 	if (dfx_switch)
