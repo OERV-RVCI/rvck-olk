@@ -7194,8 +7194,10 @@ int tcp_conn_request(struct request_sock_ops *rsk_ops,
 	if (IS_ENABLED(CONFIG_SMC) && want_cookie)
 		tmp_opt.smc_ok = 0;
 
-	if (IS_ENABLED(CONFIG_UB_UMS) && want_cookie)
+#if IS_ENABLED(CONFIG_UB_UMS)
+	if (want_cookie)
 		tmp_opt.ums_ok = 0;
+#endif
 
 	tmp_opt.tstamp_ok = tmp_opt.saw_tstamp;
 	tcp_openreq_init(req, &tmp_opt, skb, sk);
