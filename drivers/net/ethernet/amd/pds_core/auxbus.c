@@ -172,10 +172,9 @@ static struct pds_auxiliary_dev *pdsc_auxbus_dev_register(struct pdsc *cf,
 	return padev;
 }
 
-int pdsc_auxbus_dev_del(struct pdsc *cf, struct pdsc *pf)
+void pdsc_auxbus_dev_del(struct pdsc *cf, struct pdsc *pf)
 {
 	struct pds_auxiliary_dev *padev;
-	int err = 0;
 
 	mutex_lock(&pf->config_lock);
 
@@ -188,19 +187,31 @@ int pdsc_auxbus_dev_del(struct pdsc *cf, struct pdsc *pf)
 	pf->vfs[cf->vf_id].padev = NULL;
 
 	mutex_unlock(&pf->config_lock);
-	return err;
 }
 
 int pdsc_auxbus_dev_add(struct pdsc *cf, struct pdsc *pf)
 {
 	struct pds_auxiliary_dev *padev;
-	enum pds_core_vif_types vt;
 	char devname[PDS_DEVNAME_LEN];
+	enum pds_core_vif_types vt;
+	unsigned long mask;
 	u16 vt_support;
 	int client_id;
 	int err = 0;
 
+	if (!cf)
+		return -ENODEV;
+
 	mutex_lock(&pf->config_lock);
+
+	mask = BIT_ULL(PDSC_S_FW_DEAD) |
+	       BIT_ULL(PDSC_S_STOPPING_DRIVER);
+	if (cf->state & mask) {
+		dev_err(pf->dev, "%s: can't add dev, VF client in bad state %#lx\n",
+			__func__, cf->state);
+		err = -ENXIO;
+		goto out_unlock;
+	}
 
 	/* We only support vDPA so far, so it is the only one to
 	 * be verified that it is available in the Core device and
