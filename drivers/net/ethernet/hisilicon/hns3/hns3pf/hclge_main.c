@@ -4791,177 +4791,6 @@ static void hclge_update_vport_alive(struct hclge_dev *hdev)
 	}
 }
 
-static int hclge_set_fd_qb_counter(struct hclge_dev *hdev, u8 vf_id)
-{
-	struct hclge_fd_qb_ad_cmd *req;
-	struct hclge_desc desc;
-	int ret;
-
-	hclge_cmd_setup_basic_desc(&desc, HCLGE_OPC_FD_QB_AD_OP, false);
-	req = (struct hclge_fd_qb_ad_cmd *)desc.data;
-	req->vf_id = vf_id;
-	hnae3_set_bit(req->ad_sel, HCLGE_FD_QB_AD_COUNTER_VLD_B, 1);
-	req->counter_id = vf_id % hdev->fd_cfg.cnt_num[HCLGE_FD_STAGE_1];
-	ret = hclge_cmd_send(&hdev->hw, &desc, 1);
-	if (ret)
-		dev_warn(&hdev->pdev->dev,
-			 "failed to set qb counter for vport %u, ret = %d.\n",
-			 vf_id, ret);
-	return ret;
-}
-
-static void hclge_init_fd_qb_counter(struct hclge_dev *hdev)
-{
-	int ret;
-	u16 i;
-
-	if (!test_bit(HNAE3_DEV_SUPPORT_QB_B, hdev->ae_dev->caps))
-		return;
-
-	for (i = 0; i < hdev->num_alloc_vport; i++) {
-		ret = hclge_set_fd_qb_counter(hdev, i);
-		if (ret)
-			return;
-	}
-}
-
-static int hclge_set_fd_qb(struct hclge_dev *hdev, u8 vf_id, bool enable)
-{
-	struct hclge_fd_qb_cfg_cmd *req;
-	struct hclge_desc desc;
-	int ret;
-
-	hclge_cmd_setup_basic_desc(&desc, HCLGE_OPC_FD_QB_CTRL, false);
-	req = (struct hclge_fd_qb_cfg_cmd *)desc.data;
-	req->en = enable;
-	req->vf_id = vf_id;
-
-	ret = hclge_cmd_send(&hdev->hw, &desc, 1);
-	if (ret)
-		dev_err(&hdev->pdev->dev,
-			"failed to %s qb config for vport %u, ret = %d.\n",
-			enable ? "enable" : "disable", vf_id, ret);
-	return ret;
-}
-
-static int hclge_sync_pf_qb_mode(struct hclge_dev *hdev)
-{
-	struct hclge_vport *vport = &hdev->vport[0];
-	struct hnae3_handle *handle = &vport->nic;
-	bool request_enable = true;
-	int ret;
-	u16 i;
-
-	if (!test_and_clear_bit(HCLGE_VPORT_STATE_QB_CHANGE, &vport->state))
-		return 0;
-
-	spin_lock_bh(&hdev->fd_rule_lock);
-	if (hdev->fd_active_type == HCLGE_FD_EP_ACTIVE ||
-	    hdev->fd_active_type == HCLGE_FD_TC_FLOWER_ACTIVE ||
-	    !test_bit(HNAE3_PFLAG_FD_QB_ENABLE, &handle->priv_flags))
-		request_enable = false;
-
-	if (request_enable ==
-		test_bit(HCLGE_STATE_HW_QB_ENABLE, &hdev->state)) {
-		spin_unlock_bh(&hdev->fd_rule_lock);
-		return 0;
-	}
-
-	if (request_enable)
-		hclge_clear_arfs_rules(hdev);
-
-	ret = hclge_set_fd_qb(hdev, vport->vport_id, request_enable);
-	if (!ret) {
-		if (request_enable) {
-			set_bit(HCLGE_STATE_HW_QB_ENABLE, &hdev->state);
-			hdev->fd_active_type = HCLGE_FD_QB_ACTIVE;
-		} else {
-			clear_bit(HCLGE_STATE_HW_QB_ENABLE, &hdev->state);
-			hdev->fd_active_type = HCLGE_FD_RULE_NONE;
-		}
-
-		for (i = 1; i < hdev->num_alloc_vport; i++) {
-			vport = &hdev->vport[i];
-			set_bit(HCLGE_VPORT_STATE_QB_CHANGE, &vport->state);
-		}
-	} else {
-		set_bit(HCLGE_VPORT_STATE_QB_CHANGE, &vport->state);
-	}
-	spin_unlock_bh(&hdev->fd_rule_lock);
-
-	return ret;
-}
-
-static int hclge_sync_vf_qb_mode(struct hclge_vport *vport)
-{
-	struct hclge_dev *hdev = vport->back;
-	bool request_enable = false;
-	int ret;
-
-	if (!test_and_clear_bit(HCLGE_VPORT_STATE_QB_CHANGE, &vport->state))
-		return 0;
-
-	if (vport->vf_info.trusted && vport->vf_info.request_qb_en &&
-	    test_bit(HCLGE_STATE_HW_QB_ENABLE, &hdev->state))
-		request_enable = true;
-
-	ret = hclge_set_fd_qb(hdev, vport->vport_id, request_enable);
-	if (ret)
-		set_bit(HCLGE_VPORT_STATE_QB_CHANGE, &vport->state);
-	else
-		vport->vf_info.qb_en = request_enable ? 1 : 0;
-
-	return ret;
-}
-
-static int hclge_disable_fd_qb_mode(struct hclge_dev *hdev)
-{
-	struct hnae3_ae_dev *ae_dev = hdev->ae_dev;
-	struct hclge_vport *vport;
-	int ret;
-	u16 i;
-
-	if (!test_bit(HNAE3_DEV_SUPPORT_QB_B, ae_dev->caps) ||
-	    !test_bit(HCLGE_STATE_HW_QB_ENABLE, &hdev->state))
-		return 0;
-
-	ret = hclge_set_fd_qb(hdev, 0, false);
-	if (ret)
-		return ret;
-
-	clear_bit(HCLGE_STATE_HW_QB_ENABLE, &hdev->state);
-
-	for (i = 1; i < hdev->num_alloc_vport; i++) {
-		vport = &hdev->vport[i];
-		set_bit(HCLGE_VPORT_STATE_QB_CHANGE, &vport->state);
-	}
-
-	return 0;
-}
-
-static void hclge_sync_fd_qb_mode(struct hclge_dev *hdev)
-{
-	struct hnae3_ae_dev *ae_dev = hdev->ae_dev;
-	struct hclge_vport *vport;
-	int ret;
-	u16 i;
-
-	if (!test_bit(HNAE3_DEV_SUPPORT_QB_B, ae_dev->caps))
-		return;
-
-	ret = hclge_sync_pf_qb_mode(hdev);
-	if (ret)
-		return;
-
-	for (i = 1; i < hdev->num_alloc_vport; i++) {
-		vport = &hdev->vport[i];
-
-		ret = hclge_sync_vf_qb_mode(vport);
-		if (ret)
-			return;
-	}
-}
-
 static void hclge_periodic_service_task(struct hclge_dev *hdev)
 {
 	unsigned long delta = round_jiffies_relative(HZ);
@@ -4975,7 +4804,6 @@ static void hclge_periodic_service_task(struct hclge_dev *hdev)
 	hclge_update_link_status(hdev);
 	hclge_sync_mac_table(hdev);
 	hclge_sync_promisc_mode(hdev);
-	hclge_sync_fd_qb_mode(hdev);
 	hclge_sync_fd_table(hdev);
 
 	if (time_is_after_jiffies(hdev->last_serv_processed + HZ)) {
@@ -5496,21 +5324,6 @@ static void hclge_request_update_promisc_mode(struct hnae3_handle *handle)
 	set_bit(HCLGE_VPORT_STATE_PROMISC_CHANGE, &vport->state);
 }
 
-static bool hclge_query_fd_qb_state(struct hnae3_handle *handle)
-{
-	struct hclge_vport *vport = hclge_get_vport(handle);
-	struct hclge_dev *hdev = vport->back;
-
-	return test_bit(HCLGE_STATE_HW_QB_ENABLE, &hdev->state);
-}
-
-static void hclge_flush_qb_config(struct hnae3_handle *handle)
-{
-	struct hclge_vport *vport = hclge_get_vport(handle);
-
-	set_bit(HCLGE_VPORT_STATE_QB_CHANGE, &vport->state);
-}
-
 static int
 hclge_get_pfc_storm_prevent(struct hclge_dev *hdev, int dir, bool *enable)
 {
@@ -5593,13 +5406,9 @@ hclge_request_pfc_storm_config(struct hnae3_handle *handle, bool enable)
 
 static void hclge_sync_fd_state(struct hclge_dev *hdev)
 {
-	struct hclge_vport *vport = &hdev->vport[0];
-
-	if (hlist_empty(&hdev->fd_rule_list)) {
+	if (hlist_empty(&hdev->fd_rule_list))
 		hdev->fd_active_type = HCLGE_FD_RULE_NONE;
-		set_bit(HCLGE_VPORT_STATE_QB_CHANGE, &vport->state);
 	}
-}
 
 static void hclge_fd_inc_rule_cnt(struct hclge_dev *hdev, u16 location)
 {
@@ -6023,11 +5832,6 @@ static int hclge_init_fd_config(struct hclge_dev *hdev)
 				      &hdev->fd_cfg.cnt_num[HCLGE_FD_STAGE_2]);
 	if (ret)
 		return ret;
-
-	if (!hdev->fd_cfg.cnt_num[HCLGE_FD_STAGE_1])
-		hdev->fd_cfg.cnt_num[HCLGE_FD_STAGE_1] = 1;
-
-	hclge_init_fd_qb_counter(hdev);
 
 	return hclge_set_fd_key_config(hdev, HCLGE_FD_STAGE_1);
 }
@@ -7047,10 +6851,6 @@ static int hclge_add_fd_entry_common(struct hclge_dev *hdev,
 				     struct hclge_fd_rule *rule)
 {
 	int ret;
-
-	ret = hclge_disable_fd_qb_mode(hdev);
-	if (ret)
-		return ret;
 
 	spin_lock_bh(&hdev->fd_rule_lock);
 
@@ -8798,7 +8598,6 @@ int hclge_vport_start(struct hclge_vport *vport)
 
 	set_bit(HCLGE_VPORT_STATE_INITED, &vport->state);
 	set_bit(HCLGE_VPORT_STATE_ALIVE, &vport->state);
-	set_bit(HCLGE_VPORT_STATE_QB_CHANGE, &vport->state);
 	set_bit(HCLGE_VPORT_STATE_PROMISC_CHANGE, &vport->state);
 	vport->last_active_jiffies = jiffies;
 	vport->need_notify = 0;
@@ -11028,7 +10827,6 @@ static void hclge_restore_hw_table(struct hclge_dev *hdev)
 	hclge_restore_vport_port_base_vlan_config(hdev);
 	hclge_restore_vport_vlan_table(vport);
 	set_bit(HCLGE_STATE_FD_USER_DEF_CHANGED, &hdev->state);
-	clear_bit(HCLGE_STATE_HW_QB_ENABLE, &hdev->state);
 	hclge_restore_fd_entries(handle);
 }
 
@@ -12913,8 +12711,6 @@ static int hclge_set_vf_trust(struct hnae3_handle *handle, int vf, bool enable)
 		return 0;
 
 	vport->vf_info.trusted = new_trusted;
-
-	set_bit(HCLGE_VPORT_STATE_QB_CHANGE, &vport->state);
 	set_bit(HCLGE_VPORT_STATE_PROMISC_CHANGE, &vport->state);
 	hclge_task_schedule(hdev, 0);
 
@@ -13664,10 +13460,8 @@ struct hnae3_ae_ops hclge_ops = {
 	.put_vector = hclge_put_vector,
 	.set_promisc_mode = hclge_set_promisc_mode,
 	.request_update_promisc_mode = hclge_request_update_promisc_mode,
-	.request_flush_qb_config = hclge_flush_qb_config,
 	.request_pfc_storm_config = hclge_request_pfc_storm_config,
 	.get_pfc_storm_config = hclge_get_pfc_storm_config,
-	.query_fd_qb_state = hclge_query_fd_qb_state,
 	.set_loopback = hclge_set_loopback,
 	.start = hclge_ae_start,
 	.stop = hclge_ae_stop,

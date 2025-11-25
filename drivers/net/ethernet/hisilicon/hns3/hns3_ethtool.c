@@ -483,16 +483,6 @@ static void hns3_update_limit_promisc_mode(struct net_device *netdev,
 	hns3_request_update_promisc_mode(handle);
 }
 
-static void hns3_update_fd_qb_state(struct net_device *netdev, bool enable)
-{
-	struct hnae3_handle *handle = hns3_get_handle(netdev);
-
-	if (!handle->ae_algo->ops->request_flush_qb_config)
-		return;
-
-	handle->ae_algo->ops->request_flush_qb_config(handle);
-}
-
 static void hns3_update_roh_arp_proxy_enable(struct net_device *netdev,
 					     bool enable)
 {
@@ -513,7 +503,6 @@ static void hns3_update_pfc_storm_prevent_enable(struct net_device *netdev,
 
 static const struct hns3_pflag_desc hns3_priv_flags[HNAE3_PFLAG_MAX] = {
 	{ "limit_promisc",	hns3_update_limit_promisc_mode },
-	{ "qb_enable",		hns3_update_fd_qb_state },
 	{ "roh_arp_proxy_enable",	hns3_update_roh_arp_proxy_enable },
 	{ "pfc_storm_prevent_enable",	hns3_update_pfc_storm_prevent_enable },
 };

@@ -271,7 +271,6 @@ void hclgevf_mbx_handler(struct hclgevf_dev *hdev)
 		case HCLGE_MBX_LINK_STAT_MODE:
 		case HCLGE_MBX_PUSH_VLAN_INFO:
 		case HCLGE_MBX_PUSH_PROMISC_INFO:
-		case HCLGE_MBX_PUSH_QB_STATE:
 		case HCLGE_MBX_EVENT_NOTIFY:
 			hclgevf_handle_mbx_msg(hdev, req);
 			break;
@@ -296,19 +295,6 @@ static void hclgevf_parse_promisc_info(struct hclgevf_dev *hdev,
 	if (!promisc_info)
 		dev_info(&hdev->pdev->dev,
 			 "Promisc mode is closed by host for being untrusted.\n");
-}
-
-static void hclgevf_parse_qb_info(struct hclgevf_dev *hdev, u16 qb_state)
-{
-#define HCLGEVF_HW_QB_ON       1
-#define HCLGEVF_HW_QB_OFF      0
-
-	if (qb_state > HCLGEVF_HW_QB_ON) {
-		dev_warn(&hdev->pdev->dev, "Invalid state, ignored.\n");
-		return;
-	}
-
-	hdev->qb_cfg.hw_qb_en = qb_state > HCLGEVF_HW_QB_OFF;
 }
 
 static int hclgevf_mbx_parse_event_info(struct hclgevf_dev *hdev, u64 events)
@@ -399,9 +385,6 @@ void hclgevf_mbx_async_handler(struct hclgevf_dev *hdev)
 			break;
 		case HCLGE_MBX_PUSH_PROMISC_INFO:
 			hclgevf_parse_promisc_info(hdev, le16_to_cpu(msg_q[1]));
-			break;
-		case HCLGE_MBX_PUSH_QB_STATE:
-			hclgevf_parse_qb_info(hdev, msg_q[1]);
 			break;
 		case HCLGE_MBX_EVENT_NOTIFY:
 			events = *(u64 *)(msg_q + 1);
