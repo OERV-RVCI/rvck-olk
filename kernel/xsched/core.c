@@ -215,7 +215,7 @@ static void submit_kick(struct vstream_metadata *vsm)
 
 	params.group = vs->xcu->group;
 	params.fd = vs->fd;
-	params.param_1 = &vs->id;
+	params.param_1 = &vs->sq_id;
 	params.param_2 = &vs->channel_id;
 	params.param_3 = vsm->sqe;
 	params.param_4 = &vsm->sqe_num;
@@ -243,7 +243,7 @@ static void submit_wait(struct vstream_metadata *vsm)
 	params.group = vs->xcu->group;
 	params.param_1 = &vs->channel_id;
 	params.param_2 = &vs->logic_vcq_id;
-	params.param_3 = &vs->user_stream_id;
+	params.param_3 = &vs->id;
 	params.param_4 = &vsm->sqe;
 	params.param_5 = vsm->cqe;
 	params.param_6 = vs->drv_ctx;
@@ -254,9 +254,6 @@ static void submit_wait(struct vstream_metadata *vsm)
 		XSCHED_ERR("Fail to wait Vstream id %u tasks, logic_cq_id %u.\n",
 			vs->id, vs->logic_vcq_id);
 	}
-
-	XSCHED_DEBUG("Vstream id %u wait finish, logic_cq_id %u\n",
-		vs->id, vs->logic_vcq_id);
 }
 
 static int __xsched_submit(struct xsched_cu *xcu, struct xsched_entity *xse)
@@ -267,8 +264,6 @@ static int __xsched_submit(struct xsched_cu *xcu, struct xsched_entity *xse)
 	ktime_t t_start = 0;
 	struct xcu_op_handler_params params;
 
-	XSCHED_DEBUG("%s called for xse %d on xcu %u\n",
-		__func__, xse->tgid, xcu->id);
 	list_for_each_entry_safe(vsm, tmp, &xcu->vsm_list, node) {
 		submit_kick(vsm);
 		XSCHED_DEBUG("Xse %d vsm %u sched_delay: %lld ns\n",
@@ -346,7 +341,7 @@ struct vstream_metadata *xsched_vsm_fetch_first(struct vstream_info *vs)
 {
 	struct vstream_metadata *vsm;
 
-	if (list_empty(&vs->metadata_list)) {
+	if (!vs || list_empty(&vs->metadata_list)) {
 		XSCHED_DEBUG("No metadata to fetch from vs %u @ %s\n",
 			vs->id, __func__);
 		return NULL;

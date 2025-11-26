@@ -39,8 +39,8 @@ typedef struct vstream_metadata {
 typedef int vstream_manage_t(struct vstream_args *arg);
 
 typedef struct vstream_info {
-	uint32_t user_stream_id;
 	uint32_t id;
+	uint32_t sq_id;
 	uint32_t vcq_id;
 	uint32_t logic_vcq_id;
 	uint32_t dev_id;

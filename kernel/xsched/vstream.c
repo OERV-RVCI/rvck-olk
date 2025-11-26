@@ -117,9 +117,6 @@ struct xsched_cu *xcu_find(uint32_t type,
 		return NULL;
 	}
 
-	XSCHED_DEBUG("XCU found: type=%u, dev_id=%u, chan_id=%u.\n",
-		type, dev_id, channel_id);
-
 	return group->xcu;
 }
 
@@ -128,7 +125,7 @@ static int vstream_destroy(vstream_info_t *vstream)
 	int err;
 	struct xsched_context *ctx = NULL;
 
-	err = vstream_del(vstream, vstream->id);
+	err = vstream_del(vstream, vstream->sq_id);
 	if (err)
 		return err;
 
@@ -198,7 +195,6 @@ int ctx_bind_to_xcu(vstream_info_t *vstream_info, struct xsched_context *ctx)
 	ctx->xse.xcu = xcu_found;
 	vstream_info->xcu = xcu_found;
 	revmap_data->dev_id = vstream_info->dev_id;
-	XSCHED_DEBUG("Ctx bind to xcu %u @ %s\n", xcu_found->id, __func__);
 
 	hash_add(ctx_revmap, &revmap_data->hash_node,
 		 (unsigned long)ctx->dev_id);
@@ -252,10 +248,9 @@ static int vstream_bind_to_ctx(struct vstream_info *vs)
 
 	mutex_lock(&xcu->ctx_list_lock);
 	ctx = ctx_find_by_tgid_and_xcu(vs->tgid, xcu);
-	if (ctx) {
-		XSCHED_DEBUG("Ctx %d found @ %s\n", vs->tgid, __func__);
+	if (ctx)
 		kref_get(&ctx->kref);
-	} else {
+	else {
 		err = alloc_ctx_from_vstream(vs, &ctx);
 		if (err)
 			goto out_err;
@@ -359,7 +354,7 @@ vstream_get_by_user_stream_id(struct xsched_cu *xcu, uint32_t user_stream_id)
 	mutex_lock(&xcu->vs_array_lock);
 	for (id = 0; id < MAX_VSTREAM_NUM; id++) {
 		if (xcu->vs_array[id] != NULL &&
-			xcu->vs_array[id]->user_stream_id == user_stream_id) {
+			xcu->vs_array[id]->id == user_stream_id) {
 			ret = xcu->vs_array[id];
 			break;
 		}
@@ -380,8 +375,6 @@ static int vstream_bind_to_xcu(vstream_info_t *vstream_info)
 	/* Bind vstream to a xcu. */
 	vstream_info->xcu = xcu_found;
 	vstream_info->dev_id = xcu_found->id;
-	XSCHED_DEBUG("XCU bound to a vstream: type=%u, dev_id=%u, chan_id=%u.\n",
-		type, vstream_info->dev_id, vstream_info->channel_id);
 
 	return 0;
 }
@@ -427,10 +420,10 @@ static int sqcq_alloc(struct vstream_args *arg)
 	}
 
 	vstream->drv_ctx = params.param_5;
-	vstream->id = sq_id;
+	vstream->sq_id = sq_id;
 	vstream->vcq_id = cq_id;
 	vstream->logic_vcq_id = logic_cq_id;
-	vstream->user_stream_id = va_args->user_stream_id;
+	vstream->id = va_args->user_stream_id;
 	vstream->tgid = tgid;
 	vstream->sqcq_type = va_args->type;
 	ret = vstream_bind_to_ctx(vstream);
@@ -447,7 +440,7 @@ static int sqcq_alloc(struct vstream_args *arg)
 	vstream->inode_fd = ret;
 
 	/* Add new vstream to array after allocating inode */
-	ret = vstream_add(vstream, vstream->id);
+	ret = vstream_add(vstream, vstream->sq_id);
 	if (ret)
 		goto out_err_vstream_file_put;
 
