@@ -589,12 +589,10 @@ int vstream_kick(struct vstream_args *arg)
 
 	do {
 		mutex_lock(&xcu->xcu_lock);
-		spin_lock(&vstream->stream_lock);
 
 		/* Adding kick metadata. */
 		err = xsched_vsm_add_tail(vstream, arg);
 		if (err == -EBUSY) {
-			spin_unlock(&vstream->stream_lock);
 			mutex_unlock(&xcu->xcu_lock);
 
 			/* Retry after a while */
@@ -612,7 +610,6 @@ int vstream_kick(struct vstream_args *arg)
 		enqueue_ctx(xse, xcu);
 	} while (err == -EBUSY);
 
-	spin_unlock(&vstream->stream_lock);
 	mutex_unlock(&xcu->xcu_lock);
 	if (!err)
 		wake_up_interruptible(&xcu->wq_xcu_idle);

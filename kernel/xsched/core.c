@@ -315,7 +315,10 @@ int xsched_vsm_add_tail(struct vstream_info *vs, vstream_args_t *arg)
 		return -ENOMEM;
 	}
 
+	spin_lock(&vs->stream_lock);
+
 	if (vs->kicks_count > MAX_VSTREAM_SIZE) {
+		spin_unlock(&vs->stream_lock);
 		kfree(new_vsm);
 		return -EBUSY;
 	}
@@ -323,7 +326,9 @@ int xsched_vsm_add_tail(struct vstream_info *vs, vstream_args_t *arg)
 	xsched_init_vsm(new_vsm, vs, arg);
 	list_add_tail(&new_vsm->node, &vs->metadata_list);
 	new_vsm->add_time = ktime_get();
-	vs->kicks_count += 1;
+	vs->kicks_count++;
+
+	spin_unlock(&vs->stream_lock);
 
 	/* Increasing a total amount of kicks on an CU to which this
 	 * context is attached to based on sched_class.
