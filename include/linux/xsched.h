@@ -192,7 +192,7 @@ struct xsched_entity {
 	pid_t tgid;
 
 	/* Amount of pending kicks currently sitting on this context. */
-	atomic_t kicks_pending_ctx_cnt;
+	atomic_t kicks_pending_cnt;
 
 	/* Amount of submitted kicks context, used for resched decision. */
 	atomic_t submitted_one_kick;
@@ -337,40 +337,6 @@ xse_this_grp(struct xsched_entity_cfs *xse_cfs)
 	return xse_cfs ? xse_this_grp_xcu(xse_cfs)->self : NULL;
 }
 #endif /* CONFIG_CGROUP_XCU */
-
-/* Increments pending kicks counter for an XCU that the given
- * xsched entity is attached to and for xsched entity's xsched
- * class.
- */
-static inline int xsched_inc_pending_kicks_xse(struct xsched_entity *xse)
-{
-	atomic_inc(&xse->xcu->pending_kicks);
-	/* Icrement pending kicks for current XSE. */
-	atomic_inc(&xse->kicks_pending_ctx_cnt);
-
-	return 0;
-}
-
-/* Decrements pending kicks counter for an XCU that the given
- * xsched entity is attached to and for XSched entity's sched
- * class.
- */
-static inline int xsched_dec_pending_kicks_xse(struct xsched_entity *xse)
-{
-	atomic_dec(&xse->xcu->pending_kicks);
-	/* Decrementing pending kicks for current XSE. */
-	atomic_dec(&xse->kicks_pending_ctx_cnt);
-
-	return 0;
-}
-
-/* Checks if there are pending kicks left on a given XCU for all
- * xsched classes.
- */
-static inline bool xsched_check_pending_kicks_xcu(struct xsched_cu *xcu)
-{
-	return atomic_read(&xcu->pending_kicks);
-}
 
 static inline int xse_integrity_check(const struct xsched_entity *xse)
 {

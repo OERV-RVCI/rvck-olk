@@ -617,11 +617,6 @@ int vstream_kick(struct vstream_args *arg)
 		}
 
 		enqueue_ctx(xse, xcu);
-
-		/* Increasing a total amount of kicks on an CU to which this
-		 * context is attached to based on sched_class.
-		 */
-		xsched_inc_pending_kicks_xse(&vstream->ctx->xse);
 	} while (err == -EBUSY);
 
 	spin_unlock(&vstream->stream_lock);
