@@ -432,6 +432,7 @@ void xcu_move_task(struct task_struct *task, struct xsched_group *old_xcg,
 
 		if (old_xcg != xse->parent_grp) {
 			WARN_ON(old_xcg != xse->parent_grp);
+			spin_unlock(&old_xcg->lock);
 			return;
 		}
 
