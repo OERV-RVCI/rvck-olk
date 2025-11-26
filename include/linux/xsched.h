@@ -11,25 +11,22 @@
 #define pr_fmt(fmt) fmt
 #endif
 
-#define XSCHED_INFO_PREFIX "XSched [INFO]: "
+#define XSCHED_LOG_PREFIX "XSched"
 #define XSCHED_INFO(fmt, ...)                                                  \
-	pr_info(pr_fmt(XSCHED_INFO_PREFIX fmt), ##__VA_ARGS__)
+	pr_info(pr_fmt(XSCHED_LOG_PREFIX " [INFO]: " fmt), ##__VA_ARGS__)
 
-#define XSCHED_ERR_PREFIX "XSched [ERROR]: "
 #define XSCHED_ERR(fmt, ...)                                                   \
-	pr_err(pr_fmt(XSCHED_ERR_PREFIX fmt), ##__VA_ARGS__)
+	pr_err(pr_fmt(XSCHED_LOG_PREFIX " [ERROR]: " fmt), ##__VA_ARGS__)
 
-#define XSCHED_WARN_PREFIX "XSched [WARNING]: "
 #define XSCHED_WARN(fmt, ...)                                                  \
-	pr_warn(pr_fmt(XSCHED_WARN_PREFIX fmt), ##__VA_ARGS__)
+	pr_warn(pr_fmt(XSCHED_LOG_PREFIX " [WARNING]: " fmt), ##__VA_ARGS__)
 
 /*
  * Debug specific prints for XSched
  */
 
-#define XSCHED_DEBUG_PREFIX "XSched [DEBUG]: "
 #define XSCHED_DEBUG(fmt, ...)                                                 \
-	pr_debug(pr_fmt(XSCHED_DEBUG_PREFIX fmt), ##__VA_ARGS__)
+	pr_debug(pr_fmt(XSCHED_LOG_PREFIX " [DEBUG]: " fmt), ##__VA_ARGS__)
 
 #define XSCHED_CALL_STUB()                                                     \
 	XSCHED_DEBUG(" -----* %s @ %s called *-----\n", __func__, __FILE__)
@@ -195,7 +192,7 @@ struct xsched_entity {
 	pid_t tgid;
 
 	/* Amount of pending kicks currently sitting on this context. */
-	atomic_t kicks_pending_ctx_cnt;
+	atomic_t kicks_pending_cnt;
 
 	/* Amount of submitted kicks context, used for resched decision. */
 	atomic_t submitted_one_kick;
@@ -229,10 +226,12 @@ struct xsched_entity {
 	 */
 	struct xsched_cu *xcu;
 
+#ifdef CONFIG_CGROUP_XCU
 	/* Link to list of xsched_group items */
 	struct list_head group_node;
 	struct xsched_group *parent_grp;
 	bool is_group;
+#endif /* CONFIG_CGROUP_XCU */
 
 	/* General purpose xse lock. */
 	spinlock_t xse_lock;
@@ -246,6 +245,7 @@ struct xcg_attach_entry {
 	struct list_head node;
 };
 
+#ifdef CONFIG_CGROUP_XCU
 /* xsched_group's xcu related stuff */
 struct xsched_group_xcu_priv {
 	/* Owner of this group */
@@ -309,22 +309,18 @@ struct xsched_group {
 	struct cgroup_file xcu_file[NR_XCU_FILE_TYPES];
 	struct work_struct file_show_work;
 };
-
-#define XSCHED_RQ_OF(xse)                                                      \
-	(container_of(((xse)->cfs.cfs_rq), struct xsched_rq, cfs))
-
-#define XSCHED_RQ_OF_CFS_XSE(cfs_xse)                                          \
-	(container_of(((cfs_xse)->cfs_rq), struct xsched_rq, cfs))
+#endif /* CONFIG_CGROUP_XCU */
 
 #define XSCHED_SE_OF(cfs_xse)                                                  \
 	(container_of((cfs_xse), struct xsched_entity, cfs))
 
+#ifdef CONFIG_CGROUP_XCU
 #define xcg_parent_grp_xcu(xcg)                                                \
 	((xcg)->self->parent->perxcu_priv[(xcg)->xcu_id])
 
 #define xse_parent_grp_xcu(xse_cfs)                                            \
 	(&((XSCHED_SE_OF(xse_cfs)                                                  \
-		    ->parent_grp->perxcu_priv[(XSCHED_SE_OF(xse_cfs))->xcu->id])))
+			->parent_grp->perxcu_priv[(XSCHED_SE_OF(xse_cfs))->xcu->id])))
 
 static inline struct xsched_group_xcu_priv *
 xse_this_grp_xcu(struct xsched_entity_cfs *xse_cfs)
@@ -340,40 +336,7 @@ xse_this_grp(struct xsched_entity_cfs *xse_cfs)
 {
 	return xse_cfs ? xse_this_grp_xcu(xse_cfs)->self : NULL;
 }
-
-/* Increments pending kicks counter for an XCU that the given
- * xsched entity is attached to and for xsched entity's xsched
- * class.
- */
-static inline int xsched_inc_pending_kicks_xse(struct xsched_entity *xse)
-{
-	atomic_inc(&xse->xcu->pending_kicks);
-	/* Icrement pending kicks for current XSE. */
-	atomic_inc(&xse->kicks_pending_ctx_cnt);
-
-	return 0;
-}
-
-/* Decrements pending kicks counter for an XCU that the given
- * xsched entity is attached to and for XSched entity's sched
- * class.
- */
-static inline int xsched_dec_pending_kicks_xse(struct xsched_entity *xse)
-{
-	atomic_dec(&xse->xcu->pending_kicks);
-	/* Decrementing pending kicks for current XSE. */
-	atomic_dec(&xse->kicks_pending_ctx_cnt);
-
-	return 0;
-}
-
-/* Checks if there are pending kicks left on a given XCU for all
- * xsched classes.
- */
-static inline bool xsched_check_pending_kicks_xcu(struct xsched_cu *xcu)
-{
-	return atomic_read(&xcu->pending_kicks);
-}
+#endif /* CONFIG_CGROUP_XCU */
 
 static inline int xse_integrity_check(const struct xsched_entity *xse)
 {
@@ -498,6 +461,7 @@ void enqueue_ctx(struct xsched_entity *xse, struct xsched_cu *xcu);
 void dequeue_ctx(struct xsched_entity *xse, struct xsched_cu *xcu);
 int delete_ctx(struct xsched_context *ctx);
 
+#ifdef CONFIG_CGROUP_XCU
 /* Xsched group manage functions */
 void xsched_group_inherit(struct task_struct *tsk, struct xsched_entity *xse);
 void xcu_cg_subsys_init(void);
@@ -511,4 +475,16 @@ void xsched_quota_timeout_update(struct xsched_group *xg);
 void xsched_quota_account(struct xsched_group *xg, s64 exec_time);
 bool xsched_quota_exceed(struct xsched_group *xg);
 void xsched_quota_refill(struct work_struct *work);
+
+#define XCU_PERIOD_MIN_MS 1
+#define XCU_QUOTA_RUNTIME_INF -1
+#define XCU_SHARES_MIN 1
+
+#define XCUCG_SET_FILE_RETRY_COUNT 50
+#define XCUCG_SET_FILE_DELAY_MS 10
+
+#define SCHED_CLASS_MAX_LENGTH 4
+
+#endif
+
 #endif /* !__LINUX_XSCHED_H__ */

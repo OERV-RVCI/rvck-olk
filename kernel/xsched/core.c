@@ -39,17 +39,13 @@ static void put_prev_ctx(struct xsched_entity *xse)
 
 static size_t select_work_def(struct xsched_cu *xcu, struct xsched_entity *xse)
 {
-	int kick_count, scheduled = 0, not_empty;
+	int scheduled = 0, not_empty;
 	struct vstream_info *vs;
 	struct xcu_op_handler_params params;
 	struct vstream_metadata *vsm;
 	size_t kick_slice = xse->class->kick_slice;
 
-	kick_count = atomic_read(&xse->kicks_pending_ctx_cnt);
-	XSCHED_DEBUG("Before decrement XSE kick_count=%d @ %s\n",
-		kick_count, __func__);
-
-	if (kick_count == 0) {
+	if (atomic_read(&xse->kicks_pending_cnt) == 0) {
 		XSCHED_WARN("Try to select xse that has 0 kicks @ %s\n",
 			__func__);
 		return 0;
@@ -58,17 +54,22 @@ static size_t select_work_def(struct xsched_cu *xcu, struct xsched_entity *xse)
 	do {
 		not_empty = 0;
 		for_each_vstream_in_ctx(vs, xse->ctx) {
-			spin_lock(&vs->stream_lock);
 			vsm = xsched_vsm_fetch_first(vs);
-			spin_unlock(&vs->stream_lock);
+
 			if (!vsm)
 				continue;
+
 			list_add_tail(&vsm->node, &xcu->vsm_list);
 			scheduled++;
-			xsched_dec_pending_kicks_xse(xse);
 			not_empty++;
 		}
 	} while ((scheduled < kick_slice) && (not_empty));
+
+	if (scheduled == 0)
+		return 0;
+
+	atomic_sub(scheduled, &xse->kicks_pending_cnt);
+	atomic_add(scheduled, &xcu->pending_kicks);
 
 	/*
 	 * Iterate over all vstreams in context:
@@ -86,10 +87,6 @@ static size_t select_work_def(struct xsched_cu *xcu, struct xsched_entity *xse)
 		}
 	}
 
-	kick_count = atomic_read(&xse->kicks_pending_ctx_cnt);
-	XSCHED_DEBUG("After decrement XSE kick_count=%d @ %s\n",
-		    kick_count, __func__);
-
 	xse->total_scheduled += scheduled;
 	return scheduled;
 }
@@ -106,6 +103,11 @@ static struct xsched_entity *__raw_pick_next_ctx(struct xsched_cu *xcu)
 		if (next) {
 			scheduled = class->select_work ?
 				class->select_work(xcu, next) : select_work_def(xcu, next);
+
+			if (scheduled == 0) {
+				dequeue_ctx(next, xcu);
+				return NULL;
+			}
 
 			XSCHED_DEBUG("xse %d scheduled=%zu total=%zu @ %s\n",
 				next->tgid, scheduled, next->total_scheduled, __func__);
@@ -166,12 +168,8 @@ int delete_ctx(struct xsched_context *ctx)
 	}
 
 	/* Wait till context has been submitted. */
-	while (atomic_read(&xse->kicks_pending_ctx_cnt)) {
-		XSCHED_DEBUG("Deleting ctx %d, xse->kicks_pending_ctx_cnt=%d @ %s\n",
-			xse->tgid, atomic_read(&xse->kicks_pending_ctx_cnt),
-			__func__);
+	while (atomic_read(&xse->kicks_pending_cnt))
 		usleep_range(100, 200);
-	}
 
 	mutex_lock(&xcu->xcu_lock);
 	if (curr_xse == xse)
@@ -179,8 +177,6 @@ int delete_ctx(struct xsched_context *ctx)
 	dequeue_ctx(xse, xcu);
 	--xcu->nr_ctx;
 	mutex_unlock(&xcu->xcu_lock);
-	XSCHED_DEBUG("Deleting ctx %d, pending kicks left=%d @ %s\n", xse->tgid,
-		atomic_read(&xse->kicks_pending_ctx_cnt), __func__);
 
 	xse->class->xse_deinit(xse);
 
@@ -194,6 +190,11 @@ int delete_ctx(struct xsched_context *ctx)
 int xsched_xse_set_class(struct xsched_entity *xse)
 {
 	struct xsched_class *sched = xsched_first_class;
+
+	if (!sched) {
+		XSCHED_ERR("No xsched classes registered @ %s\n", __func__);
+		return -EINVAL;
+	}
 
 #ifdef CONFIG_CGROUP_XCU
 	xsched_group_inherit(current, xse);
@@ -214,7 +215,7 @@ static void submit_kick(struct vstream_metadata *vsm)
 
 	params.group = vs->xcu->group;
 	params.fd = vs->fd;
-	params.param_1 = &vs->id;
+	params.param_1 = &vs->sq_id;
 	params.param_2 = &vs->channel_id;
 	params.param_3 = vsm->sqe;
 	params.param_4 = &vsm->sqe_num;
@@ -242,7 +243,7 @@ static void submit_wait(struct vstream_metadata *vsm)
 	params.group = vs->xcu->group;
 	params.param_1 = &vs->channel_id;
 	params.param_2 = &vs->logic_vcq_id;
-	params.param_3 = &vs->user_stream_id;
+	params.param_3 = &vs->id;
 	params.param_4 = &vsm->sqe;
 	params.param_5 = vsm->cqe;
 	params.param_6 = vs->drv_ctx;
@@ -253,9 +254,6 @@ static void submit_wait(struct vstream_metadata *vsm)
 		XSCHED_ERR("Fail to wait Vstream id %u tasks, logic_cq_id %u.\n",
 			vs->id, vs->logic_vcq_id);
 	}
-
-	XSCHED_DEBUG("Vstream id %u wait finish, logic_cq_id %u\n",
-		vs->id, vs->logic_vcq_id);
 }
 
 static int __xsched_submit(struct xsched_cu *xcu, struct xsched_entity *xse)
@@ -266,8 +264,6 @@ static int __xsched_submit(struct xsched_cu *xcu, struct xsched_entity *xse)
 	ktime_t t_start = 0;
 	struct xcu_op_handler_params params;
 
-	XSCHED_DEBUG("%s called for xse %d on xcu %u\n",
-		__func__, xse->tgid, xcu->id);
 	list_for_each_entry_safe(vsm, tmp, &xcu->vsm_list, node) {
 		submit_kick(vsm);
 		XSCHED_DEBUG("Xse %d vsm %u sched_delay: %lld ns\n",
@@ -288,8 +284,12 @@ static int __xsched_submit(struct xsched_cu *xcu, struct xsched_entity *xse)
 		kfree(vsm);
 	}
 
+	if (submitted == 0)
+		return 0;
+
 	xse->last_exec_runtime += submit_exec_time;
 	xse->total_submitted += submitted;
+	atomic_sub(submitted, &xcu->pending_kicks);
 	atomic_add(submitted, &xse->submitted_one_kick);
 	INIT_LIST_HEAD(&xcu->vsm_list);
 	XSCHED_DEBUG("Xse %d submitted=%d total=%zu, exec_time=%ld @ %s\n",
@@ -315,7 +315,10 @@ int xsched_vsm_add_tail(struct vstream_info *vs, vstream_args_t *arg)
 		return -ENOMEM;
 	}
 
+	spin_lock(&vs->stream_lock);
+
 	if (vs->kicks_count > MAX_VSTREAM_SIZE) {
+		spin_unlock(&vs->stream_lock);
 		kfree(new_vsm);
 		return -EBUSY;
 	}
@@ -323,7 +326,14 @@ int xsched_vsm_add_tail(struct vstream_info *vs, vstream_args_t *arg)
 	xsched_init_vsm(new_vsm, vs, arg);
 	list_add_tail(&new_vsm->node, &vs->metadata_list);
 	new_vsm->add_time = ktime_get();
-	vs->kicks_count += 1;
+	vs->kicks_count++;
+
+	spin_unlock(&vs->stream_lock);
+
+	/* Increasing a total amount of kicks on an CU to which this
+	 * context is attached to based on sched_class.
+	 */
+	atomic_inc(&vs->ctx->xse.kicks_pending_cnt);
 
 	return 0;
 }
@@ -336,17 +346,18 @@ struct vstream_metadata *xsched_vsm_fetch_first(struct vstream_info *vs)
 {
 	struct vstream_metadata *vsm;
 
-	if (list_empty(&vs->metadata_list)) {
+	if (!vs || list_empty(&vs->metadata_list)) {
 		XSCHED_DEBUG("No metadata to fetch from vs %u @ %s\n",
 			vs->id, __func__);
 		return NULL;
 	}
 
+	spin_lock(&vs->stream_lock);
 	vsm = list_first_entry(&vs->metadata_list, struct vstream_metadata, node);
 	if (!vsm) {
 		XSCHED_ERR("Corrupted metadata list in vs %u @ %s\n",
 			vs->id, __func__);
-		return NULL;
+		goto out_unlock;
 	}
 
 	list_del(&vsm->node);
@@ -355,6 +366,9 @@ struct vstream_metadata *xsched_vsm_fetch_first(struct vstream_info *vs)
 			vs->id, __func__);
 	else
 		vs->kicks_count -= 1;
+
+out_unlock:
+	spin_unlock(&vs->stream_lock);
 
 	return vsm;
 }
@@ -376,11 +390,6 @@ int xsched_schedule(void *input_xcu)
 			break;
 		}
 
-		if (!xsched_check_pending_kicks_xcu(xcu)) {
-			XSCHED_WARN("%s: No pending kicks on xcu %u\n", __func__, xcu->id);
-			continue;
-		}
-
 		next_xse = __raw_pick_next_ctx(xcu);
 		if (!next_xse) {
 			XSCHED_WARN("%s: Couldn't find next xse on xcu %u\n", __func__, xcu->id);
@@ -397,7 +406,7 @@ int xsched_schedule(void *input_xcu)
 
 		/* if not deleted yet */
 		put_prev_ctx(curr_xse);
-		if (!atomic_read(&curr_xse->kicks_pending_ctx_cnt))
+		if (!atomic_read(&curr_xse->kicks_pending_cnt))
 			dequeue_ctx(curr_xse, xcu);
 
 #ifdef CONFIG_CGROUP_XCU
@@ -460,7 +469,7 @@ int xsched_init_entity(struct xsched_context *ctx, struct vstream_info *vs)
 	int err = 0;
 	struct xsched_entity *xse = &ctx->xse;
 
-	atomic_set(&xse->kicks_pending_ctx_cnt, 0);
+	atomic_set(&xse->kicks_pending_cnt, 0);
 	atomic_set(&xse->submitted_one_kick, 0);
 
 	xse->total_scheduled = 0;

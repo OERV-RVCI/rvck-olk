@@ -327,7 +327,9 @@ int xsched_xcu_register(struct xcu_group *group, uint32_t phys_id)
 		return ret;
 	}
 
+#ifdef CONFIG_CGROUP_XCU
 	xcu_cfs_root_cg_init(xcu);
+#endif /* CONFIG_CGROUP_XCU */
 
 	return 0;
 }
