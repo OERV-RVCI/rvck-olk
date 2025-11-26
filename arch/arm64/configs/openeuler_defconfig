@@ -8388,6 +8388,10 @@ CONFIG_UDFI_ODF=m
 CONFIG_FWCTL_UB=m
 # end of UB_FWCTL
 
+# UB sentry
+CONFIG_UB_SENTRY=m
+# end of UB sentry
+
 #
 # PAGEATTACH SUPPORT
 #
