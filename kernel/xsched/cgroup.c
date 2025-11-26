@@ -253,20 +253,19 @@ static void xcu_css_free(struct cgroup_subsys_state *css)
 static void delay_xcu_cg_set_file_show_workfn(struct work_struct *work)
 {
 	struct xsched_group *xg;
-	int retry = 50;
 
 	xg = container_of(work, struct xsched_group, file_show_work);
 
-	for (int i = 0; i < retry; i++) {
+	for (int i = 0; i < XCUCG_SET_FILE_RETRY_COUNT; i++) {
 		if (!xcu_cg_set_file_show(xg))
 			return;
 
-		mdelay(10);
+		mdelay(XCUCG_SET_FILE_DELAY_MS);
 	}
 
 	XSCHED_ERR("Failed to control the files xcu.{quota, period, shares} visibility after\n"
 				"%d retries, sched_class=%d, css=0x%lx\n",
-				retry, xg->sched_class, (uintptr_t)&xg->css);
+				XCUCG_SET_FILE_RETRY_COUNT, xg->sched_class, (uintptr_t)&xg->css);
 }
 
 static int xcu_css_online(struct cgroup_subsys_state *css)
@@ -527,8 +526,8 @@ static ssize_t xcu_sched_class_write(struct kernfs_open_file *of, char *buf,
 {
 	struct cgroup_subsys_state *css = of_css(of);
 	struct xsched_group *xg = xcu_cg_from_css(css);
-	char type_name[4];
-	int type = -1;
+	char type_name[SCHED_CLASS_MAX_LENGTH];
+	int type;
 
 	ssize_t ret = sscanf(buf, "%3s", type_name);
 
@@ -633,7 +632,7 @@ static int xcu_write_s64(struct cgroup_subsys_state *css, struct cftype *cft,
 
 	switch (cft->private) {
 	case XCU_FILE_PERIOD_MS:
-		if (val < 1 || val > (S64_MAX / NSEC_PER_MSEC)) {
+		if (val < XCU_PERIOD_MIN_MS || val > (S64_MAX / NSEC_PER_MSEC)) {
 			ret = -EINVAL;
 			break;
 		}
@@ -641,7 +640,7 @@ static int xcu_write_s64(struct cgroup_subsys_state *css, struct cftype *cft,
 		xsched_quota_timeout_update(xcucg);
 		break;
 	case XCU_FILE_QUOTA_MS:
-		if (val < -1 || val > (S64_MAX / NSEC_PER_MSEC)) {
+		if (val < XCU_QUOTA_RUNTIME_INF || val > (S64_MAX / NSEC_PER_MSEC)) {
 			ret = -EINVAL;
 			break;
 		}
@@ -655,7 +654,7 @@ static int xcu_write_s64(struct cgroup_subsys_state *css, struct cftype *cft,
 		xsched_quota_timeout_update(xcucg);
 		break;
 	case XCU_FILE_SHARES:
-		if (val <= 0 || val > U64_MAX) {
+		if (val < XCU_SHARES_MIN || val > U64_MAX) {
 			ret = -EINVAL;
 			break;
 		}
