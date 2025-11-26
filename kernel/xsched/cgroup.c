@@ -211,34 +211,8 @@ inline struct xsched_group *xcu_cg_from_css(struct cgroup_subsys_state *css)
 	return css ? container_of(css, struct xsched_group, css) : NULL;
 }
 
-/*
- * Determine whether the given css corresponds to root_xsched_group.css.
- *
- * Parameter only_css_self:
- *   - true  : Only check whether the css pointer itself is NULL
- *             (i.e., the subsystem root). Do not dereference xg->parent.
- *             Used in the allocation path (css_alloc).
- *   - false : Further check whether the associated xsched_group
- *             has no parent (i.e., a normal root check).
- */
-static inline bool xsched_group_css_is_root(struct cgroup_subsys_state *css, bool only_css_self)
+static inline bool xsched_group_is_root(struct xsched_group *xg)
 {
-	struct xsched_group *xg;
-
-	/* NULL indicates the subsystem root */
-	if (!css)
-		return true;
-
-	/*
-	 * During the allocation phase,
-	 * cannot find its parent xsched_group via xg->parent,
-	 * so can only determine on the css itself.
-	 */
-	if (only_css_self)
-		return false;
-
-	xg = xcu_cg_from_css(css);
-
 	return xg && !xg->parent;
 }
 
@@ -258,7 +232,7 @@ xcu_css_alloc(struct cgroup_subsys_state *parent_css)
 {
 	struct xsched_group *xg;
 
-	if (xsched_group_css_is_root(parent_css, true))
+	if (!parent_css)
 		return &root_xsched_group.css;
 
 	xg = kmem_cache_alloc(xsched_group_cache, GFP_KERNEL | __GFP_ZERO);
@@ -324,7 +298,7 @@ static void xcu_css_offline(struct cgroup_subsys_state *css)
 	struct xsched_group *xcg;
 
 	xcg = xcu_cg_from_css(css);
-	if (!xsched_group_css_is_root(css, false)) {
+	if (!xsched_group_is_root(xcg)) {
 		switch (xcg->sched_class) {
 		case XSCHED_TYPE_CFS:
 			xcu_cfs_cg_deinit(xcg);
@@ -572,8 +546,8 @@ static ssize_t xcu_sched_class_write(struct kernfs_open_file *of, char *buf,
 	if (!list_empty(&css->children))
 		return -EBUSY;
 
-	/* only root child can switch scheduler type */
-	if (!xg->parent || !xsched_group_css_is_root(&xg->parent->css, false))
+	/* only the first level of root can switch scheduler type */
+	if (!xsched_group_is_root(xg->parent))
 		return -EINVAL;
 
 	ret = xcu_cg_set_sched_class(xg, type);
