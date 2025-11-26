@@ -226,10 +226,12 @@ struct xsched_entity {
 	 */
 	struct xsched_cu *xcu;
 
+#ifdef CONFIG_CGROUP_XCU
 	/* Link to list of xsched_group items */
 	struct list_head group_node;
 	struct xsched_group *parent_grp;
 	bool is_group;
+#endif /* CONFIG_CGROUP_XCU */
 
 	/* General purpose xse lock. */
 	spinlock_t xse_lock;
@@ -243,6 +245,7 @@ struct xcg_attach_entry {
 	struct list_head node;
 };
 
+#ifdef CONFIG_CGROUP_XCU
 /* xsched_group's xcu related stuff */
 struct xsched_group_xcu_priv {
 	/* Owner of this group */
@@ -306,22 +309,18 @@ struct xsched_group {
 	struct cgroup_file xcu_file[NR_XCU_FILE_TYPES];
 	struct work_struct file_show_work;
 };
-
-#define XSCHED_RQ_OF(xse)                                                      \
-	(container_of(((xse)->cfs.cfs_rq), struct xsched_rq, cfs))
-
-#define XSCHED_RQ_OF_CFS_XSE(cfs_xse)                                          \
-	(container_of(((cfs_xse)->cfs_rq), struct xsched_rq, cfs))
+#endif /* CONFIG_CGROUP_XCU */
 
 #define XSCHED_SE_OF(cfs_xse)                                                  \
 	(container_of((cfs_xse), struct xsched_entity, cfs))
 
+#ifdef CONFIG_CGROUP_XCU
 #define xcg_parent_grp_xcu(xcg)                                                \
 	((xcg)->self->parent->perxcu_priv[(xcg)->xcu_id])
 
 #define xse_parent_grp_xcu(xse_cfs)                                            \
 	(&((XSCHED_SE_OF(xse_cfs)                                                  \
-		    ->parent_grp->perxcu_priv[(XSCHED_SE_OF(xse_cfs))->xcu->id])))
+			->parent_grp->perxcu_priv[(XSCHED_SE_OF(xse_cfs))->xcu->id])))
 
 static inline struct xsched_group_xcu_priv *
 xse_this_grp_xcu(struct xsched_entity_cfs *xse_cfs)
@@ -337,6 +336,7 @@ xse_this_grp(struct xsched_entity_cfs *xse_cfs)
 {
 	return xse_cfs ? xse_this_grp_xcu(xse_cfs)->self : NULL;
 }
+#endif /* CONFIG_CGROUP_XCU */
 
 /* Increments pending kicks counter for an XCU that the given
  * xsched entity is attached to and for xsched entity's xsched
@@ -495,6 +495,7 @@ void enqueue_ctx(struct xsched_entity *xse, struct xsched_cu *xcu);
 void dequeue_ctx(struct xsched_entity *xse, struct xsched_cu *xcu);
 int delete_ctx(struct xsched_context *ctx);
 
+#ifdef CONFIG_CGROUP_XCU
 /* Xsched group manage functions */
 void xsched_group_inherit(struct task_struct *tsk, struct xsched_entity *xse);
 void xcu_cg_subsys_init(void);
@@ -508,4 +509,6 @@ void xsched_quota_timeout_update(struct xsched_group *xg);
 void xsched_quota_account(struct xsched_group *xg, s64 exec_time);
 bool xsched_quota_exceed(struct xsched_group *xg);
 void xsched_quota_refill(struct work_struct *work);
+#endif
+
 #endif /* !__LINUX_XSCHED_H__ */

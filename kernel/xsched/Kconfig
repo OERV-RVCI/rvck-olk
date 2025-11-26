@@ -5,8 +5,6 @@ config XCU_SCHEDULER
     default n
     select XCU_VSTREAM
     select XCU_SCHED_RT
-    select XCU_SCHED_CFS
-    select CGROUP_XCU
     help
       This option enables the XSched scheduler, a custom scheduling mechanism
       designed for heterogeneous compute units (e.g., XPUs). It provides:
@@ -56,6 +54,7 @@ config XCU_SCHED_CFS
     bool "XCU CFS scheduling class"
     default n
     depends on XCU_SCHEDULER
+    select CGROUP_XCU
     help
       Enable support for the CFS scheduling class in the XCU scheduler.
 
@@ -72,7 +71,7 @@ config XCU_SCHED_CFS
 config CGROUP_XCU
     bool "XCU bandwidth control and group scheduling for xsched_cfs"
     default n
-    depends on XCU_SCHEDULER
+    depends on XCU_SCHEDULER && XCU_SCHED_CFS
     help
       This option enables the extended Compute Unit (XCU) resource controller for
       CFS task groups, providing hierarchical scheduling and fine-grained bandwidth
@@ -80,6 +79,15 @@ config CGROUP_XCU
       - Proportional XCU time distribution across cgroups based on shares/quotas
       - Nested group scheduling with latency isolation
       - Integration with xsched_cfs for fair CPU resource management
+
+      KABI impact:
+      Enabling this option adds a new xsched entry (SUBSYS(xcu)) into
+      cgroup_subsys.h, which increases CGROUP_SUBSYS_COUNT in enum
+      cgroup_subsys_id. This change directly affects the layout of core
+      kernel structures such as struct css_set (subsys, e_cset_node) and
+      struct cgroup (subsys, e_csets). Since these structures are widely
+      referenced by multiple interfaces, enabling this option will
+      introduce extensive KABI changes.
 
       Required for systems requiring fine-grained resource control in cgroups.
       If unsure, say N.
