@@ -424,11 +424,10 @@ void xcu_move_task(struct task_struct *task, struct xsched_group *old_xcg,
 	struct xsched_cu *xcu;
 
 	spin_lock(&old_xcg->lock);
+
 	list_for_each_entry_safe(xse, tmp, &old_xcg->members, group_node) {
 		if (xse->owner_pid != task_pid_nr(task))
 			continue;
-
-		xcu = xse->xcu;
 
 		if (old_xcg != xse->parent_grp) {
 			WARN_ON(old_xcg != xse->parent_grp);
@@ -436,8 +435,12 @@ void xcu_move_task(struct task_struct *task, struct xsched_group *old_xcg,
 			return;
 		}
 
+		xcu = xse->xcu;
+
 		/* delete from the old_xcg */
 		list_del(&xse->group_node);
+
+		spin_unlock(&old_xcg->lock);
 
 		mutex_lock(&xcu->xcu_lock);
 		/* dequeue from the current runqueue */
@@ -447,7 +450,10 @@ void xcu_move_task(struct task_struct *task, struct xsched_group *old_xcg,
 		/* enqueue to the runqueue in new_xcg */
 		enqueue_ctx(xse, xcu);
 		mutex_unlock(&xcu->xcu_lock);
+
+		return;
 	}
+
 	spin_unlock(&old_xcg->lock);
 }
 
