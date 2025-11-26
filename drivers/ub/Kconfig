@@ -18,6 +18,7 @@ source "drivers/ub/ubfi/Kconfig"
 source "drivers/ub/ubase/Kconfig"
 source "drivers/ub/cdma/Kconfig"
 source "drivers/ub/urma/hw/udma/Kconfig"
+source "drivers/ub/obmm/Kconfig"
 
 config UB_URMA
 	tristate "Unified Bus (UB) urma support"
