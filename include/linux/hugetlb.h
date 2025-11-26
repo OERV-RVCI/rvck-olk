@@ -287,6 +287,7 @@ long hugetlb_change_protection(struct vm_area_struct *vma,
 
 bool is_hugetlb_entry_migration(pte_t pte);
 void hugetlb_unshare_all_pmds(struct vm_area_struct *vma);
+void hugetlb_split(struct vm_area_struct *vma, unsigned long addr);
 
 void enqueue_hugetlb_folio(struct hstate *h, struct folio *folio);
 struct folio *dequeue_hugetlb_folio_node_exact(struct hstate *h, int nid);
@@ -542,6 +543,8 @@ static inline struct folio *alloc_hugetlb_folio_size(int nid, unsigned long size
 {
 	return NULL;
 }
+
+static inline void hugetlb_split(struct vm_area_struct *vma, unsigned long addr) {}
 
 #endif /* !CONFIG_HUGETLB_PAGE */
 /*
