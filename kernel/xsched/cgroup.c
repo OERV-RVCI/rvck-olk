@@ -612,13 +612,14 @@ void xcu_grp_shares_update(struct xsched_group *parent)
 	struct xsched_group *children;
 	u64 rem, sh_sum = 0, sh_gcd = 0, w_gcd = 0, sh_prod_red = 1;
 
-	spin_lock(&parent->lock);
-	list_for_each_entry(children, &(parent)->children_groups, group_node) {
+	lockdep_assert_held(&cgroup_mutex);
+
+	list_for_each_entry(children, &parent->children_groups, group_node) {
 		if (children->sched_class == XSCHED_TYPE_CFS)
 			sh_gcd = gcd(sh_gcd, children->shares_cfg);
 	}
 
-	list_for_each_entry(children, &(parent)->children_groups, group_node) {
+	list_for_each_entry(children, &parent->children_groups, group_node) {
 		if (children->sched_class == XSCHED_TYPE_CFS) {
 			sh_sum += children->shares_cfg;
 			children->shares_cfg_red = div64_u64(children->shares_cfg, sh_gcd);
@@ -629,14 +630,15 @@ void xcu_grp_shares_update(struct xsched_group *parent)
 	}
 
 	parent->children_shares_sum = sh_sum;
-	list_for_each_entry(children, &(parent)->children_groups, group_node) {
+
+	list_for_each_entry(children, &parent->children_groups, group_node) {
 		if (children->sched_class == XSCHED_TYPE_CFS) {
 			children->weight = div64_u64(sh_prod_red, children->shares_cfg_red);
 			w_gcd = gcd(w_gcd, children->weight);
 		}
 	}
 
-	list_for_each_entry(children, &(parent)->children_groups, group_node) {
+	list_for_each_entry(children, &parent->children_groups, group_node) {
 		if (children->sched_class == XSCHED_TYPE_CFS) {
 			children->weight = div64_u64(children->weight, w_gcd);
 			for_each_active_xcu(xcu, id) {
@@ -646,7 +648,6 @@ void xcu_grp_shares_update(struct xsched_group *parent)
 			}
 		}
 	}
-	spin_unlock(&parent->lock);
 }
 
 static int xcu_write_s64(struct cgroup_subsys_state *css, struct cftype *cft,
@@ -684,8 +685,10 @@ static int xcu_write_s64(struct cgroup_subsys_state *css, struct cftype *cft,
 			ret = -EINVAL;
 			break;
 		}
+		cgroup_lock();
 		xcucg->shares_cfg = val;
 		xcu_grp_shares_update(xcucg->parent);
+		cgroup_unlock();
 		break;
 	default:
 		XSCHED_ERR("invalid operation %lu @ %s\n", cft->private, __func__);
