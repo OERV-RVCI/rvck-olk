@@ -680,20 +680,24 @@ static void ioinf_sample_cpu_lat(struct ioinf_lat_stat *cur, int cpu,
 	cur->write.met += pstat->write.met;
 }
 
+static inline void ioinf_update_delta_io_stat(struct ioinf_io_stat cur,
+	struct ioinf_io_stat last, struct ioinf_io_stat *delta)
+{
+	u64 lat = delta->nr * delta->lat;
+
+	delta->nr += cur.nr - last.nr;
+	delta->met += cur.met - last.met;
+	if (delta->nr > 0) {
+		lat += cur.lat - last.lat;
+		delta->lat = div_u64(lat, delta->nr);
+	}
+}
+
 static void ioinf_update_delta_stat(struct ioinf_lat_stat *cur,
 	struct ioinf_lat_stat *last, struct ioinf_lat_stat *delta)
 {
-	delta->read.nr += cur->read.nr - last->read.nr;
-	delta->read.met += cur->read.met - last->read.met;
-	delta->read.lat += cur->read.lat - last->read.lat;
-	if (delta->read.nr > 0)
-		delta->read.lat = div_u64(delta->read.lat, delta->read.nr);
-
-	delta->write.nr += cur->write.nr - last->write.nr;
-	delta->write.met += cur->write.met - last->write.met;
-	delta->write.lat += cur->write.lat - last->write.lat;
-	if (delta->write.nr > 0)
-		delta->write.lat = div_u64(delta->write.lat, delta->write.nr);
+	ioinf_update_delta_io_stat(cur->read, last->read, &delta->read);
+	ioinf_update_delta_io_stat(cur->write, last->write, &delta->write);
 }
 
 static void ioinf_sample_lat(struct ioinf *inf)
