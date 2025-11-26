@@ -191,6 +191,11 @@ int xsched_xse_set_class(struct xsched_entity *xse)
 {
 	struct xsched_class *sched = xsched_first_class;
 
+	if (!sched) {
+		XSCHED_ERR("No xsched classes registered @ %s\n", __func__);
+		return -EINVAL;
+	}
+
 #ifdef CONFIG_CGROUP_XCU
 	xsched_group_inherit(current, xse);
 	for_each_xsched_class(sched) {
