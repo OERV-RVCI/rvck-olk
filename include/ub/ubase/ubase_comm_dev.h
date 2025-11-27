@@ -168,10 +168,8 @@ struct ubase_pmem_caps {
  * @jfs: jfs resource capabilities
  * @jfr: jfr resource capabilities
  * @jfc: jfc resource capabilities
- * @tp: tp resource capabilities
  * @tpg: tp group resource capabilities
  * @pmem: physical memory capabilities
- * @utp_port_bitmap: utp port bitmap
  * @jtg_max_cnt: jetty group max count
  * @rc_max_cnt: rc max count
  * @rc_que_depth: rc queue depth
@@ -185,10 +183,8 @@ struct ubase_adev_caps {
 	struct ubase_res_caps	jfs;
 	struct ubase_res_caps	jfr;
 	struct ubase_res_caps	jfc;
-	struct ubase_res_caps	tp;
 	struct ubase_res_caps	tpg;
 	struct ubase_pmem_caps	pmem;
-	u32			utp_port_bitmap;  /* utp port bitmap */
 	u32			jtg_max_cnt;
 	u32			rc_max_cnt;
 	u32			rc_que_depth;
@@ -222,8 +218,6 @@ struct ubase_ctx_buf_cap {
  * @jfc: jfc context buffer capability
  * @jtg: jetty group context buffer capability
  * @rc: rc context buffer capability
- * @tp: tp context buffer capability
- * @tpg: tp group context buffer capability
  */
 struct ubase_ctx_buf {
 	struct ubase_ctx_buf_cap jfs;
@@ -231,9 +225,6 @@ struct ubase_ctx_buf {
 	struct ubase_ctx_buf_cap jfc;
 	struct ubase_ctx_buf_cap jtg;
 	struct ubase_ctx_buf_cap rc;
-
-	struct ubase_ctx_buf_cap tp;
-	struct ubase_ctx_buf_cap tpg;
 };
 
 struct net_device;
@@ -356,6 +347,7 @@ struct ubase_bus_eid {
 bool ubase_adev_ubl_supported(struct auxiliary_device *adev);
 bool ubase_adev_ctrlq_supported(struct auxiliary_device *adev);
 bool ubase_adev_eth_mac_supported(struct auxiliary_device *adev);
+bool ubase_adev_mac_stats_supported(struct auxiliary_device *aux_dev);
 bool ubase_adev_prealloc_supported(struct auxiliary_device *aux_dev);
 struct ubase_resource_space *ubase_get_io_base(struct auxiliary_device *adev);
 struct ubase_resource_space *ubase_get_mem_base(struct auxiliary_device *adev);
@@ -386,5 +378,9 @@ void ubase_activate_unregister(struct auxiliary_device *adev);
 int ubase_activate_dev(struct auxiliary_device *adev);
 int ubase_deactivate_dev(struct auxiliary_device *adev);
 int ubase_get_bus_eid(struct auxiliary_device *adev, struct ubase_bus_eid *eid);
+
+int ubase_get_dev_mac(struct auxiliary_device *adev, u8 *dev_addr, u8 addr_len);
+int ubase_set_dev_mac(struct auxiliary_device *adev, const u8 *dev_addr,
+		      u8 addr_len);
 
 #endif

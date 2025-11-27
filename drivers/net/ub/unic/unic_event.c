@@ -20,9 +20,10 @@
 #include "unic_dcbnl.h"
 #include "unic_dev.h"
 #include "unic_hw.h"
+#include "unic_ip.h"
+#include "unic_mac.h"
 #include "unic_netdev.h"
 #include "unic_qos_hw.h"
-#include "unic_rack_ip.h"
 #include "unic_reset.h"
 #include "unic_event.h"
 
@@ -86,6 +87,9 @@ static void unic_activate_event_process(struct unic_dev *unic_dev)
 	else
 		clear_bit(UNIC_VPORT_STATE_PROMISC_CHANGE, &unic_dev->vport.state);
 
+	if (unic_dev_eth_mac_supported(unic_dev))
+		unic_activate_mac_table(unic_dev);
+
 out:
 	mutex_lock(&act_info->mutex);
 	act_info->deactivate = false;
@@ -118,6 +122,9 @@ static void unic_deactivate_event_process(struct unic_dev *unic_dev)
 	mutex_lock(&act_info->mutex);
 	act_info->deactivate = true;
 	mutex_unlock(&act_info->mutex);
+
+	if (unic_dev_eth_mac_supported(unic_dev))
+		unic_deactivate_mac_table(unic_dev);
 
 	ret = unic_activate_promisc_mode(unic_dev, false);
 	if (ret)
@@ -160,6 +167,18 @@ static void unic_rack_port_reset(struct unic_dev *unic_dev, bool link_up)
 		unic_dev->hw.mac.link_status = UNIC_LINK_STATUS_DOWN;
 }
 
+static void unic_port_reset(struct net_device *netdev, bool link_up)
+{
+	rtnl_lock();
+
+	if (link_up)
+		unic_net_open(netdev);
+	else
+		unic_net_stop(netdev);
+
+	rtnl_unlock();
+}
+
 static void unic_port_handler(struct auxiliary_device *adev, bool link_up)
 {
 	struct unic_dev *unic_dev = dev_get_drvdata(&adev->dev);
@@ -168,7 +187,10 @@ static void unic_port_handler(struct auxiliary_device *adev, bool link_up)
 	if (!netif_running(netdev))
 		return;
 
-	unic_rack_port_reset(unic_dev, link_up);
+	if (unic_dev_ubl_supported(unic_dev))
+		unic_rack_port_reset(unic_dev, link_up);
+	else
+		unic_port_reset(netdev, link_up);
 }
 
 static struct ubase_ctrlq_event_nb unic_ctrlq_events[] = {

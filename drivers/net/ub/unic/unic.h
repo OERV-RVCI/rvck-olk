@@ -47,10 +47,23 @@ enum {
 #define UNIC_USER_BPE				BIT(2) /* broadcast promisc enabled by user */
 #define UNIC_OVERFLOW_MGP			BIT(3) /* mulitcast guid overflow */
 #define UNIC_OVERFLOW_IPP			BIT(4) /* unicast ip overflow */
+#define UNIC_OVERFLOW_UP_MAC			BIT(5) /* unicast mac overflow */
+#define UNIC_OVERFLOW_MP_MAC			BIT(6) /* multicast mac overflow */
 #define UNIC_UPE				(UNIC_USER_UPE | \
-						 UNIC_OVERFLOW_IPP)
+						 UNIC_OVERFLOW_IPP | \
+						 UNIC_OVERFLOW_UP_MAC)
 #define UNIC_MPE				(UNIC_USER_MPE | \
-						 UNIC_OVERFLOW_MGP)
+						 UNIC_OVERFLOW_MGP | \
+						 UNIC_OVERFLOW_MP_MAC)
+
+#define UNIC_SUPPORT_APP_LB		BIT(0)
+#define UNIC_SUPPORT_SERIAL_SERDES_LB	BIT(1)
+#define UNIC_SUPPORT_PARALLEL_SERDES_LB	BIT(2)
+#define UNIC_SUPPORT_EXTERNAL_LB	BIT(3)
+#define UNIC_LB_TEST_FLAGS		(UNIC_SUPPORT_APP_LB | \
+					 UNIC_SUPPORT_SERIAL_SERDES_LB | \
+					 UNIC_SUPPORT_PARALLEL_SERDES_LB | \
+					 UNIC_SUPPORT_EXTERNAL_LB)
 
 #define UNIC_RSS_MAX_VL_NUM		UBASE_NIC_MAX_VL_NUM
 #define UNIC_INVALID_PRIORITY		(0xff)

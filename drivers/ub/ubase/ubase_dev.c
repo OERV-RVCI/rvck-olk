@@ -4,6 +4,7 @@
  *
  */
 
+#include <linux/etherdevice.h>
 #include <linux/kernel.h>
 #include <ub/ubus/ubus.h>
 
@@ -299,6 +300,21 @@ static void ubase_uninit_aux_devices(struct ubase_dev *udev)
 	mutex_destroy(&udev->priv.uadev_lock);
 }
 
+static void ubase_update_stats_for_all(struct ubase_dev *udev)
+{
+	int ret;
+
+	if (ubase_dev_unic_supported(udev) &&
+	    ubase_dev_eth_mac_supported(udev) &&
+	    ubase_dev_mac_stats_supported(udev)) {
+		ret = ubase_update_eth_stats_trylock(udev);
+		if (ret)
+			ubase_err(udev,
+				  "failed to update stats for eth, ret = %d.\n",
+				  ret);
+	}
+}
+
 static void ubase_cancel_period_service_task(struct ubase_dev *udev)
 {
 	if (udev->period_service_task.service_task.work.func)
@@ -321,7 +337,6 @@ static int ubase_enable_period_service_task(struct ubase_dev *udev)
 static void ubase_period_service_task(struct work_struct *work)
 {
 #define UBASE_STATS_TIMER_INTERVAL		(300000 / (UBASE_PERIOD_100MS))
-#define UBASE_QUERY_SL_TIMER_INTERVAL		(1000 / (UBASE_PERIOD_100MS))
 
 	struct ubase_delay_work *ubase_work =
 		container_of(work, struct ubase_delay_work, service_task.work);
@@ -332,6 +347,10 @@ static void ubase_period_service_task(struct work_struct *work)
 		ubase_enable_period_service_task(udev);
 		return;
 	}
+
+	if (test_bit(UBASE_STATE_INITED_B, &udev->state_bits) &&
+	    !(udev->serv_proc_cnt % UBASE_STATS_TIMER_INTERVAL))
+		ubase_update_stats_for_all(udev);
 
 	udev->serv_proc_cnt++;
 	ubase_enable_period_service_task(udev);
@@ -1329,6 +1348,15 @@ struct ubase_adev_qos *ubase_get_adev_qos(struct auxiliary_device *adev)
 }
 EXPORT_SYMBOL(ubase_get_adev_qos);
 
+bool ubase_adev_mac_stats_supported(struct auxiliary_device *adev)
+{
+	if (!adev)
+		return false;
+
+	return ubase_dev_mac_stats_supported(__ubase_get_udev_by_adev(adev));
+}
+EXPORT_SYMBOL(ubase_adev_mac_stats_supported);
+
 static void ubase_activate_notify(struct ubase_dev *udev,
 				  struct auxiliary_device *adev, bool activate)
 {
@@ -1634,3 +1662,55 @@ int ubase_get_bus_eid(struct auxiliary_device *adev, struct ubase_bus_eid *eid)
 	return __ubase_get_bus_eid(udev, eid);
 }
 EXPORT_SYMBOL(ubase_get_bus_eid);
+
+/**
+ * ubase_set_dev_mac() - Record the MAC address of the device
+ * @adev: auxiliary device
+ * @dev_addr: MAC address of the device
+ * @addr_len: MAC address length
+ *
+ * This function is used to record the MAC address of the device, and store the
+ * MAC address in the ubase_dev structure.
+ *
+ * Context: Any context.
+ * Return: 0 on success, negative error code otherwise
+ */
+int ubase_set_dev_mac(struct auxiliary_device *adev, const u8 *dev_addr,
+		      u8 addr_len)
+{
+	struct ubase_dev *udev;
+
+	if (!adev || !dev_addr || addr_len < ETH_ALEN)
+		return -EINVAL;
+
+	udev = __ubase_get_udev_by_adev(adev);
+	ether_addr_copy(udev->dev_mac, dev_addr);
+
+	return 0;
+}
+EXPORT_SYMBOL(ubase_set_dev_mac);
+
+/**
+ * ubase_get_dev_mac() - Obtain the device MAC address and output it.
+ * @adev: auxiliary device
+ * @dev_addr: Output parameter, save the obtained MAC address array.
+ * @addr_len: Length of the array for storing MAC addresses
+ *
+ * This function is used to get the device MAC address from ubase_dev.
+ *
+ * Context: Any context.
+ * Return: 0 on success, negative error code otherwise
+ */
+int ubase_get_dev_mac(struct auxiliary_device *adev, u8 *dev_addr, u8 addr_len)
+{
+	struct ubase_dev *udev;
+
+	if (!adev || !dev_addr || addr_len < ETH_ALEN)
+		return -EINVAL;
+
+	udev = __ubase_get_udev_by_adev(adev);
+	ether_addr_copy(dev_addr, udev->dev_mac);
+
+	return 0;
+}
+EXPORT_SYMBOL(ubase_get_dev_mac);

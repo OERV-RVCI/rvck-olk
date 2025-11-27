@@ -43,6 +43,8 @@ enum unic_vport_state {
 	UNIC_VPORT_STATE_ALIVE,
 	UNIC_VPORT_STATE_PROMISC_CHANGE,
 	UNIC_VPORT_STATE_IP_TBL_CHANGE,
+	UNIC_VPORT_STATE_VLAN_FILTER_CHANGE,
+	UNIC_VPORT_STATE_MAC_TBL_CHANGE,
 	UNIC_VPORT_STATE_IP_QUERYING,
 };
 
@@ -124,6 +126,11 @@ struct unic_coal_txrx {
 	struct unic_coalesce	rx_coal;
 };
 
+struct unic_pfc_info {
+	u8	fc_mode;
+	u8	pfc_en;
+};
+
 struct unic_vl {
 	u8	vl_num;
 	u8	dscp_app_cnt;
@@ -136,6 +143,7 @@ struct unic_vl {
 	u8	vl_sl[UBASE_MAX_VL_NUM];
 	u64	vl_maxrate[UBASE_MAX_VL_NUM];
 	u16	vl_bitmap;
+	struct	unic_pfc_info	pfc_info;
 };
 
 struct unic_channels {
@@ -161,7 +169,10 @@ struct unic_channels {
 struct unic_caps {
 	u16	rx_buff_len;
 	u16	total_ip_tbl_size;
-	u32	rsvd0[5];
+	u32	uc_mac_tbl_size;
+	u32	mc_mac_tbl_size;
+	u32	vlan_tbl_size;
+	u32	mng_tbl_size;
 	u16	max_trans_unit;
 	u16	min_trans_unit;
 	u32	vport_buf_size; /* unit: byte */
@@ -204,6 +215,22 @@ struct unic_addr_tbl {
 
 	spinlock_t		tmp_ip_lock; /* protect ip address from controller */
 	struct list_head	tmp_ip_list; /* Store temprary ip table */
+
+	spinlock_t		mac_list_lock; /* protect mac address need to add/detele */
+	struct list_head	uc_mac_list; /* store unicast mac table */
+	struct list_head	mc_mac_list; /* store multicast mac table */
+};
+
+struct unic_vlan_tbl {
+	bool			cur_vlan_fltr_en;
+	unsigned long		vlan_del_fail_bmap[BITS_TO_LONGS(VLAN_N_VID)];
+	struct list_head	vlan_list; /* Store vlan table */
+	spinlock_t		vlan_lock; /* protect vlan list */
+};
+
+struct unic_vlan_cfg {
+	struct list_head	node;
+	u16			vlan_id;
 };
 
 struct unic_vport_buf {
@@ -214,6 +241,7 @@ struct unic_vport_buf {
 struct unic_vport {
 	struct unic_dev		*back;
 	struct unic_addr_tbl	addr_tbl;
+	struct unic_vlan_tbl	vlan_tbl;
 	u8			overflow_promisc_flags;
 	u8			last_promisc_flags;
 	unsigned long		state;
@@ -283,6 +311,11 @@ static inline bool unic_dev_eth_mac_supported(struct unic_dev *unic_dev)
 	return ubase_adev_eth_mac_supported(unic_dev->comdev.adev);
 }
 
+static inline bool unic_dev_pfc_supported(struct unic_dev *unic_dev)
+{
+	return unic_get_cap_bit(unic_dev, UNIC_SUPPORT_PFC_B);
+}
+
 static inline bool unic_dev_ets_supported(struct unic_dev *unic_dev)
 {
 	return unic_get_cap_bit(unic_dev, UNIC_SUPPORT_ETS_B);
@@ -291,6 +324,21 @@ static inline bool unic_dev_ets_supported(struct unic_dev *unic_dev)
 static inline bool unic_dev_fec_supported(struct unic_dev *unic_dev)
 {
 	return unic_get_cap_bit(unic_dev, UNIC_SUPPORT_FEC_B);
+}
+
+static inline bool unic_dev_pause_supported(struct unic_dev *unic_dev)
+{
+	return unic_get_cap_bit(unic_dev, UNIC_SUPPORT_PAUSE_B);
+}
+
+static inline bool unic_dev_eth_supported(struct unic_dev *unic_dev)
+{
+	return unic_get_cap_bit(unic_dev, UNIC_SUPPORT_ETH_B);
+}
+
+static inline bool unic_dev_serial_serdes_lb_supported(struct unic_dev *unic_dev)
+{
+	return unic_get_cap_bit(unic_dev, UNIC_SUPPORT_SERIAL_SERDES_LB_B);
 }
 
 static inline bool unic_dev_tc_speed_limit_supported(struct unic_dev *unic_dev)
@@ -308,9 +356,34 @@ static inline bool unic_dev_rx_csum_offload_supported(struct unic_dev *unic_dev)
 	return unic_get_cap_bit(unic_dev, UNIC_SUPPORT_RX_CSUM_OFFLOAD_B);
 }
 
+static inline bool unic_dev_app_lb_supported(struct unic_dev *unic_dev)
+{
+	return unic_get_cap_bit(unic_dev, UNIC_SUPPORT_APP_LB_B);
+}
+
 static inline bool unic_dev_fec_stats_supported(struct unic_dev *unic_dev)
 {
 	return unic_get_cap_bit(unic_dev, UNIC_SUPPORT_FEC_STATS_B);
+}
+
+static inline bool unic_dev_external_lb_supported(struct unic_dev *unic_dev)
+{
+	return unic_get_cap_bit(unic_dev, UNIC_SUPPORT_EXTERNAL_LB_B);
+}
+
+static inline bool unic_dev_parallel_serdes_lb_supported(struct unic_dev *unic_dev)
+{
+	return unic_get_cap_bit(unic_dev, UNIC_SUPPORT_PARALLEL_SERDES_LB_B);
+}
+
+static inline bool unic_dev_cfg_vlan_filter_supported(struct unic_dev *unic_dev)
+{
+	return unic_get_cap_bit(unic_dev, UNIC_SUPPORT_CFG_VLAN_FILTER_B);
+}
+
+static inline bool unic_dev_cfg_mac_supported(struct unic_dev *unic_dev)
+{
+	return unic_get_cap_bit(unic_dev, UNIC_SUPPORT_CFG_MAC_B);
 }
 
 static inline bool __unic_removing(struct unic_dev *unic_dev)
