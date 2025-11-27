@@ -3,15 +3,12 @@
 
 :Copyright: |copy| 2025 HiSilicon Technologies Co., Ltd. All rights reserved.
 
-=====================
-UnifiedBus Subsystem
-=====================
+============
+UDMA Driver
+============
 
 .. toctree::
-   :maxdepth: 4
+   :maxdepth: 2
+   :numbered:
 
-   ubase/index
-   ubfi/index
-   ubus/index
-   cdma/index
-   urma/udma/index
+   udma
