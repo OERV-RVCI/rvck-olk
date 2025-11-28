@@ -26,7 +26,6 @@ struct xcall_comm {
 	char *binary;
 	struct path binary_path;
 	char *module;
-	struct list_head list;
 };
 
 struct xcall {
@@ -37,6 +36,7 @@ struct xcall {
 	struct inode		*binary;
 	struct xcall_prog	*program;
 	char			*name;
+	struct xcall_comm	*info;
 };
 
 struct xcall_area {
@@ -52,6 +52,8 @@ struct xcall_area {
 
 extern const syscall_fn_t *default_sys_call_table(void);
 #ifdef CONFIG_DYNAMIC_XCALL
+extern void free_xcall_comm(struct xcall_comm *info);
+extern void xcall_info_show(struct seq_file *m);
 extern int xcall_attach(struct xcall_comm *info);
 extern int xcall_detach(struct xcall_comm *info);
 extern int xcall_pre_sstep_check(struct pt_regs *regs);
