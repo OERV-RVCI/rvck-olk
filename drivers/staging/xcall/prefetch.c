@@ -17,13 +17,13 @@
 
 #include <asm/xcall.h>
 
-#define MAX_FD 100
+#define MAX_FD 1024
 
 #define XCALL_CACHE_PAGE_ORDER 2
 #define XCALL_CACHE_BUF_SIZE ((1 << XCALL_CACHE_PAGE_ORDER) * PAGE_SIZE)
 
-#define current_prefetch_items() \
-	((struct prefetch_item *) \
+#define current_prefetch_mm_data() \
+	((struct prefetch_mm_data *) \
 	((((struct xcall_area *)(current->mm->xcall))->sys_call_data)[__NR_epoll_pwait]))
 
 static DEFINE_PER_CPU_ALIGNED(unsigned long, xcall_cache_hit);
@@ -32,6 +32,9 @@ static DEFINE_PER_CPU_ALIGNED(unsigned long, xcall_cache_miss);
 static struct workqueue_struct *rc_work;
 static struct cpumask xcall_mask;
 struct proc_dir_entry *xcall_proc_dir, *prefetch_dir, *xcall_mask_dir;
+
+static struct list_head prefetch_mm_data_to_delete;
+static spinlock_t prefetch_mm_delete_lock;
 
 enum cache_state {
 	XCALL_CACHE_NONE = 0,
@@ -51,6 +54,13 @@ struct prefetch_item {
 	/* cache state in epoll_wait */
 	atomic_t state;
 	loff_t pos;
+};
+
+struct prefetch_mm_data {
+	struct prefetch_item items[MAX_FD];
+	struct epoll_event events[MAX_FD];
+	struct mmu_notifier mmu_notifier;
+	struct list_head list;
 };
 
 static ssize_t xcall_mask_proc_write(struct file *file, const char __user *buf,
@@ -140,6 +150,17 @@ static const struct proc_ops xcall_prefetch_fops = {
 	.proc_release = single_release
 };
 
+static inline struct prefetch_item *get_pfi(unsigned int fd)
+{
+	struct prefetch_item *pfis = NULL;
+
+	if (fd >= MAX_FD || !current_prefetch_mm_data())
+		return NULL;
+
+	pfis = (struct prefetch_item *)current_prefetch_mm_data();
+	return pfis + fd;
+}
+
 static inline bool transition_state(struct prefetch_item *pfi,
 				    enum cache_state old, enum cache_state new)
 {
@@ -200,29 +221,61 @@ static int get_async_prefetch_cpu(struct prefetch_item *pfi)
 	return pfi->cpu;
 }
 
-static void xcall_mm_release(struct mmu_notifier *mn, struct mm_struct *mm)
+static void prefetch_pfi_release(struct mmu_notifier *mn, struct mm_struct *mm)
 {
+	struct prefetch_mm_data *private_data =
+				container_of(mn, struct prefetch_mm_data, mmu_notifier);
 	struct xcall_area *area = mm_xcall_area(mm);
-	void *area_private_data = NULL;
+	struct prefetch_item *prefetch_items = NULL;
+	int i;
 
-	area_private_data = xchg(&area->sys_call_data[__NR_epoll_pwait], NULL);
-	kfree(area_private_data);
+	private_data = xchg(&area->sys_call_data[__NR_epoll_pwait], NULL);
+	prefetch_items = (struct prefetch_item *)private_data->items;
+	for (i = 0; i < MAX_FD; i++) {
+		cancel_work_sync(&prefetch_items[i].work);
+		if (prefetch_items[i].file)
+			fput(prefetch_items[i].file);
+		if (prefetch_items[i].cache_pages)
+			__free_pages(prefetch_items[i].cache_pages, XCALL_CACHE_PAGE_ORDER);
+		prefetch_items[i].cache = NULL;
+	}
+	spin_lock(&prefetch_mm_delete_lock);
+	list_add_tail(&private_data->list, &prefetch_mm_data_to_delete);
+	spin_unlock(&prefetch_mm_delete_lock);
+}
+
+static void xcall_mmu_notifier_free(struct mmu_notifier *mn)
+{
+	kfree(container_of(mn, struct prefetch_mm_data, mmu_notifier));
+}
+
+static void xcall_prefetch_mm_free(void)
+{
+	struct prefetch_mm_data *private_data, *tmp;
+
+	spin_lock(&prefetch_mm_delete_lock);
+	list_for_each_entry_safe(private_data, tmp, &prefetch_mm_data_to_delete, list) {
+		list_del(&private_data->list);
+		mmu_notifier_put(&private_data->mmu_notifier);
+	}
+	spin_unlock(&prefetch_mm_delete_lock);
 }
 
 static struct mmu_notifier_ops xcall_mmu_notifier_ops = {
-	.release = xcall_mm_release,
-};
-
-static struct mmu_notifier xcall_mmu_notifier = {
-	.ops = &xcall_mmu_notifier_ops,
+	.release = prefetch_pfi_release,
+	.free_notifier = xcall_mmu_notifier_free,
 };
 
 static void xcall_cancel_work(unsigned int fd)
 {
-	struct prefetch_item *pfi = current_prefetch_items() + fd;
+	struct prefetch_item *pfi = NULL;
 
-	if (fd < MAX_FD && pfi->file)
+	pfi = get_pfi(fd);
+	if (pfi && pfi->file) {
 		cancel_work_sync(&pfi->work);
+		fput(pfi->file);
+		xchg(&pfi->file, NULL);
+	}
 }
 
 #define MAX_READY_WAIT_TIME  msecs_to_jiffies(2)
@@ -291,11 +344,8 @@ static inline int xcall_read_begin(unsigned int fd, char __user *buf, size_t cou
 {
 	struct prefetch_item *pfi = NULL;
 
-	if (fd >= MAX_FD || !current_prefetch_items())
-		return -EAGAIN;
-
-	pfi = current_prefetch_items() + fd;
-	if (!pfi->file)
+	pfi = get_pfi(fd);
+	if (!pfi || !pfi->file)
 		return -EAGAIN;
 
 	return xcall_read(pfi, buf, count);
@@ -305,11 +355,8 @@ static inline void xcall_read_end(unsigned int fd)
 {
 	struct prefetch_item *pfi = NULL;
 
-	if (fd >= MAX_FD || !current_prefetch_items())
-		return;
-
-	pfi = current_prefetch_items() + fd;
-	if (!pfi->file)
+	pfi = get_pfi(fd);
+	if (!pfi || !pfi->file)
 		return;
 
 	transition_state(pfi, XCALL_CACHE_CANCEL, XCALL_CACHE_NONE);
@@ -320,24 +367,24 @@ static long __do_sys_epoll_create(struct pt_regs *regs)
 	long ret;
 	int i;
 	struct xcall_area *area = mm_xcall_area(current->mm);
+	struct prefetch_mm_data *private_data = NULL;
 	struct prefetch_item *items = NULL;
 
 	ret = default_sys_call_table()[__NR_epoll_create1](regs);
 	if (ret < 0)
 		return ret;
-
-	if (current_prefetch_items())
+	if (current_prefetch_mm_data())
 		return ret;
 
-	items = kcalloc(MAX_FD, sizeof(struct prefetch_item), GFP_KERNEL);
-	if (!items)
-		return -ENOMEM;
-
-	if (cmpxchg(&area->sys_call_data[__NR_epoll_pwait], NULL, items)) {
-		kfree(items);
+	private_data = kmalloc(sizeof(struct prefetch_mm_data), GFP_KERNEL);
+	if (!private_data)
+		return ret;
+	if (cmpxchg(&area->sys_call_data[__NR_epoll_pwait], NULL, private_data)) {
+		kfree(private_data);
 		return ret;
 	}
 
+	items = private_data->items;
 	for (i = 0; i < MAX_FD; i++) {
 		items[i].cache_pages = alloc_pages(GFP_KERNEL_ACCOUNT | __GFP_ZERO,
 						   XCALL_CACHE_PAGE_ORDER);
@@ -354,7 +401,12 @@ static long __do_sys_epoll_create(struct pt_regs *regs)
 		items[i].file = NULL;
 		set_prefetch_numa_cpu(&items[i]);
 	}
-	mmu_notifier_register(&xcall_mmu_notifier, current->mm);
+
+	memset(private_data->events, 0, sizeof(private_data->events));
+	INIT_LIST_HEAD(&private_data->list);
+	private_data->mmu_notifier.ops = &xcall_mmu_notifier_ops;
+	mmu_notifier_register(&private_data->mmu_notifier, current->mm);
+	xcall_prefetch_mm_free();
 	return ret;
 }
 
@@ -367,19 +419,18 @@ static long __do_sys_epoll_ctl(struct pt_regs *regs)
 	long ret;
 
 	ret = default_sys_call_table()[__NR_epoll_ctl](regs);
-	if (ret || fd >= MAX_FD)
+	if (ret)
 		return ret;
 
-	if (!current_prefetch_items())
+	pfi = get_pfi(fd);
+	if (!pfi)
 		return ret;
 
-	pfi = current_prefetch_items() + fd;
 	switch (op) {
 	case EPOLL_CTL_ADD:
 		file = fget(fd);
 		if (!file)
 			return ret;
-
 		if (!sock_from_file(file)) {
 			fput(file);
 			return ret;
@@ -399,7 +450,8 @@ static long __do_sys_epoll_pwait(struct pt_regs *regs)
 {
 	void __user *buf = (void *)regs->regs[1];
 	struct prefetch_item *pfi = NULL;
-	struct epoll_event events[MAX_FD] = {0};
+	struct prefetch_mm_data *private_data = NULL;
+	struct epoll_event *events = NULL;
 	int i, fd, cpu, prefetch_task_num;
 	long ret;
 
@@ -407,8 +459,11 @@ static long __do_sys_epoll_pwait(struct pt_regs *regs)
 	if (ret <= 0)
 		return ret;
 
-	if (!current_prefetch_items())
+	if (!current_prefetch_mm_data())
 		return ret;
+
+	private_data = current_prefetch_mm_data();
+	events = private_data->events;
 
 	prefetch_task_num = ret > MAX_FD ? MAX_FD : ret;
 	if (copy_from_user(events, buf, prefetch_task_num * sizeof(struct epoll_event)))
@@ -419,7 +474,7 @@ static long __do_sys_epoll_pwait(struct pt_regs *regs)
 		if (!(events[i].events & EPOLLIN) || fd >= MAX_FD)
 			continue;
 
-		pfi = current_prefetch_items() + fd;
+		pfi = get_pfi(fd);
 		if (!(pfi->file) || !(pfi->file->f_mode & FMODE_READ))
 			continue;
 		if (atomic_read(&pfi->state) != XCALL_CACHE_NONE)
@@ -438,11 +493,11 @@ static long __do_sys_close(struct pt_regs *regs)
 	struct file *pfi_old_file = NULL;
 	struct file *pfi_new_file = NULL;
 
-	if (!current_prefetch_items())
+	pfi = get_pfi(fd);
+	if (!pfi)
 		return default_sys_call_table()[__NR_close](regs);
 
-	pfi = current_prefetch_items() + fd;
-	if (fd < MAX_FD && pfi->file) {
+	if (pfi && pfi->file) {
 		pfi_old_file = pfi->file;
 		pfi_new_file = cmpxchg(&pfi->file, pfi_old_file, NULL);
 		if (pfi_new_file == pfi_old_file) {
@@ -544,6 +599,8 @@ static int __init xcall_prefetch_init(void)
 	if (ret)
 		goto remove_dir;
 
+	INIT_LIST_HEAD(&prefetch_mm_data_to_delete);
+	spin_lock_init(&prefetch_mm_delete_lock);
 	return ret;
 
 remove_dir:
@@ -568,6 +625,8 @@ static void __exit xcall_prefetch_exit(void)
 		proc_remove(xcall_proc_dir);
 
 	xcall_prog_unregister(&xcall_prefetch_prog);
+	xcall_prefetch_mm_free();
+	mmu_notifier_synchronize();
 }
 
 module_init(xcall_prefetch_init);
