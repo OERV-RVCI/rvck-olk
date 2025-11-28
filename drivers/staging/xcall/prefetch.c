@@ -400,7 +400,7 @@ static long __do_sys_epoll_pwait(struct pt_regs *regs)
 	void __user *buf = (void *)regs->regs[1];
 	struct prefetch_item *pfi = NULL;
 	struct epoll_event events[MAX_FD] = {0};
-	int i, fd, cpu, prefech_task_num;
+	int i, fd, cpu, prefetch_task_num;
 	long ret;
 
 	ret = default_sys_call_table()[__NR_epoll_pwait](regs);
@@ -410,11 +410,11 @@ static long __do_sys_epoll_pwait(struct pt_regs *regs)
 	if (!current_prefetch_items())
 		return ret;
 
-	prefech_task_num = ret > MAX_FD ? MAX_FD : ret;
-	if (copy_from_user(events, buf, prefech_task_num * sizeof(struct epoll_event)))
+	prefetch_task_num = ret > MAX_FD ? MAX_FD : ret;
+	if (copy_from_user(events, buf, prefetch_task_num * sizeof(struct epoll_event)))
 		return ret;
 
-	for (i = 0; i < prefech_task_num; i++) {
+	for (i = 0; i < prefetch_task_num; i++) {
 		fd = events[i].data;
 		if (!(events[i].events & EPOLLIN) || fd >= MAX_FD)
 			continue;
