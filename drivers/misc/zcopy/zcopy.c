@@ -407,6 +407,7 @@ static int attach_pte_range(struct vm_area_struct *dst_vma, struct vm_area_struc
 {
 	struct mm_struct *dst_mm = dst_vma->vm_mm;
 	pte_t *src_ptep, *dst_ptep, pte, dst_pte;
+	pte_t *orig_src_ptep, *orig_dst_ptep;
 	spinlock_t *dst_ptl;
 	int max_nr, ret, nr, i;
 	int rss[NR_MM_COUNTERS];
@@ -420,6 +421,8 @@ static int attach_pte_range(struct vm_area_struct *dst_vma, struct vm_area_struc
 	src_ptep = zcopy_pte_offset_map(src_pmdp, src_addr);
 	dst_ptep = zcopy_pte_offset_map(dst_pmdp, dst_addr);
 	dst_ptl = pte_lockptr(dst_mm, dst_pmdp);
+	orig_src_ptep = src_ptep;
+	orig_dst_ptep = dst_ptep;
 	spin_lock_nested(dst_ptl, SINGLE_DEPTH_NESTING);
 
 	do {
@@ -457,6 +460,8 @@ static int attach_pte_range(struct vm_area_struct *dst_vma, struct vm_area_struc
 out:
 	zcopy_add_mm_rss_vec(dst_mm, rss);
 	spin_unlock(dst_ptl);
+	pte_unmap(orig_dst_ptep);
+	pte_unmap(orig_src_ptep);
 	return ret;
 }
 
