@@ -746,6 +746,7 @@ struct kvm_shadow {
 	struct list_head ioeventfds_shadow;
 	/* Used for temporarily storing modifications to the bus */
 	struct kvm_io_bus *buses_shadow[KVM_NR_BUSES];
+	bool in_shadow;
 };
 
 /* Global linked list, used to associate kvm with kvm_shadow */
@@ -967,16 +968,15 @@ static struct kvm_shadow *kvm_find_shadow(struct kvm *kvm)
 {
 	struct kvm_shadow *ks;
 
-	list_for_each_entry(ks, &kvm_shadow_list, list) {
-		if (ks->kvm == kvm)
+	rcu_read_lock();
+	list_for_each_entry_rcu(ks, &kvm_shadow_list, list) {
+		if (ks->kvm == kvm) {
+			rcu_read_unlock();
 			return ks;
+		}
 	}
+	rcu_read_unlock();
 	return NULL;
-}
-
-static inline bool is_kvm_in_shadow(struct kvm *kvm)
-{
-	return kvm_find_shadow(kvm) != NULL;
 }
 
 static inline struct kvm_io_bus *kvm_get_real_bus(struct kvm *kvm, enum kvm_bus idx)
@@ -986,10 +986,16 @@ static inline struct kvm_io_bus *kvm_get_real_bus(struct kvm *kvm, enum kvm_bus 
 				      !refcount_read(&kvm->users_count));
 }
 
-static inline struct kvm_io_bus *kvm_get_bus(struct kvm *kvm, enum kvm_bus idx)
+/* The eventfd device may need to processed through the shadow bus */
+static inline struct kvm_io_bus *kvm_get_bus(struct kvm *kvm, enum kvm_bus idx, bool is_eventfd)
 {
-	return is_kvm_in_shadow(kvm) ?
-		kvm_find_shadow(kvm)->buses_shadow[idx] : kvm_get_real_bus(kvm, idx);
+	struct kvm_shadow *ks;
+
+	ks = kvm_find_shadow(kvm);
+	if (is_eventfd && ks && ks->in_shadow)
+		return ks->buses_shadow[idx];
+	else
+		return kvm_get_real_bus(kvm, idx);
 }
 
 static inline struct kvm_vcpu *kvm_get_vcpu(struct kvm *kvm, int i)
@@ -2162,7 +2168,8 @@ int kvm_send_userspace_msi(struct kvm *kvm, struct kvm_msi *msi);
 
 #ifdef CONFIG_HAVE_KVM_EVENTFD
 
-void kvm_release_ioeventfds_shadow(struct kvm *kvm);
+bool kvm_io_device_is_ioeventfd(struct kvm_io_device *dev);
+void kvm_release_ioeventfds_shadow(struct kvm_shadow *kvm);
 void kvm_eventfd_init(struct kvm *kvm);
 int kvm_ioeventfd(struct kvm *kvm, struct kvm_ioeventfd *args);
 

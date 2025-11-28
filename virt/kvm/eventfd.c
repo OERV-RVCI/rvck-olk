@@ -163,7 +163,6 @@ irqfd_shutdown(struct work_struct *work)
 	kfree(irqfd);
 }
 
-
 /* assumes kvm->irqfds.lock is held */
 static bool
 irqfd_is_active(struct kvm_kernel_irqfd *irqfd)
@@ -833,6 +832,11 @@ static const struct kvm_io_device_ops ioeventfd_ops = {
 	.destructor = ioeventfd_destructor,
 };
 
+bool kvm_io_device_is_ioeventfd(struct kvm_io_device *dev)
+{
+	return (const struct kvm_io_device_ops *)dev->ops == &ioeventfd_ops;
+}
+
 /* assumes kvm->slots_lock held */
 static bool
 ioeventfd_check_collision(struct kvm *kvm, struct _ioeventfd *p)
@@ -902,7 +906,7 @@ static int kvm_assign_ioeventfd_idx(struct kvm *kvm,
 	 * record the eventfd and operation, and process it later
 	 */
 	ks = kvm_find_shadow(kvm);
-	if (ks) {
+	if (ks && ks->in_shadow) {
 		es = kzalloc(sizeof(*es), GFP_KERNEL_ACCOUNT);
 		if (!es) {
 			ret = -ENOMEM;
@@ -925,7 +929,7 @@ static int kvm_assign_ioeventfd_idx(struct kvm *kvm,
 		if (ret < 0)
 			goto unlock_fail;
 
-		kvm_get_bus(kvm, bus_idx)->ioeventfd_count++;
+		kvm_get_bus(kvm, bus_idx, true)->ioeventfd_count++;
 		list_add_tail(&p->list, &kvm->ioeventfds);
 	}
 
@@ -979,7 +983,7 @@ kvm_deassign_ioeventfd_idx(struct kvm *kvm, enum kvm_bus bus_idx,
 		 * record the eventfd and operation, and process it later
 		 */
 		ks = kvm_find_shadow(kvm);
-		if (ks) {
+		if (ks && ks->in_shadow) {
 			es = kzalloc(sizeof(*es), GFP_KERNEL_ACCOUNT);
 			if (!es) {
 				ret = -ENOMEM;
@@ -993,7 +997,7 @@ kvm_deassign_ioeventfd_idx(struct kvm *kvm, enum kvm_bus bus_idx,
 			ret = 0;
 		} else {
 			kvm_io_bus_unregister_dev(kvm, bus_idx, &p->dev);
-			bus = kvm_get_bus(kvm, bus_idx);
+			bus = kvm_get_bus(kvm, bus_idx, true);
 			if (bus)
 				bus->ioeventfd_count--;
 			ret = 0;
@@ -1078,21 +1082,13 @@ static int kvm_ioeventfd_batch_begin(struct kvm *kvm)
 
 	mutex_lock(&kvm->slots_lock);
 
-	if (is_kvm_in_shadow(kvm)) {
+	ks = kvm_find_shadow(kvm);
+	if (!ks || ks->in_shadow) {
 		ret = -EBUSY;
 		goto out;
 	}
 
-	ks = kzalloc(sizeof(*ks), GFP_KERNEL_ACCOUNT);
-	if (!ks) {
-		ret = -ENOMEM;
-		goto out;
-	}
-	INIT_LIST_HEAD(&ks->list);
-	INIT_LIST_HEAD(&ks->ioeventfds_shadow);
-	ks->kvm = kvm;
-	list_add_tail(&ks->list, &kvm_shadow_list);
-
+	ks->in_shadow = true;
 out:
 	mutex_unlock(&kvm->slots_lock);
 	return ret;
@@ -1105,16 +1101,16 @@ out:
  * the reference count of fd,
  * and the maintenance of each list.
  */
-void kvm_release_ioeventfds_shadow(struct kvm *kvm)
+void kvm_release_ioeventfds_shadow(struct kvm_shadow *ks)
 {
-	struct kvm_shadow *ks;
 	struct eventfd_shadow *es, *tmp;
 	struct _ioeventfd *p;
+	struct kvm *kvm;
 
-	ks = kvm_find_shadow(kvm);
-	if (!ks)
+	if (!ks || !ks->kvm)
 		return;
 
+	kvm = ks->kvm;
 	list_for_each_entry_safe(es, tmp, &ks->ioeventfds_shadow, node) {
 		p = es->eventfd;
 		list_del_init(&es->node);
@@ -1132,19 +1128,19 @@ void kvm_release_ioeventfds_shadow(struct kvm *kvm)
  * to the buses according to the operation, then discard the failed eventfd.
  * Continue processing the rest and ultimately return a failure.
  */
-static int kvm_handle_ioeventfds_shadow(struct kvm *kvm)
+static int kvm_handle_ioeventfds_shadow(struct kvm_shadow *ks)
 {
-	struct kvm_shadow *ks;
 	struct eventfd_shadow *es, *tmp;
 	struct _ioeventfd *p;
 	struct kvm_io_bus *bus;
+	struct kvm *kvm;
 	int result = 0;
 	int ret = 0;
 
-	ks = kvm_find_shadow(kvm);
-	if (!ks)
+	if (!ks || !ks->in_shadow || !ks->kvm)
 		return 0;
 
+	kvm = ks->kvm;
 	list_for_each_entry_safe(es, tmp, &ks->ioeventfds_shadow, node) {
 		list_del_init(&es->node);
 		p = es->eventfd;
@@ -1156,12 +1152,12 @@ static int kvm_handle_ioeventfds_shadow(struct kvm *kvm)
 				ioeventfd_release(p);
 				result = ret;
 			} else {
-				kvm_get_bus(kvm, p->bus_idx)->ioeventfd_count++;
+				kvm_get_bus(kvm, p->bus_idx, true)->ioeventfd_count++;
 				list_add_tail(&p->list, &kvm->ioeventfds);
 			}
 		} else {
 			kvm_io_bus_unregister_dev(kvm, p->bus_idx, &p->dev);
-			bus = kvm_get_bus(kvm, p->bus_idx);
+			bus = kvm_get_bus(kvm, p->bus_idx, true);
 			if (bus)
 				bus->ioeventfd_count--;
 			ioeventfd_release(p);
@@ -1191,7 +1187,7 @@ static int kvm_ioeventfd_batch_end(struct kvm *kvm)
 	mutex_lock(&kvm->slots_lock);
 
 	ks = kvm_find_shadow(kvm);
-	if (!ks) {
+	if (!ks || !ks->in_shadow) {
 		ret = -EINVAL;
 		goto out;
 	}
@@ -1209,7 +1205,7 @@ static int kvm_ioeventfd_batch_end(struct kvm *kvm)
 		ks->buses_shadow[i] = new_bus;
 	}
 
-	ret = kvm_handle_ioeventfds_shadow(kvm);
+	ret = kvm_handle_ioeventfds_shadow(ks);
 
 	for (i = 0; i < KVM_NR_BUSES; i++) {
 		old[i] = kvm_get_real_bus(kvm, i);
@@ -1226,16 +1222,14 @@ static int kvm_ioeventfd_batch_end(struct kvm *kvm)
 	goto out;
 
 fail:
-	kvm_release_ioeventfds_shadow(kvm);
+	kvm_release_ioeventfds_shadow(ks);
 	for (i = 0; i < KVM_NR_BUSES; i++) {
 		kfree(ks->buses_shadow[i]);
 		ks->buses_shadow[i] = NULL;
 	}
 out:
 	if (ks)
-		list_del_init(&ks->list);
-
-	kfree(ks);
+		ks->in_shadow = false;
 	mutex_unlock(&kvm->slots_lock);
 	return ret;
 }
