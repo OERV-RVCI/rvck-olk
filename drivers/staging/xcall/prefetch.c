@@ -474,7 +474,7 @@ static long __do_sys_read(struct pt_regs *regs)
 
 /* MANDATORY */
 struct xcall_prog xcall_prefetch_prog = {
-	.name		= "xcall_prefetch",
+	.name		= "prefetch",
 	.owner		= THIS_MODULE,
 	.objs		= {
 		{
@@ -572,6 +572,4 @@ static void __exit xcall_prefetch_exit(void)
 
 module_init(xcall_prefetch_init);
 module_exit(xcall_prefetch_exit);
-MODULE_AUTHOR("");
-MODULE_DESCRIPTION("Xcall Prefetch");
 MODULE_LICENSE("GPL");
