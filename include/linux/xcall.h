@@ -32,6 +32,7 @@ struct xcall_prog {
 extern int xcall_prog_register(struct xcall_prog *prog);
 extern void xcall_prog_unregister(struct xcall_prog *prog);
 extern void mm_init_xcall_area(struct mm_struct *mm, struct task_struct *p);
+extern struct proc_dir_entry *xcall_subdir_create(const char *name);
 extern void clear_xcall_area(struct mm_struct *mm);
 extern int xcall_mmap(struct vm_area_struct *vma, struct mm_struct *mm);
 #else /* !CONFIG_DYNAMIC_XCALL */

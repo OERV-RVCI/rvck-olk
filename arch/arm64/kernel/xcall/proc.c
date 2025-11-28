@@ -16,6 +16,8 @@
 static LIST_HEAD(comm_list);
 static DECLARE_RWSEM(comm_rwsem);
 
+static struct proc_dir_entry *root_xcall_dir;
+
 static void free_xcall_comm(struct xcall_comm *info)
 {
 	if (!info)
@@ -213,6 +215,12 @@ static ssize_t xcall_comm_write(struct file *file,
 	return ret ? ret : nbytes;
 }
 
+struct proc_dir_entry *xcall_subdir_create(const char *name)
+{
+	return proc_mkdir(name, root_xcall_dir);
+}
+EXPORT_SYMBOL(xcall_subdir_create);
+
 static const struct proc_ops xcall_comm_ops = {
 	.proc_open	= xcall_comm_open,
 	.proc_read	= seq_read,
@@ -223,8 +231,6 @@ static const struct proc_ops xcall_comm_ops = {
 
 static int __init xcall_proc_init(void)
 {
-	struct proc_dir_entry *root_xcall_dir;
-
 	if (!static_key_enabled(&xcall_enable))
 		return 0;
 

@@ -503,7 +503,7 @@ struct xcall_prog xcall_prefetch_prog = {
 
 static int __init init_xcall_prefetch_procfs(void)
 {
-	xcall_proc_dir = proc_mkdir("xcall_feature", NULL);
+	xcall_proc_dir = xcall_subdir_create("prefetch");
 	if (!xcall_proc_dir)
 		return -ENOMEM;
 	prefetch_dir = proc_create("prefetch", 0640, xcall_proc_dir,
