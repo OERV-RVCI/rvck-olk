@@ -117,6 +117,8 @@ static void put_xcall(struct xcall *xcall)
 		return;
 
 	kfree(xcall->name);
+	free_xcall_comm(xcall->info);
+
 	if (xcall->program)
 		module_put(xcall->program->owner);
 
@@ -135,16 +137,18 @@ static struct xcall *find_xcall(const char *name, struct inode *binary)
 	return NULL;
 }
 
-static struct xcall *insert_xcall_locked(struct xcall *xcall)
+static struct xcall *insert_xcall_locked(struct xcall *xcall, struct xcall_comm *info)
 {
 	struct xcall *ret = NULL;
 
 	spin_lock(&xcall_list_lock);
 	ret = find_xcall(xcall->name, xcall->binary);
-	if (!ret)
+	if (!ret) {
+		xcall->info = info;
 		list_add(&xcall->list, &xcalls_list);
-	else
+	} else
 		put_xcall(ret);
+
 	spin_unlock(&xcall_list_lock);
 	return ret;
 }
@@ -284,6 +288,19 @@ void clear_xcall_area(struct mm_struct *mm)
 	mm->xcall = NULL;
 }
 
+void xcall_info_show(struct seq_file *m)
+{
+	struct xcall *xcall;
+
+	spin_lock(&xcall_list_lock);
+	list_for_each_entry(xcall, &xcalls_list, list) {
+		seq_printf(m, "+:%s %s %s\n",
+			   xcall->info->name, xcall->info->binary,
+			   xcall->info->module);
+	}
+	spin_unlock(&xcall_list_lock);
+}
+
 int xcall_attach(struct xcall_comm *comm)
 {
 	struct xcall *xcall;
@@ -305,7 +322,7 @@ int xcall_attach(struct xcall_comm *comm)
 		return -ENOMEM;
 	}
 
-	if (insert_xcall_locked(xcall)) {
+	if (insert_xcall_locked(xcall, comm)) {
 		delete_xcall(xcall);
 		return -EINVAL;
 	}
