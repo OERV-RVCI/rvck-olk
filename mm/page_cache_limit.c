@@ -38,6 +38,9 @@ static bool page_cache_over_limit(void)
 	unsigned long lru_file;
 	unsigned long limit;
 
+	if (!vm_cache_limit_mbytes)
+		return false;
+
 	limit = vm_cache_limit_mbytes << (20 - PAGE_SHIFT);
 	lru_file = global_node_page_state(NR_ACTIVE_FILE) +
 			global_node_page_state(NR_INACTIVE_FILE);
@@ -45,17 +48,6 @@ static bool page_cache_over_limit(void)
 		return true;
 
 	return false;
-}
-
-static bool should_reclaim_page_cache(void)
-{
-	if (!should_periodical_reclaim())
-		return false;
-
-	if (!vm_cache_limit_mbytes)
-		return false;
-
-	return true;
 }
 
 int cache_reclaim_enable_handler(struct ctl_table *table, int write,
@@ -110,7 +102,7 @@ int cache_limit_mbytes_sysctl_handler(struct ctl_table *table, int write,
 	}
 
 	if (write) {
-		while (should_reclaim_page_cache() && page_cache_over_limit() &&
+		while (should_periodical_reclaim() && page_cache_over_limit() &&
 				nr_retries--) {
 			if (signal_pending(current))
 				return -EINTR;
