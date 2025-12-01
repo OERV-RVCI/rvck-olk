@@ -20,6 +20,7 @@
 #include <linux/kthread.h>
 #include <linux/slab.h>
 #include <linux/spinlock_types.h>
+#include <linux/syscalls.h>
 #include <linux/types.h>
 #include <linux/xsched.h>
 
@@ -533,3 +534,81 @@ __init int xsched_sched_init(void)
 }
 late_initcall(xsched_sched_init);
 
+static int xsched_setattr(struct task_struct *p, const struct xsched_attr *attr)
+{
+	struct xsched_attr *old_attr = &p->_resvd->xse_attr;
+
+	if (old_attr->xsched_class == attr->xsched_class &&
+		old_attr->xsched_priority == attr->xsched_priority)
+		return 0;
+
+	old_attr->xsched_class = attr->xsched_class;
+	old_attr->xsched_priority = attr->xsched_priority;
+	xsched_rt_prio_set(p->pid, old_attr->xsched_priority);
+
+	return 0;
+}
+
+SYSCALL_DEFINE2(xsched_setattr, pid_t, pid, struct xsched_attr __user *, arg)
+{
+	struct xsched_attr kattr;
+	struct task_struct *p;
+	int rt_prio, retval;
+
+	if (pid < 0 || !arg)
+		return -EINVAL;
+
+	if (copy_from_user(&kattr, arg, sizeof(*arg))) {
+		XSCHED_ERR("Fail to copy_from_user @ %s\n", __func__);
+		return -EFAULT;
+	}
+
+	rt_prio = NR_XSE_PRIO - kattr.xsched_priority;
+	/* Only support RT */
+	if (rt_prio < XSE_PRIO_HIGH || rt_prio > XSE_PRIO_LOW ||
+		kattr.xsched_class != XSCHED_TYPE_RT)
+		return -EINVAL;
+
+	kattr.xsched_priority = rt_prio;
+
+	rcu_read_lock();
+	retval = -ESRCH;
+	p = pid ? find_task_by_vpid(pid) : current;
+	if (likely(p))
+		get_task_struct(p);
+	rcu_read_unlock();
+
+	if (likely(p)) {
+		retval = xsched_setattr(p, &kattr);
+		put_task_struct(p);
+	}
+
+	return retval;
+}
+
+SYSCALL_DEFINE2(xsched_getattr, pid_t, pid, struct xsched_attr __user *, arg)
+{
+	struct xsched_attr kattr = { };
+	struct task_struct *p;
+
+	if (pid < 0 || !arg)
+		return -EINVAL;
+
+	rcu_read_lock();
+	p = pid ? find_task_by_vpid(pid) : current;
+	if (!p) {
+		rcu_read_unlock();
+		return -ESRCH;
+	}
+	kattr = p->_resvd->xse_attr;
+	rcu_read_unlock();
+
+	kattr.xsched_priority = NR_XSE_PRIO - kattr.xsched_priority;
+
+	if (copy_to_user(arg, &kattr, sizeof(kattr))) {
+		XSCHED_ERR("Fail to copy_to_user @ %s\n", __func__);
+		return -EFAULT;
+	}
+
+	return 0;
+}

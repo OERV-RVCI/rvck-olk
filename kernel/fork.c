@@ -1165,6 +1165,9 @@ static bool dup_resvd_task_struct(struct task_struct *dst,
 		return false;
 
 	dst->_resvd->task = dst;
+#ifdef CONFIG_XCU_SCHEDULER
+	dst->_resvd->xse_attr = orig->_resvd->xse_attr;
+#endif
 	return true;
 }
 

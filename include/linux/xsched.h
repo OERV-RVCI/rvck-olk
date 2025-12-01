@@ -6,6 +6,7 @@
 #include <linux/kref.h>
 #include <linux/vstream.h>
 #include <linux/xcu_group.h>
+#include <linux/xsched_types.h>
 
 #ifndef pr_fmt
 #define pr_fmt(fmt) fmt
@@ -52,20 +53,6 @@
 #define XSCHED_CFS_KICK_SLICE 10
 
 extern struct xsched_cu *xsched_cu_mgr[XSCHED_NR_CUS];
-
-enum xcu_sched_type {
-	XSCHED_TYPE_RT = 0,
-	XSCHED_TYPE_CFS = 1,
-	XSCHED_TYPE_NUM,
-	XSCHED_TYPE_DFLT = XSCHED_TYPE_RT
-};
-
-enum xse_prio {
-	XSE_PRIO_HIGH = 0,
-	XSE_PRIO_LOW = 4,
-	NR_XSE_PRIO,
-	XSE_PRIO_DFLT = XSE_PRIO_LOW
-};
 
 extern struct xsched_class rt_xsched_class;
 extern struct xsched_class fair_xsched_class;
@@ -406,7 +393,7 @@ static inline u64 gcd(u64 a, u64 b)
 }
 
 struct xsched_class {
-	enum xcu_sched_type class_id;
+	enum xcu_sched_class class_id;
 	size_t kick_slice;
 	struct list_head node;
 
@@ -456,7 +443,7 @@ int xsched_init_entity(struct xsched_context *ctx, struct vstream_info *vs);
 int ctx_bind_to_xcu(vstream_info_t *vstream_info, struct xsched_context *ctx);
 int xsched_vsm_add_tail(struct vstream_info *vs, vstream_args_t *arg);
 struct vstream_metadata *xsched_vsm_fetch_first(struct vstream_info *vs);
-int xsched_rt_prio_set(pid_t tgid, unsigned int prio);
+void xsched_rt_prio_set(pid_t tgid, unsigned int prio);
 void enqueue_ctx(struct xsched_entity *xse, struct xsched_cu *xcu);
 void dequeue_ctx(struct xsched_entity *xse, struct xsched_cu *xcu);
 int delete_ctx(struct xsched_context *ctx);

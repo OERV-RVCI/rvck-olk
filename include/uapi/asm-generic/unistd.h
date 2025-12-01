@@ -853,10 +853,10 @@ __SYSCALL(__NR_kabi_reserved464, sys_ni_syscall)
 __SYSCALL(__NR_kabi_reserved465, sys_ni_syscall)
 #define __NR_kabi_reserved466 466
 __SYSCALL(__NR_kabi_reserved466, sys_ni_syscall)
-#define __NR_kabi_reserved467 467
-__SYSCALL(__NR_kabi_reserved467, sys_ni_syscall)
-#define __NR_kabi_reserved468 468
-__SYSCALL(__NR_kabi_reserved468, sys_ni_syscall)
+#define __NR_xsched_setattr 467
+__SYSCALL(__NR_xsched_setattr, sys_xsched_setattr)
+#define __NR_xsched_getattr 468
+__SYSCALL(__NR_xsched_getattr, sys_xsched_getattr)
 
 #undef __NR_syscalls
 #define __NR_syscalls 469

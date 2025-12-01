@@ -25,76 +25,6 @@
 
 #define XSCHED_RT_TIMESLICE	(10 * NSEC_PER_MSEC)
 
-#define TGID_HASH_BITS 8
-
-/* Mapping between tgid and context */
-struct tgid_prio {
-	pid_t tgid;
-	int32_t prio;
-	struct hlist_node hnode;
-};
-
-static DEFINE_HASHTABLE(tgid_prio_map, TGID_HASH_BITS);
-static DEFINE_SPINLOCK(tgid_prio_lock);
-
-static int tgid_prio_insert(pid_t tgid, int32_t prio)
-{
-	struct tgid_prio *new_map;
-	unsigned int hash_key;
-
-	if (prio >= NR_XSE_PRIO)
-		return -EINVAL;
-
-	new_map = kzalloc(sizeof(struct tgid_prio), GFP_KERNEL);
-	if (!new_map) {
-		XSCHED_ERR("Fail to alloc mapping (tgid=%d) @ %s\n",
-			tgid, __func__);
-		return -ENOMEM;
-	}
-
-	new_map->tgid = tgid;
-	new_map->prio = prio;
-
-	hash_key = hash_32(tgid, TGID_HASH_BITS);
-
-	spin_lock(&tgid_prio_lock);
-	hash_add_rcu(tgid_prio_map, &new_map->hnode, hash_key);
-	spin_unlock(&tgid_prio_lock);
-
-	return 0;
-}
-
-static struct tgid_prio *tgid_prio_find(pid_t tgid)
-{
-	struct tgid_prio *map = NULL;
-	unsigned int hash_key = hash_32(tgid, TGID_HASH_BITS);
-
-	rcu_read_lock();
-	hash_for_each_possible_rcu(tgid_prio_map, map, hnode, hash_key) {
-		if (map->tgid == tgid)
-			break;
-	}
-	rcu_read_unlock();
-	return map;
-}
-
-static void tgid_prio_delete(pid_t tgid)
-{
-	struct tgid_prio *map;
-	unsigned int hash_key = hash_32(tgid, TGID_HASH_BITS);
-
-	spin_lock(&tgid_prio_lock);
-	hash_for_each_possible(tgid_prio_map, map, hnode, hash_key) {
-		if (map->tgid == tgid) {
-			hash_del_rcu(&map->hnode);
-			spin_unlock(&tgid_prio_lock);
-			kfree(map);
-			return;
-		}
-	}
-	spin_unlock(&tgid_prio_lock);
-}
-
 static inline void
 xse_rt_add(struct xsched_entity *xse, struct xsched_cu *xcu)
 {
@@ -115,7 +45,7 @@ static inline void xse_rt_move_tail(struct xsched_entity *xse)
 
 /* Increase RT runqueue total and per prio nr_running stat. */
 static inline void xrq_inc_nr_running(struct xsched_entity *xse,
-				      struct xsched_cu *xcu)
+					struct xsched_cu *xcu)
 {
 	xcu->xrq.rt.nr_running++;
 }
@@ -143,7 +73,7 @@ static void enqueue_ctx_rt(struct xsched_entity *xse, struct xsched_cu *xcu)
 }
 
 static inline struct xsched_entity *xrq_next_xse(struct xsched_cu *xcu,
-						 int prio)
+						int prio)
 {
 	return list_first_entry(&xcu->xrq.rt.rq[prio], struct xsched_entity,
 				rt.list_node);
@@ -217,23 +147,16 @@ void rq_init_rt(struct xsched_cu *xcu)
 
 void xse_init_rt(struct xsched_entity *xse)
 {
-	struct tgid_prio *map = tgid_prio_find(xse->tgid);
+	struct task_struct *p;
 
-	xse->rt.prio = (map) ? map->prio : XSE_PRIO_DFLT;
+	p = find_task_by_vpid(xse->tgid);
+	xse->rt.prio = p->_resvd->xse_attr.xsched_priority;
 	XSCHED_DEBUG("Xse init: set priority=%d.\n", xse->rt.prio);
 	xse->rt.timeslice = XSCHED_RT_TIMESLICE;
 	INIT_LIST_HEAD(&xse->rt.list_node);
 }
 
-void xse_deinit_rt(struct xsched_entity *xse)
-{
-	struct tgid_prio *map = tgid_prio_find(xse->tgid);
-
-	if (map) {
-		tgid_prio_delete(xse->tgid);
-		XSCHED_DEBUG("Map deleted: tgid=%d\n", xse->tgid);
-	}
-}
+void xse_deinit_rt(struct xsched_entity *xse) { }
 
 struct xsched_class rt_xsched_class = {
 	.class_id = XSCHED_TYPE_RT,
@@ -248,15 +171,12 @@ struct xsched_class rt_xsched_class = {
 	.check_preempt = check_preempt_ctx_rt
 };
 
-int xsched_rt_prio_set(pid_t tgid, unsigned int prio)
+void xsched_rt_prio_set(pid_t tgid, unsigned int prio)
 {
 	unsigned int id;
 	struct xsched_cu *xcu;
 	struct xsched_context *ctx;
 	struct xsched_entity *xse;
-
-	tgid_prio_delete(tgid);
-	tgid_prio_insert(tgid, prio);
 
 	for_each_active_xcu(xcu, id) {
 		mutex_lock(&xcu->ctx_list_lock);
@@ -275,7 +195,5 @@ int xsched_rt_prio_set(pid_t tgid, unsigned int prio)
 		mutex_unlock(&xcu->xcu_lock);
 		mutex_unlock(&xcu->ctx_list_lock);
 	}
-
-	return 0;
 }
 

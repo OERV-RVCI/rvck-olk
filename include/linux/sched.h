@@ -41,6 +41,10 @@
 #include <linux/thread_bits.h>
 #include <linux/kabi.h>
 
+#ifdef CONFIG_XCU_SCHEDULER
+#include <linux/xsched_types.h>
+#endif
+
 /* task_struct member predeclarations (sorted alphabetically): */
 struct audit_context;
 struct bio_list;
@@ -776,6 +780,10 @@ struct kmap_ctrl {
 struct task_struct_resvd {
 	/* pointer back to the main task_struct */
 	struct task_struct	*task;
+
+#ifdef CONFIG_XCU_SCHEDULER
+	struct xsched_attr xse_attr;
+#endif
 };
 
 struct task_struct {
