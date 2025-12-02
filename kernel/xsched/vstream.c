@@ -656,4 +656,14 @@ SYSCALL_DEFINE2(vstream_manage, struct vstream_args __user *, arg, int, cmd)
 {
 	return 0;
 }
+
+SYSCALL_DEFINE2(xsched_setattr, pid_t, pid, struct xsched_attr __user *, arg)
+{
+	return 0;
+}
+
+SYSCALL_DEFINE2(xsched_getattr, pid_t, pid, struct xsched_attr __user *, arg)
+{
+	return 0;
+}
 #endif
