@@ -24,6 +24,8 @@ typedef struct { unsigned long pgprot; } pgprot_t;
 #define __pud(x)	((pud_t) { (x)  })
 #define __pgd(x)	((pgd_t) { (x) })
 #define __pgprot(x)	((pgprot_t) { (x) })
+
+#define pte_pgprot pte_pgprot
 #endif /* !__ASSEMBLY__ */
 
 #define PAGE_OFFSET	0xfff0000000000000

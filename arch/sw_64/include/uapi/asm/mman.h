@@ -31,6 +31,8 @@
 #define MAP_HUGETLB		0x100000	/* create a huge page mapping */
 #define MAP_FIXED_NOREPLACE	0x200000	/* MAP_FIXED which doesn't unmap underlying mapping */
 
+#define MAP_PEER_SHARED		0x10000000	/* GMEM scene, for heterogeneous memory, sw64 unsupported */
+
 #define MS_ASYNC		1		/* sync memory asynchronously */
 #define MS_SYNC			2		/* synchronous memory sync */
 #define MS_INVALIDATE		4		/* invalidate the caches */
