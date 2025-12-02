@@ -341,10 +341,13 @@ int xcall_detach(struct xcall_comm *comm)
 		return -EINVAL;
 	}
 
-	put_xcall(xcall);
 	list_del(&xcall->list);
-	put_xcall(xcall);
 	spin_unlock(&xcall_list_lock);
+
+	// this put_xcall pairs with list_del() above
+	put_xcall(xcall);
+	// this put_xcall pairs with find_xcall() above
+	put_xcall(xcall);
 	return 0;
 }
 
