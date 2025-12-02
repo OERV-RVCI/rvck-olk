@@ -53,24 +53,14 @@ struct hbg_buffer {
 	dma_addr_t state_dma;
 
 	struct sk_buff *skb;
-	struct page *page;
-	u32 page_offset;
+	dma_addr_t skb_dma;
+	u32 skb_len;
 
-	union {
-		void *skb_data_addr;
-		void *page_addr;
-		void *pkt_addr;
-	};
-	union {
-		dma_addr_t skb_dma;
-		dma_addr_t page_dma;
-		dma_addr_t pkt_dma;
-	};
-	union {
-		u32 skb_len;
-		u32 page_size;
-		u32 pkt_len;
-	};
+	struct page *page;
+	void *page_addr;
+	dma_addr_t page_dma;
+	u32 page_size;
+	u32 page_offset;
 
 	enum hbg_dir dir;
 	struct hbg_ring *ring;
@@ -95,7 +85,7 @@ struct hbg_ring {
 	struct hbg_priv *priv;
 	struct napi_struct napi;
 	char *tout_log_buf; /* tx timeout log buffer */
-	struct page_pool *page_pool;
+	struct page_pool *page_pool; /* only for rx */
 };
 
 enum hbg_hw_event_type {
@@ -119,7 +109,6 @@ struct hbg_dev_specs {
 
 	u32 max_frame_len;
 	u32 rx_buf_size;
-	bool page_pool_enabled;
 };
 
 struct hbg_irq_info {
