@@ -18,7 +18,7 @@ static int vm_cache_reclaim_enable = 1;
 static unsigned long vm_cache_limit_mbytes __read_mostly;
 
 static void shrink_shepherd(struct work_struct *w);
-static DECLARE_DEFERRABLE_WORK(shepherd, shrink_shepherd);
+static DECLARE_DELAYED_WORK(shepherd, shrink_shepherd);
 static struct work_struct vmscan_works[MAX_NUMNODES];
 
 static bool should_periodical_reclaim(void)
@@ -38,6 +38,9 @@ static bool page_cache_over_limit(void)
 	unsigned long lru_file;
 	unsigned long limit;
 
+	if (!vm_cache_limit_mbytes)
+		return false;
+
 	limit = vm_cache_limit_mbytes << (20 - PAGE_SHIFT);
 	lru_file = global_node_page_state(NR_ACTIVE_FILE) +
 			global_node_page_state(NR_INACTIVE_FILE);
@@ -45,17 +48,6 @@ static bool page_cache_over_limit(void)
 		return true;
 
 	return false;
-}
-
-static bool should_reclaim_page_cache(void)
-{
-	if (!should_periodical_reclaim())
-		return false;
-
-	if (!vm_cache_limit_mbytes)
-		return false;
-
-	return true;
 }
 
 int cache_reclaim_enable_handler(struct ctl_table *table, int write,
@@ -110,7 +102,7 @@ int cache_limit_mbytes_sysctl_handler(struct ctl_table *table, int write,
 	}
 
 	if (write) {
-		while (should_reclaim_page_cache() && page_cache_over_limit() &&
+		while (should_periodical_reclaim() && page_cache_over_limit() &&
 				nr_retries--) {
 			if (signal_pending(current))
 				return -EINTR;
@@ -129,9 +121,11 @@ static void shrink_shepherd(struct work_struct *w)
 	if (!should_periodical_reclaim())
 		return;
 
-	for_each_online_node(node) {
-		if (!work_pending(&vmscan_works[node]))
-			queue_work_node(node, system_unbound_wq, &vmscan_works[node]);
+	if (page_cache_over_limit())
+		for_each_online_node(node) {
+			if (!work_pending(&vmscan_works[node]))
+				queue_work_node(node, system_unbound_wq,
+						&vmscan_works[node]);
 	}
 
 	queue_delayed_work(system_unbound_wq, &shepherd,
