@@ -154,10 +154,10 @@ static inline struct prefetch_item *get_pfi(unsigned int fd)
 {
 	struct prefetch_item *pfis = NULL;
 
-	if (fd >= MAX_FD || !current_prefetch_mm_data())
+	pfis = (struct prefetch_item *)current_prefetch_mm_data();
+	if (fd >= MAX_FD || !pfis)
 		return NULL;
 
-	pfis = (struct prefetch_item *)current_prefetch_mm_data();
 	return pfis + fd;
 }
 
@@ -475,7 +475,7 @@ static long __do_sys_epoll_pwait(struct pt_regs *regs)
 			continue;
 
 		pfi = get_pfi(fd);
-		if (!(pfi->file) || !(pfi->file->f_mode & FMODE_READ))
+		if (!pfi || !(pfi->file) || !(pfi->file->f_mode & FMODE_READ))
 			continue;
 		if (atomic_read(&pfi->state) != XCALL_CACHE_NONE)
 			continue;
