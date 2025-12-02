@@ -154,10 +154,10 @@ static inline struct prefetch_item *get_pfi(unsigned int fd)
 {
 	struct prefetch_item *pfis = NULL;
 
-	if (fd >= MAX_FD || !current_prefetch_mm_data())
+	pfis = (struct prefetch_item *)current_prefetch_mm_data();
+	if (fd >= MAX_FD || !pfis)
 		return NULL;
 
-	pfis = (struct prefetch_item *)current_prefetch_mm_data();
 	return pfis + fd;
 }
 
