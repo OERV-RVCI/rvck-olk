@@ -950,6 +950,9 @@ asmlinkage long sys_cachestat(unsigned int fd,
 asmlinkage long sys_map_shadow_stack(unsigned long addr, unsigned long size, unsigned int flags);
 
 asmlinkage long sys_vstream_manage(struct vstream_args __user *arg, int cmd);
+
+asmlinkage long sys_xsched_setattr(pid_t pid, struct xsched_attr __user *arg);
+asmlinkage long sys_xsched_getattr(pid_t pid, struct xsched_attr __user *arg);
 /*
  * Architecture-specific system calls
  */

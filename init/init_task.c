@@ -14,6 +14,9 @@
 #include <linux/scs.h>
 
 #include <linux/uaccess.h>
+#ifdef CONFIG_XCU_SCHEDULER
+#include <linux/xsched_types.h>
+#endif
 
 static struct signal_struct init_signals = {
 	.nr_threads	= 1,
@@ -59,6 +62,9 @@ unsigned long init_shadow_call_stack[SCS_SIZE / sizeof(long)]
 
 static struct task_struct_resvd init_task_struct_resvd = {
 	.task = &init_task,
+#ifdef CONFIG_XCU_SCHEDULER
+	.xse_attr = { .xsched_priority = XSE_PRIO_DFLT },
+#endif
 };
 
 /*

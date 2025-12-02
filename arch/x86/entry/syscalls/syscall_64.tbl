@@ -388,8 +388,8 @@
 464	common	kabi_reserved464	sys_ni_syscall
 465	common	kabi_reserved465	sys_ni_syscall
 466	common	kabi_reserved466	sys_ni_syscall
-467	common	kabi_reserved467	sys_ni_syscall
-468	common	kabi_reserved468	sys_ni_syscall
+467	common	xsched_setattr	    sys_xsched_setattr
+468	common	xsched_getattr	    sys_xsched_getattr
 
 #
 # Due to a historical design error, certain syscalls are numbered differently

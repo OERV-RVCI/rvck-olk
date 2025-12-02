@@ -471,5 +471,5 @@
 464	i386	kabi_reserved464	sys_ni_syscall
 465	i386	kabi_reserved465	sys_ni_syscall
 466	i386	kabi_reserved466	sys_ni_syscall
-467	i386	kabi_reserved467	sys_ni_syscall
-468	i386	kabi_reserved468	sys_ni_syscall
+467	i386	xsched_setattr	sys_ni_syscall
+468	i386	xsched_getattr	sys_ni_syscall
