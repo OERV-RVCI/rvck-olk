@@ -755,4 +755,5 @@ struct cgroup_subsys xcu_cgrp_subsys = {
 	.dfl_cftypes = xcu_cg_files,
 	.legacy_cftypes = xcu_cg_files,
 	.early_init = false,
+	.threaded  = true
 };
