@@ -248,6 +248,7 @@ struct xsched_group_xcu_priv {
 	/* Statistics */
 	int nr_throttled;
 	u64 throttled_time;
+	ktime_t start_throttled_time;
 };
 
 enum xcu_file_type {

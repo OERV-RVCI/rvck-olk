@@ -29,6 +29,14 @@ static void xsched_group_unthrottle(struct xsched_group *xg)
 		if (!READ_ONCE(xg->perxcu_priv[id].xse.on_rq)) {
 			enqueue_ctx(&xg->perxcu_priv[id].xse, xcu);
 			wake_up_interruptible(&xcu->wq_xcu_idle);
+
+			if (xg->perxcu_priv[id].start_throttled_time != 0) {
+				xg->perxcu_priv[id].throttled_time +=
+					ktime_to_ns(ktime_sub(ktime_get(),
+					xg->perxcu_priv[id].start_throttled_time));
+
+				xg->perxcu_priv[id].start_throttled_time = 0;
+			}
 		}
 		mutex_unlock(&xcu->xcu_lock);
 	}
