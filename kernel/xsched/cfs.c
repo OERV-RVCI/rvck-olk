@@ -107,7 +107,10 @@ static void xg_update(struct xsched_group_xcu_priv *xg, int task_delta)
 	for (; xg; xg = &xcg_parent_grp_xcu(xg)) {
 		xg->cfs_rq->nr_running += task_delta;
 		entry = xs_pick_first(xg->cfs_rq);
-		new_xrt = entry ? entry->xruntime * xg->xse.cfs.weight : XSCHED_TIME_INF;
+		if (entry)
+			new_xrt = xg->xse.cfs.sum_exec_runtime * xg->xse.cfs.weight;
+		else
+			new_xrt = XSCHED_TIME_INF;
 
 		xg->cfs_rq->min_xruntime = new_xrt;
 		xg->xse.cfs.xruntime = new_xrt;
