@@ -248,6 +248,7 @@ struct xsched_group_xcu_priv {
 	/* Statistics */
 	int nr_throttled;
 	u64 throttled_time;
+	ktime_t start_throttled_time;
 };
 
 enum xcu_file_type {
@@ -467,7 +468,7 @@ void xsched_quota_refill(struct work_struct *work);
 #define XCU_QUOTA_RUNTIME_INF -1
 #define XCU_SHARES_MIN 1
 
-#define XCUCG_SET_FILE_RETRY_COUNT 50
+#define XCUCG_SET_FILE_RETRY_COUNT 100
 #define XCUCG_SET_FILE_DELAY_MS 10
 
 #define SCHED_CLASS_MAX_LENGTH 4

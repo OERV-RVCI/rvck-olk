@@ -46,13 +46,8 @@ static int xcu_cg_set_file_show(struct xsched_group *xg)
 
 	/* Update visibility of related files based on sched_class */
 	for (int type_name = XCU_FILE_PERIOD_MS; type_name < NR_XCU_FILE_TYPES; type_name++) {
-		if (unlikely(!xg->xcu_file[type_name].kn)) {
-			XSCHED_ERR("Fail to control the file [%d] to be %s @ %s.\n",
-				type_name,
-				xg->sched_class == XSCHED_TYPE_CFS ? "visible" : "invisible",
-				__func__);
+		if (unlikely(!xg->xcu_file[type_name].kn))
 			return -EBUSY;
-		}
 
 		cgroup_file_show(&xg->xcu_file[type_name], xg->sched_class == XSCHED_TYPE_CFS);
 	}
@@ -755,4 +750,5 @@ struct cgroup_subsys xcu_cgrp_subsys = {
 	.dfl_cftypes = xcu_cg_files,
 	.legacy_cftypes = xcu_cg_files,
 	.early_init = false,
+	.threaded  = true
 };

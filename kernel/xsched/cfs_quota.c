@@ -19,10 +19,31 @@
 
 static struct workqueue_struct *quota_workqueue;
 
-void xsched_quota_refill(struct work_struct *work)
+static void xsched_group_unthrottle(struct xsched_group *xg)
 {
 	uint32_t id;
 	struct xsched_cu *xcu;
+
+	for_each_active_xcu(xcu, id) {
+		mutex_lock(&xcu->xcu_lock);
+		if (!READ_ONCE(xg->perxcu_priv[id].xse.on_rq)) {
+			enqueue_ctx(&xg->perxcu_priv[id].xse, xcu);
+			wake_up_interruptible(&xcu->wq_xcu_idle);
+
+			if (xg->perxcu_priv[id].start_throttled_time != 0) {
+				xg->perxcu_priv[id].throttled_time +=
+					ktime_to_ns(ktime_sub(ktime_get(),
+					xg->perxcu_priv[id].start_throttled_time));
+
+				xg->perxcu_priv[id].start_throttled_time = 0;
+			}
+		}
+		mutex_unlock(&xcu->xcu_lock);
+	}
+}
+
+void xsched_quota_refill(struct work_struct *work)
+{
 	struct xsched_group *xg;
 
 	xg = container_of(work, struct xsched_group, refill_work);
@@ -38,14 +59,7 @@ void xsched_quota_refill(struct work_struct *work)
 		return;
 	}
 
-	for_each_active_xcu(xcu, id) {
-		mutex_lock(&xcu->xcu_lock);
-		if (!READ_ONCE(xg->perxcu_priv[id].xse.on_rq)) {
-			enqueue_ctx(&xg->perxcu_priv[id].xse, xcu);
-			wake_up_interruptible(&xcu->wq_xcu_idle);
-		}
-		mutex_unlock(&xcu->xcu_lock);
-	}
+	xsched_group_unthrottle(xg);
 }
 
 static enum hrtimer_restart quota_timer_cb(struct hrtimer *hrtimer)
@@ -95,4 +109,6 @@ void xsched_quota_timeout_update(struct xsched_group *xg)
 
 	if (xg->quota > 0 && xg->period > 0)
 		hrtimer_start(t, ns_to_ktime(xg->period), HRTIMER_MODE_REL_SOFT);
+	else
+		xsched_group_unthrottle(xg);
 }

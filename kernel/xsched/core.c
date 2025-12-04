@@ -411,8 +411,12 @@ int xsched_schedule(void *input_xcu)
 			dequeue_ctx(curr_xse, xcu);
 
 #ifdef CONFIG_CGROUP_XCU
-		if (xsched_quota_exceed(curr_xse->parent_grp))
+		if (xsched_quota_exceed(curr_xse->parent_grp)) {
 			dequeue_ctx(&curr_xse->parent_grp->perxcu_priv[xcu->id].xse, xcu);
+			curr_xse->parent_grp->perxcu_priv[xcu->id].nr_throttled++;
+			curr_xse->parent_grp->perxcu_priv[xcu->id].start_throttled_time =
+				ktime_get();
+		}
 #endif
 
 		xcu->xrq.curr_xse = NULL;
