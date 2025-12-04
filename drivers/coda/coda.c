@@ -684,6 +684,12 @@ static int virtcca_create_ste_entry(struct pci_dev *pci_dev, bool host, bool new
 	else
 		smmu_domain = to_smmu_domain(iommu_get_domain_for_dev(&(pci_dev->dev)));
 
+	if (!smmu_domain->smmu) {
+		dev_err(&(pci_dev->dev), "CoDA: Security smmu has not been correctly set\n");
+		kfree(params_ptr);
+		return -EINVAL;
+	}
+
 	data = io_pgtable_ops_to_pgtable(smmu_domain->pgtbl_ops);
 	cfg = &data->cfg;
 	typeof(&cfg->arm_lpae_s2_cfg.vtcr) vtcr = &cfg->arm_lpae_s2_cfg.vtcr;
