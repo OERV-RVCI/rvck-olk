@@ -251,9 +251,6 @@
 #define QM_QOS_MAX_CIR_U		6
 #define QM_AUTOSUSPEND_DELAY		3000
 
-#define QM_MIG_REGION_SEL		0x100198
-#define QM_MIG_REGION_EN		0x1
-
  /* abnormal status value for stopping queue */
 #define QM_STOP_QUEUE_FAIL		1
 #define	QM_DUMP_SQC_FAIL		3
@@ -3200,7 +3197,7 @@ static void hisi_mig_region_clear(struct hisi_qm *qm)
 	/* Clear migration region set of PF */
 	if (qm->fun_type == QM_HW_PF && qm->ver > QM_HW_V3) {
 		val = readl(qm->io_base + QM_MIG_REGION_SEL);
-		val &= ~BIT(0);
+		val &= ~QM_MIG_REGION_EN;
 		writel(val, qm->io_base + QM_MIG_REGION_SEL);
 	}
 }
@@ -6149,6 +6146,7 @@ static int qm_rebuild_for_resume(struct hisi_qm *qm)
 	}
 
 	qm_cmd_init(qm);
+	hisi_mig_region_enable(qm);
 	qm_dev_err_init(qm);
 	/* Set the doorbell timeout to QM_DB_TIMEOUT_CFG ns. */
 	writel(QM_DB_TIMEOUT_SET, qm->io_base + QM_DB_TIMEOUT_CFG);
