@@ -1811,6 +1811,11 @@ static struct page *hct_get_page(pgoff_t page_idx)
 	int numa_node;
 
 	mutex_lock(&hct_share.lock);
+	if (hct_data.iommu[page_idx].pdev == NULL) {
+		mutex_unlock(&hct_share.lock);
+		return NULL;
+	}
+
 	if (!hct_share.pages[page_idx]) {
 		hct_share.pages[page_idx] =
 			alloc_pages(GFP_HIGHUSER | __GFP_ZERO, 0);
