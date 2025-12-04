@@ -21,7 +21,6 @@
 #define HCLGE_COMM_MAC_STATS_EXT_EN_B		3
 #define HCLGE_COMM_SYNC_RX_RING_HEAD_EN_B	4
 #define HCLGE_COMM_LLRS_FEC_EN_B		5
-#define HCLGE_COMM_VF_MULTI_TC_EN_B		7
 
 #define hclge_comm_dev_phy_imp_supported(ae_dev) \
 	test_bit(HNAE3_DEV_SUPPORT_PHY_IMP_B, (ae_dev)->caps)
