@@ -641,7 +641,7 @@ static int attach_pages(unsigned long dst_addr, unsigned long src_addr,
 	struct task_struct *src_task, *dst_task;
 	struct page **process_pages;
 	unsigned long nr_pages;
-	unsigned int flags = 0;
+	unsigned int flags = FOLL_NOFAULT;
 	int pinned_pages;
 	int locked = 1;
 	int ret;
