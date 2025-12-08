@@ -937,7 +937,6 @@ static void write_msmon_ctl_flt_vals(struct mon_read *m, u32 ctl_val,
 				     u32 flt_val)
 {
 	struct mpam_msc *msc = m->ris->msc;
-	struct msmon_mbwu_state *mbwu_state;
 
 	/*
 	 * Write the ctl_val with the enable bit cleared, reset the counter,
@@ -960,11 +959,6 @@ static void write_msmon_ctl_flt_vals(struct mon_read *m, u32 ctl_val,
 			mpam_write_monsel_reg(msc, MBWU, 0);
 
 		mpam_write_monsel_reg(msc, CFG_MBWU_CTL, ctl_val|MSMON_CFG_x_CTL_EN);
-
-		mbwu_state = &m->ris->mbwu_state[m->ctx->mon];
-		if (mbwu_state)
-			mbwu_state->prev_val = 0;
-
 		break;
 	default:
 		return;
@@ -1070,7 +1064,6 @@ static void __ris_msmon_read(void *arg)
 	    mpam_csu_hisi_need_retrigger(ris, m->err == -EBUSY)) {
 		write_msmon_ctl_flt_vals(m, ctl_val, flt_val);
 		if (mbwu_state) {
-			mbwu_state->prev_val = 0;
 			mbwu_state->correction = 0;
 			mbwu_overflow = false;
 		}
@@ -1132,7 +1125,6 @@ static void __ris_msmon_read(void *arg)
 		if (mbwu_overflow)
 			overflow_val = mpam_msmon_overflow_val(ris);
 
-		mbwu_state->prev_val = now;
 		mbwu_state->correction += overflow_val;
 
 		/* Include bandwidth consumed before the last hardware reset */
@@ -2584,6 +2576,7 @@ int mpam_apply_config(struct mpam_component *comp, u16 partid,
 		arg.ris = ris;
 		mutex_lock(&ris->msc->lock);
 		mpam_touch_msc(ris->msc, __write_config, &arg);
+		ris->in_reset_state = false;
 		mutex_unlock(&ris->msc->lock);
 	}
 	srcu_read_unlock(&mpam_srcu, idx);
