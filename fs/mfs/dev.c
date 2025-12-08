@@ -106,8 +106,8 @@ static ssize_t mfs_dev_read(struct file *file, char __user *buf,
 		xas_store(&xas, NULL);
 	xas_unlock(&xas);
 out:
-	put_mfs_event(event);
 	trace_mfs_dev_read(file, msg->opcode, msg->id, msg->fd);
+	put_mfs_event(event);
 	return ret ? ret : n;
 }
 
