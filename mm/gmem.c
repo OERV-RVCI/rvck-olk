@@ -40,55 +40,6 @@ static inline unsigned long pe_mask(unsigned int order)
 	return 0;
 }
 
-static struct percpu_counter g_gmem_stats[NR_GMEM_STAT_ITEMS];
-
-void gmem_stats_counter(enum gmem_stats_item item, int val)
-{
-	if (!gmem_is_enabled())
-		return;
-
-	if (WARN_ON_ONCE(unlikely(item >= NR_GMEM_STAT_ITEMS)))
-		return;
-
-	percpu_counter_add(&g_gmem_stats[item], val);
-}
-
-static int gmem_stats_init(void)
-{
-	int i, rc;
-
-	for (i = 0; i < NR_GMEM_STAT_ITEMS; i++) {
-		rc = percpu_counter_init(&g_gmem_stats[i], 0, GFP_KERNEL);
-		if (rc) {
-			int j;
-
-			for (j = i-1; j >= 0; j--)
-				percpu_counter_destroy(&g_gmem_stats[j]);
-
-			break;	/* break the initialization process */
-		}
-	}
-
-	return rc;
-}
-
-#ifdef CONFIG_PROC_FS
-static int gmem_stats_show(struct seq_file *m, void *arg)
-{
-	if (!gmem_is_enabled())
-		return 0;
-
-	seq_printf(
-		m, "migrating H2D     : %lld\n",
-		percpu_counter_read_positive(&g_gmem_stats[NR_PAGE_MIGRATING_H2D]));
-	seq_printf(
-		m, "migrating D2H     : %lld\n",
-		percpu_counter_read_positive(&g_gmem_stats[NR_PAGE_MIGRATING_D2H]));
-
-	return 0;
-}
-#endif /* CONFIG_PROC_FS */
-
 static struct workqueue_struct *prefetch_wq;
 
 #define GM_WORK_CONCURRENCY 4
@@ -126,20 +77,12 @@ static int __init gmem_init(void)
 	if (err)
 		goto free_vm_object;
 
-	err = gmem_stats_init();
-	if (err)
-		goto free_gm_sysfs;
-
-#ifdef CONFIG_PROC_FS
-	proc_create_single("gmemstats", 0444, NULL, gmem_stats_show);
-#endif
-
 	prefetch_wq = alloc_workqueue("prefetch",
 		__WQ_LEGACY | WQ_UNBOUND | WQ_HIGHPRI | WQ_CPU_INTENSIVE, GM_WORK_CONCURRENCY);
 	if (!prefetch_wq) {
 		gmem_err("fail to alloc workqueue prefetch_wq\n");
 		err = -EFAULT;
-		goto free_ctx;
+		goto free_gm_sysfs;
 	}
 
 	static_branch_enable(&gmem_status);
@@ -477,8 +420,10 @@ int gm_as_attach(struct gm_as *as, struct gm_dev *dev,
 	 * gm_as_attach will be used to attach device to process address space.
 	 * Handle this case and add hnodes registered by device to process mems_allowed.
 	 */
+#ifdef CONFIG_CPUSETS
 	for_each_node_mask(nid, dev->registered_hnodes)
 		node_set(nid, current->mems_allowed);
+#endif
 	return 0;
 }
 EXPORT_SYMBOL_GPL(gm_as_attach);
@@ -832,33 +777,40 @@ static void do_hmemcpy(struct mm_struct *mm, int hnid, unsigned long dest,
 		mutex_lock(&gm_mapping_dest->lock);
 
 	mutex_lock(&gm_mapping_src->lock);
+	if (gm_mapping_nomap(gm_mapping_src)) {
+		gmem_err("hmemcpy: src address is not mapping to CPU or device");
+		goto unlock_gm_mapping;
+	}
+
 	// Use memcpy when there is no device address, otherwise use peer_memcpy
 	if (hnid == -1) {
 		if (gm_mapping_cpu(gm_mapping_src)) { // host to host
 			gmem_err("hmemcpy: host to host is unimplemented\n");
 			goto unlock_gm_mapping;
-		} else if (gm_mapping_device(gm_mapping_src)) { // device to host
+		} else { // device to host
 			dev = gm_mapping_src->dev;
-			gmc.dest = phys_to_dma(dev->dma_dev,
-				page_to_phys(gm_mapping_dest->page) + (dest & (page_size - 1)));
+			gmc.dest = dma_map_page(dev->dma_dev, gm_mapping_dest->page,
+				 (dest & (page_size - 1)), page_size, DMA_BIDIRECTIONAL);
+			if (dma_mapping_error(dev->dma_dev, gmc.dest)) {
+				gmem_err("hmemcpy dma map failed");
+				goto unlock_gm_mapping;
+			}
 			gmc.src = gm_mapping_src->gm_page->dev_dma_addr + (src & (page_size - 1));
 			gmc.kind = GM_MEMCPY_D2H;
-		} else {
-			gmem_err("hmemcpy: src address is not mapping to CPU or device");
-			goto unlock_gm_mapping;
 		}
 	} else {
 		if (gm_mapping_cpu(gm_mapping_src)) { // host to device
 			gmc.dest = gm_mapping_dest->gm_page->dev_dma_addr +
 						(dest & (page_size - 1));
-			gmc.src = phys_to_dma(dev->dma_dev,
-				page_to_phys(gm_mapping_src->page) + (src & (page_size - 1)));
+			gmc.src = dma_map_page(dev->dma_dev, gm_mapping_src->page,
+				 (src & (page_size - 1)), page_size, DMA_BIDIRECTIONAL);
+			if (dma_mapping_error(dev->dma_dev, gmc.src)) {
+				gmem_err("hmemcpy dma map failed");
+				goto unlock_gm_mapping;
+			}
 			gmc.kind = GM_MEMCPY_H2D;
-		} else if (gm_mapping_device(gm_mapping_src)) { // device to device
+		} else { // device to device
 			gmem_err("hmemcpy: device to device is unimplemented\n");
-			goto unlock_gm_mapping;
-		} else {
-			gmem_err("hmemcpy: src address is not mapping to CPU or device");
 			goto unlock_gm_mapping;
 		}
 	}
@@ -866,6 +818,11 @@ static void do_hmemcpy(struct mm_struct *mm, int hnid, unsigned long dest,
 	gmc.dev = dev;
 	gmc.size = size;
 	dev->mmu->peer_hmemcpy(&gmc);
+
+	if (hnid == -1)
+		dma_unmap_page(dev->dma_dev, gmc.dest, page_size, DMA_BIDIRECTIONAL);
+	else
+		dma_unmap_page(dev->dma_dev, gmc.src, page_size, DMA_BIDIRECTIONAL);
 
 unlock_gm_mapping:
 	mutex_unlock(&gm_mapping_src->lock);
