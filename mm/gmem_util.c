@@ -243,7 +243,7 @@ static void gmem_reserve_vma(struct mm_struct *mm, unsigned long start,
 		kfree(node);
 		return;
 	}
-	vm_flags_set(vma, ~VM_PEER_SHARED);
+	vm_flags_clear(vma, VM_PEER_SHARED);
 
 	node->start = start;
 	node->len = round_up(len, SZ_2M);
