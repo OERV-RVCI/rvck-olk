@@ -135,7 +135,8 @@ vm_fault_t do_peer_shared_anonymous_page(struct vm_fault *vmf)
 	/* map page in pgtable */
 	vmf->ptl = pmd_lock(vma->vm_mm, vmf->pmd);
 
-	BUG_ON(!pmd_none(*vmf->pmd));
+	if (!pmd_none(*vmf->pmd))
+		goto unlock_release;
 	ret = check_stable_address_space(vma->vm_mm);
 	if (ret)
 		goto unlock_release;
