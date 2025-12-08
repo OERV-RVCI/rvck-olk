@@ -22,6 +22,88 @@ struct hnode_kobject {
 
 #define HNODE_NAME_LEN	32
 
+/* work like memparse, but use kstrtoull to check overflow */
+static unsigned long long safe_memparse(const char *ptr,
+					unsigned long *result)
+{
+	char *startptr = (char *)ptr;
+	char endchar = 0;
+	unsigned int max_chars = INT_MAX;
+	unsigned long long num;
+	unsigned long long ret;
+
+	if (!result)
+		return -EINVAL;
+	while (max_chars--) {
+		if (*startptr == '\0')
+			break;
+		/* only support demical */
+		if (!('0' <= *startptr && *startptr <= '9') && (*startptr != '\n')) {
+			if (endchar)
+				return -EINVAL;
+			endchar = *startptr;
+			*startptr = '\0';
+		}
+		startptr++;
+	}
+
+	ret = kstrtoull(ptr, 0, &num);
+	if (ret != 0)
+		return ret;
+
+	switch (endchar) {
+	case 'E':
+	case 'e':
+		if (num >= (ULONG_MAX >> 10))
+			return -ERANGE;
+		num <<= 10;
+		fallthrough;
+	case 'P':
+	case 'p':
+		if (num >= (ULONG_MAX >> 10))
+			return -ERANGE;
+		num <<= 10;
+		fallthrough;
+	case 'T':
+	case 't':
+		if (num >= (ULONG_MAX >> 10))
+			return -ERANGE;
+		num <<= 10;
+		fallthrough;
+	case 'G':
+	case 'g':
+		if (num >= (ULONG_MAX >> 10))
+			return -ERANGE;
+		num <<= 10;
+		fallthrough;
+	case 'M':
+	case 'm':
+		if (num >= (ULONG_MAX >> 10))
+			return -ERANGE;
+		num <<= 10;
+		fallthrough;
+	case 'K':
+	case 'k':
+		if (num >= (ULONG_MAX >> 10))
+			return -ERANGE;
+		num <<= 10;
+		break;
+	case 'B':
+	case 'b':
+		break;
+	default:
+		if (endchar)
+			return -EINVAL;
+	}
+
+	if (num >= ULONG_MAX)
+		return -ERANGE;
+
+	*result = (unsigned long)num;
+
+	return 0;
+}
+
 static struct hnode *get_hnode_kobj(struct kobject *kobj)
 {
 	struct hnode *hnode;
@@ -48,15 +130,36 @@ static ssize_t max_memsize_show(struct kobject *kobj,
 }
 
 static ssize_t max_memsize_store(struct kobject *kobj,
-				 struct kobj_attribute *attr,
-				 const char *buf, size_t count)
+				 struct kobj_attribute *attr, const char *buf,
+				 size_t count)
 {
 	struct hnode *hnode = get_hnode_kobj(kobj);
+	unsigned long nr_pages;
+	unsigned long used_mem;
+	unsigned long max_memsize;
+	int ret = 0;
 
 	if (!hnode)
 		return -EINVAL;
 
-	hnode->max_memsize = memparse(buf, NULL) & (~(HPAGE_SIZE - 1));
+	nr_pages = atomic_read(&hnode->nr_free_pages) +
+		   atomic_read(&hnode->nr_active_pages);
+	used_mem = nr_pages * HPAGE_SIZE;
+	ret = safe_memparse(buf, &max_memsize);
+	if (ret != 0) {
+		if (ret == -ERANGE)
+			gmem_err("write to max_memsize overflow, value not changed");
+		else
+			gmem_err("write to max_memsize with invalid value, value not changed");
+		return ret;
+	}
+	max_memsize = max_memsize & (~(HPAGE_SIZE * NUM_IMPORT_PAGES - 1));
+	if (max_memsize < used_mem && max_memsize) {
+		gmem_err(
+			"new max_memsize should be larger than used mem, value not changed\n");
+		return -EINVAL;
+	}
+	hnode->max_memsize = max_memsize;
 	return count;
 }
 
@@ -89,56 +192,12 @@ static ssize_t nr_activepages_show(struct kobject *kobj,
 }
 
 static struct kobj_attribute nr_activepages_attr =
-	__ATTR(nr_activepages, 0444, nr_activepages_show, NULL);
-
-static ssize_t nr_freelist_show(struct kobject *kobj,
-				struct kobj_attribute *attr, char *buf)
-{
-	unsigned int nr_freelist = 0;
-	struct gm_page *gm_page;
-	struct hnode *hnode = get_hnode_kobj(kobj);
-
-	if (!hnode)
-		return -EINVAL;
-
-	spin_lock(&hnode->freelist_lock);
-	list_for_each_entry(gm_page, &hnode->freelist, gm_page_list) {
-		nr_freelist++;
-	}
-	spin_unlock(&hnode->freelist_lock);
-	return sprintf(buf, "%u\n", nr_freelist);
-}
-
-static struct kobj_attribute nr_freelist_attr =
-		__ATTR(nr_freelist, 0444, nr_freelist_show, NULL);
-
-static ssize_t nr_activelist_show(struct kobject *kobj,
-				  struct kobj_attribute *attr, char *buf)
-{
-	unsigned int nr_activelist = 0;
-	struct gm_page *gm_page;
-	struct hnode *hnode = get_hnode_kobj(kobj);
-
-	if (!hnode)
-		return -EINVAL;
-
-	spin_lock(&hnode->activelist_lock);
-	list_for_each_entry(gm_page, &hnode->activelist, gm_page_list) {
-		nr_activelist++;
-	}
-	spin_unlock(&hnode->activelist_lock);
-	return sprintf(buf, "%u\n", nr_activelist);
-}
-
-static struct kobj_attribute nr_activelist_attr =
-		__ATTR(nr_activelist, 0444, nr_activelist_show, NULL);
+	__ATTR(nr_activepages, 0440, nr_activepages_show, NULL);
 
 static struct attribute *hnode_attrs[] = {
 	&max_memsize_attr.attr,
 	&nr_freepages_attr.attr,
 	&nr_activepages_attr.attr,
-	&nr_freelist_attr.attr,
-	&nr_activelist_attr.attr,
 	NULL,
 };
 

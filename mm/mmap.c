@@ -1353,7 +1353,7 @@ unsigned long __do_mmap_mm(struct mm_struct *mm, struct file *file, unsigned lon
 	if (IS_ERR_VALUE(addr))
 		return addr;
 
-	if ((flags & MAP_FIXED_NOREPLACE) || (flags & MAP_PEER_SHARED)) {
+	if ((flags & MAP_FIXED_NOREPLACE) || (gmem_is_enabled() && (flags & MAP_PEER_SHARED))) {
 		if (find_vma_intersection(mm, addr, addr + len))
 			return -EEXIST;
 	}

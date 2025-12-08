@@ -22,7 +22,7 @@
 
 static struct kmem_cache *gm_page_cachep;
 
-DEFINE_SPINLOCK(hnode_lock);
+static DEFINE_SPINLOCK(hnode_lock);
 static nodemask_t hnode_map;
 struct hnode *hnodes[MAX_NUMNODES];
 
@@ -66,6 +66,7 @@ void hnode_init(struct hnode *hnode, unsigned int hnid, struct gm_dev *dev)
 	INIT_LIST_HEAD(&hnode->activelist);
 	spin_lock_init(&hnode->freelist_lock);
 	spin_lock_init(&hnode->activelist_lock);
+	spin_lock_init(&hnode->lock);
 	atomic_set(&hnode->nr_free_pages, 0);
 	atomic_set(&hnode->nr_active_pages, 0);
 	hnode->import_failed = false;
@@ -294,7 +295,7 @@ enum gm_evict_ret {
 	GM_EVICT_DEVERR,
 };
 
-enum gm_evict_ret gm_evict_page_locked(struct gm_page *gm_page)
+static enum gm_evict_ret gm_evict_page_locked(struct gm_page *gm_page)
 {
 	struct gm_dev *gm_dev;
 	struct gm_mapping *gm_mapping;
@@ -550,13 +551,27 @@ struct gm_page *gm_alloc_page(struct mm_struct *mm, struct hnode *hnode)
 
 retry:
 	gm_page = get_gm_page_from_freelist(hnode);
-	if (!gm_page && can_import(hnode) && !hnode->import_failed) {
-		/* Import pages from device. */
-		ret = gm_dev->mmu->import_phys_mem(mm, hnode->id, NUM_IMPORT_PAGES);
-		if (!ret)
+	spin_lock(&hnode->lock);
+	if (!gm_page) {
+		spin_lock(&hnode->freelist_lock);
+		if (atomic_read(&hnode->nr_free_pages)) {
+			spin_unlock(&hnode->freelist_lock);
+			spin_unlock(&hnode->lock);
 			goto retry;
-		hnode->import_failed = true;
+		}
+		spin_unlock(&hnode->freelist_lock);
+		if (can_import(hnode) && !hnode->import_failed) {
+			/* Import pages from device. */
+			ret = gm_dev->mmu->import_phys_mem(mm, hnode->id,
+							   NUM_IMPORT_PAGES);
+			if (!ret) {
+				spin_unlock(&hnode->lock);
+				goto retry;
+			}
+			hnode->import_failed = true;
+		}
 	}
+	spin_unlock(&hnode->lock);
 
 	/* Try to swap pages. */
 	if (!gm_page) {
