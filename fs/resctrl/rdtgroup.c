@@ -3932,10 +3932,12 @@ out:
 
 static int rdtgroup_show_options(struct seq_file *seq, struct kernfs_root *kf)
 {
+	bool l2_visible = !resctrl_arch_get_resource(RDT_RESOURCE_L2)->invisible;
+
 	if (resctrl_arch_get_cdp_enabled(RDT_RESOURCE_L3))
 		seq_puts(seq, ",cdp");
 
-	if (resctrl_arch_get_cdp_enabled(RDT_RESOURCE_L2))
+	if (l2_visible && resctrl_arch_get_cdp_enabled(RDT_RESOURCE_L2))
 		seq_puts(seq, ",cdpl2");
 
 	if (is_mba_sc(resctrl_arch_get_resource(RDT_RESOURCE_MBA)))
@@ -3943,6 +3945,9 @@ static int rdtgroup_show_options(struct seq_file *seq, struct kernfs_root *kf)
 
 	if (resctrl_debug)
 		seq_puts(seq, ",debug");
+
+	if (IS_ENABLED(CONFIG_ARM64_MPAM) && l2_visible)
+		seq_puts(seq, ",l2");
 
 	return 0;
 }
