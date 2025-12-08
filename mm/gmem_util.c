@@ -135,7 +135,8 @@ vm_fault_t do_peer_shared_anonymous_page(struct vm_fault *vmf)
 	/* map page in pgtable */
 	vmf->ptl = pmd_lock(vma->vm_mm, vmf->pmd);
 
-	BUG_ON(!pmd_none(*vmf->pmd));
+	if (!pmd_none(*vmf->pmd))
+		goto unlock_release;
 	ret = check_stable_address_space(vma->vm_mm);
 	if (ret)
 		goto unlock_release;
@@ -242,7 +243,7 @@ static void gmem_reserve_vma(struct mm_struct *mm, unsigned long start,
 		kfree(node);
 		return;
 	}
-	vm_flags_set(vma, ~VM_PEER_SHARED);
+	vm_flags_clear(vma, VM_PEER_SHARED);
 
 	node->start = start;
 	node->len = round_up(len, SZ_2M);
