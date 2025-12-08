@@ -1107,8 +1107,10 @@ static long migrate_to_node(struct mm_struct *mm, int source, int dest,
 
 	mmap_read_lock(mm);
 	vma = find_vma(mm, 0);
-	if (unlikely(!vma))
+	if (unlikely(!vma)) {
+		mmap_read_unlock(mm);
 		return 0;
+	}
 
 	/*
 	 * This does not migrate the range, but isolates all pages that
@@ -2265,13 +2267,9 @@ static nodemask_t *policy_nodemask(gfp_t gfp, struct mempolicy *pol,
 		WARN_ON_ONCE(gfp & __GFP_THISNODE);
 		break;
 	case MPOL_INTERLEAVE:
-		*nid = NUMA_NO_NODE;
-		if (smart_grid_used())
-			*nid = sched_grid_preferred_interleave_nid(pol);
 		/* Override input node id */
-		if (*nid == NUMA_NO_NODE)
-			*nid = (ilx == NO_INTERLEAVE_INDEX) ?
-				interleave_nodes(pol) : interleave_nid(pol, ilx);
+		*nid = (ilx == NO_INTERLEAVE_INDEX) ?
+			interleave_nodes(pol) : interleave_nid(pol, ilx);
 		break;
 	case MPOL_WEIGHTED_INTERLEAVE:
 		*nid = (ilx == NO_INTERLEAVE_INDEX) ?
@@ -2406,17 +2404,18 @@ static struct page *alloc_pages_preferred_many(gfp_t gfp, unsigned int order,
 }
 
 /**
- * alloc_pages_mpol - Allocate pages according to NUMA mempolicy.
+ * __alloc_pages_mpol - Allocate pages according to NUMA mempolicy.
  * @gfp: GFP flags.
  * @order: Order of the page allocation.
  * @pol: Pointer to the NUMA mempolicy.
  * @ilx: Index for interleave mempolicy (also distinguishes alloc_pages()).
  * @nid: Preferred node (usually numa_node_id() but @mpol may override it).
+ * @use_smart_grid: Control whether to apply the smart grid scheduling policy.
  *
  * Return: The page on success or NULL if allocation fails.
  */
-struct page *alloc_pages_mpol(gfp_t gfp, unsigned int order,
-		struct mempolicy *pol, pgoff_t ilx, int nid)
+struct page *__alloc_pages_mpol(gfp_t gfp, unsigned int order,
+		struct mempolicy *pol, pgoff_t ilx, int nid, bool use_smart_grid)
 {
 	nodemask_t *nodemask;
 	struct page *page;
@@ -2456,6 +2455,19 @@ struct page *alloc_pages_mpol(gfp_t gfp, unsigned int order,
 			 * to prefer hugepage backing, retry allowing remote
 			 * memory with both reclaim and compact as well.
 			 */
+		}
+	}
+
+	if (use_smart_grid && smart_grid_used()) {
+		if ((pol->mode == MPOL_INTERLEAVE) ||
+		    (pol->mode == MPOL_WEIGHTED_INTERLEAVE)) {
+			int preferred_nid;
+
+			preferred_nid = sched_grid_preferred_interleave_nid(pol);
+			if (preferred_nid != NUMA_NO_NODE)
+				nid = preferred_nid;
+		} else {
+			nid = sched_grid_preferred_nid(nid, nodemask);
 		}
 	}
 
@@ -2499,8 +2511,8 @@ struct folio *vma_alloc_folio(gfp_t gfp, int order, struct vm_area_struct *vma,
 	struct page *page;
 
 	pol = get_vma_policy(vma, addr, order, &ilx);
-	page = alloc_pages_mpol(gfp | __GFP_COMP, order,
-				pol, ilx, numa_node_id());
+	page = __alloc_pages_mpol(gfp | __GFP_COMP, order,
+				pol, ilx, numa_node_id(), true);
 	mpol_cond_put(pol);
 	return page_rmappable_folio(page);
 }
