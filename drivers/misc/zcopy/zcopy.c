@@ -211,11 +211,12 @@ static pud_t *zcopy_alloc_new_pud(struct mm_struct *mm, unsigned long addr)
 	return zcopy_pud_alloc(mm, p4d, addr);
 }
 
-static pmd_t *zcopy_alloc_pmd(struct mm_struct *mm, unsigned long addr)
+static pmd_t *zcopy_alloc_pmd(struct mm_struct *mm, unsigned long addr, int *rc)
 {
 	pud_t *pud;
 	pmd_t *pmd;
 
+	*rc = -ENOMEM;
 	pud = zcopy_alloc_new_pud(mm, addr);
 	if (!pud)
 		return NULL;
@@ -223,6 +224,12 @@ static pmd_t *zcopy_alloc_pmd(struct mm_struct *mm, unsigned long addr)
 	pmd = zcopy_pmd_alloc(mm, pud, addr);
 	if (!pmd)
 		return NULL;
+
+	if (pmd_trans_huge(*pmd)) {
+		pr_warn_once("va mapped to hugepage, please free it and realloc va\n");
+		*rc = -EAGAIN;
+		return NULL;
+	}
 
 	return pmd;
 }
@@ -317,21 +324,15 @@ static __always_inline int zcopy_folio_try_dup_anon_rmap(struct folio *folio,
 	switch (level) {
 	case RMAP_LEVEL_PTE:
 		if (!folio_test_large(folio)) {
-			if (PageAnonExclusive(page))
-				ClearPageAnonExclusive(page);
 			atomic_inc(&page->_mapcount);
 			break;
 		}
 
 		do {
-			if (PageAnonExclusive(page))
-				ClearPageAnonExclusive(page);
 			atomic_inc(&page->_mapcount);
 		} while (page++, --nr_pages > 0);
 		break;
 	case RMAP_LEVEL_PMD:
-		if (PageAnonExclusive(page))
-			ClearPageAnonExclusive(page);
 		atomic_inc(&folio->_entire_mapcount);
 		break;
 	}
@@ -382,7 +383,6 @@ static int attach_ptes(struct vm_area_struct *dst_vma, struct vm_area_struct *sr
 			return -EAGAIN;
 		}
 		rss[MM_ANONPAGES] += nr;
-		VM_WARN_ON_FOLIO(PageAnonExclusive(src_page), src_folio);
 
 		zcopy_set_ptes(dst_vma->vm_mm, dst_addr, dst_ptep, pte, nr);
 		return nr;
@@ -395,7 +395,6 @@ static int attach_ptes(struct vm_area_struct *dst_vma, struct vm_area_struct *sr
 		return -EAGAIN;
 	}
 	rss[MM_ANONPAGES]++;
-	VM_WARN_ON_FOLIO(PageAnonExclusive(src_page), src_folio);
 
 	zcopy_set_ptes(dst_vma->vm_mm, dst_addr, dst_ptep, pte, 1);
 	return 1;
@@ -592,11 +591,10 @@ static int attach_page_range(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 		src_pmd = zcopy_get_pmd(src_mm, src_addr);
 		if (!src_pmd)
 			continue;
-		dst_pmd = zcopy_alloc_pmd(dst_mm, dst_addr);
-		if (!dst_pmd) {
-			ret = -ENOMEM;
+
+		dst_pmd = zcopy_alloc_pmd(dst_mm, dst_addr, &ret);
+		if (!dst_pmd)
 			break;
-		}
 
 		if (pmd_trans_huge(*src_pmd)) {
 			if (extent == HPAGE_PMD_SIZE) {
@@ -643,7 +641,7 @@ static int attach_pages(unsigned long dst_addr, unsigned long src_addr,
 	struct task_struct *src_task, *dst_task;
 	struct page **process_pages;
 	unsigned long nr_pages;
-	unsigned int flags = 0;
+	unsigned int flags = FOLL_NOFAULT;
 	int pinned_pages;
 	int locked = 1;
 	int ret;
