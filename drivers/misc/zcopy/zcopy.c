@@ -179,6 +179,9 @@ static pud_t *zcopy_get_pud(struct mm_struct *mm, unsigned long addr)
 	if (pud_none(*pud))
 		return NULL;
 
+	if (!pud_table(*pud))
+		return NULL;
+
 	return pud;
 }
 
