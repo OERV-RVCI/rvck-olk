@@ -41,7 +41,6 @@
 #define SEED_SHIFT_24		24
 #define SEED_SHIFT_16		16
 #define SEED_SHIFT_8		8
-#define WAIT_PERIOD		20
 
 struct hisi_trng_list {
 	struct mutex lock;
@@ -54,7 +53,6 @@ struct hisi_trng {
 	struct hisi_trng_list *trng_list;
 	struct list_head list;
 	struct hwrng rng;
-	u32 ctx_num;
 	u32 ver;
 	bool is_used;
 	struct mutex mutex;
@@ -62,7 +60,6 @@ struct hisi_trng {
 
 struct hisi_trng_ctx {
 	struct hisi_trng *trng;
-	struct crypto_rng *drbg;
 };
 
 static atomic_t trng_active_devs;
@@ -88,7 +85,6 @@ static int hisi_trng_seed(struct crypto_rng *tfm, const u8 *seed,
 			  unsigned int slen)
 {
 	struct hisi_trng_ctx *ctx = crypto_rng_ctx(tfm);
-	struct crypto_rng *drbg = ctx->drbg;
 	struct hisi_trng *trng = ctx->trng;
 	u32 val = 0;
 	int ret = 0;
@@ -97,12 +93,6 @@ static int hisi_trng_seed(struct crypto_rng *tfm, const u8 *seed,
 		pr_err("slen(%u) is not matched with trng(%d)\n", slen,
 			SW_DRBG_SEED_SIZE);
 		return -EINVAL;
-	}
-
-	/* when the device is busy, use soft tfm instead */
-	if (drbg) {
-		crypto_rng_set_entropy(drbg, seed, slen);
-		return crypto_rng_reset(drbg, NULL, 0);
 	}
 
 	writel(0x0, trng->base + SW_DRBG_BLOCKS);
@@ -124,7 +114,6 @@ static int hisi_trng_generate(struct crypto_rng *tfm, const u8 *src,
 			      unsigned int slen, u8 *dstn, unsigned int dlen)
 {
 	struct hisi_trng_ctx *ctx = crypto_rng_ctx(tfm);
-	struct crypto_rng *drbg = ctx->drbg;
 	struct hisi_trng *trng = ctx->trng;
 	u32 data[SW_DRBG_DATA_NUM];
 	u32 currsize = 0;
@@ -137,9 +126,6 @@ static int hisi_trng_generate(struct crypto_rng *tfm, const u8 *src,
 			SW_DRBG_BLOCKS_NUM * SW_DRBG_BYTES);
 		return -EINVAL;
 	}
-
-	if (drbg)
-		return crypto_rng_generate(drbg, src, slen, dstn, dlen);
 
 	do {
 		ret = readl_relaxed_poll_timeout(trng->base + SW_DRBG_STATUS,
@@ -170,40 +156,18 @@ static int hisi_trng_init(struct crypto_tfm *tfm)
 {
 	struct hisi_trng_ctx *ctx = crypto_tfm_ctx(tfm);
 	struct hisi_trng *trng;
-	int ret = 0;
+	int ret = -EBUSY;
 
 	mutex_lock(&trng_devices.lock);
 	list_for_each_entry(trng, &trng_devices.list, list) {
 		if (!trng->is_used) {
 			trng->is_used = true;
-			trng->ctx_num++;
 			ctx->trng = trng;
+			ret = 0;
 			break;
 		}
 	}
 	mutex_unlock(&trng_devices.lock);
-
-	if (!ctx->trng) {
-		ctx->drbg = crypto_alloc_rng("drbg_nopr_ctr_aes256", 0, 0);
-		if (IS_ERR(ctx->drbg)) {
-			pr_err("Can not alloc rng!\n");
-			ret = PTR_ERR(ctx->drbg);
-			return ret;
-		}
-
-		mutex_lock(&trng_devices.lock);
-		if (list_empty(&trng_devices.list)) {
-			mutex_unlock(&trng_devices.lock);
-			crypto_free_rng(ctx->drbg);
-			return -ENODEV;
-		}
-
-		trng = list_first_entry(&trng_devices.list,
-					struct hisi_trng, list);
-		trng->ctx_num++;
-		ctx->trng = trng;
-		mutex_unlock(&trng_devices.lock);
-	}
 
 	return ret;
 }
@@ -213,12 +177,7 @@ static void hisi_trng_exit(struct crypto_tfm *tfm)
 	struct hisi_trng_ctx *ctx = crypto_tfm_ctx(tfm);
 
 	mutex_lock(&trng_devices.lock);
-	if (!ctx->drbg)
-		ctx->trng->is_used = false;
-	else
-		crypto_free_rng(ctx->drbg);
-
-	ctx->trng->ctx_num--;
+	ctx->trng->is_used = false;
 	mutex_unlock(&trng_devices.lock);
 }
 
@@ -280,7 +239,7 @@ static int hisi_trng_del_from_list(struct hisi_trng *trng)
 	int ret = -EBUSY;
 
 	mutex_lock(&trng_devices.lock);
-	if (!trng->ctx_num) {
+	if (!trng->is_used) {
 		list_del(&trng->list);
 		ret = 0;
 	}
@@ -305,7 +264,6 @@ static int hisi_trng_probe(struct platform_device *pdev)
 		return PTR_ERR(trng->base);
 
 	trng->is_used = false;
-	trng->ctx_num = 0;
 	trng->ver = readl(trng->base + HISI_TRNG_VERSION);
 	if (!trng_devices.is_init) {
 		INIT_LIST_HEAD(&trng_devices.list);
@@ -352,7 +310,7 @@ static void hisi_trng_remove(struct platform_device *pdev)
 
 	/* Wait until the task is finished */
 	while (hisi_trng_del_from_list(trng))
-		msleep(WAIT_PERIOD);
+		;
 
 	if (trng->ver != HISI_TRNG_VER_V1 &&
 	    atomic_dec_return(&trng_active_devs) == 0)
