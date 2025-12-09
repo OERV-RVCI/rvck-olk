@@ -44,6 +44,7 @@
 #define WAIT_PERIOD		20
 
 struct hisi_trng_list {
+	struct mutex lock;
 	struct list_head list;
 	bool is_init;
 };
@@ -66,7 +67,6 @@ struct hisi_trng_ctx {
 
 static atomic_t trng_active_devs;
 static struct hisi_trng_list trng_devices;
-static DEFINE_MUTEX(trng_device_lock);
 
 static void hisi_trng_set_seed(struct hisi_trng *trng, const u8 *seed)
 {
@@ -172,7 +172,7 @@ static int hisi_trng_init(struct crypto_tfm *tfm)
 	struct hisi_trng *trng;
 	int ret = 0;
 
-	mutex_lock(&trng_device_lock);
+	mutex_lock(&trng_devices.lock);
 	list_for_each_entry(trng, &trng_devices.list, list) {
 		if (!trng->is_used) {
 			trng->is_used = true;
@@ -181,7 +181,7 @@ static int hisi_trng_init(struct crypto_tfm *tfm)
 			break;
 		}
 	}
-	mutex_unlock(&trng_device_lock);
+	mutex_unlock(&trng_devices.lock);
 
 	if (!ctx->trng) {
 		ctx->drbg = crypto_alloc_rng("drbg_nopr_ctr_aes256", 0, 0);
@@ -191,9 +191,9 @@ static int hisi_trng_init(struct crypto_tfm *tfm)
 			return ret;
 		}
 
-		mutex_lock(&trng_device_lock);
+		mutex_lock(&trng_devices.lock);
 		if (list_empty(&trng_devices.list)) {
-			mutex_unlock(&trng_device_lock);
+			mutex_unlock(&trng_devices.lock);
 			crypto_free_rng(ctx->drbg);
 			return -ENODEV;
 		}
@@ -202,7 +202,7 @@ static int hisi_trng_init(struct crypto_tfm *tfm)
 					struct hisi_trng, list);
 		trng->ctx_num++;
 		ctx->trng = trng;
-		mutex_unlock(&trng_device_lock);
+		mutex_unlock(&trng_devices.lock);
 	}
 
 	return ret;
@@ -212,16 +212,14 @@ static void hisi_trng_exit(struct crypto_tfm *tfm)
 {
 	struct hisi_trng_ctx *ctx = crypto_tfm_ctx(tfm);
 
-	mutex_lock(&trng_device_lock);
-
+	mutex_lock(&trng_devices.lock);
 	if (!ctx->drbg)
 		ctx->trng->is_used = false;
 	else
 		crypto_free_rng(ctx->drbg);
 
 	ctx->trng->ctx_num--;
-
-	mutex_unlock(&trng_device_lock);
+	mutex_unlock(&trng_devices.lock);
 }
 
 static int hisi_trng_read(struct hwrng *rng, void *buf, size_t max, bool wait)
@@ -272,28 +270,21 @@ static struct rng_alg hisi_trng_alg = {
 
 static void hisi_trng_add_to_list(struct hisi_trng *trng)
 {
-	mutex_lock(&trng_device_lock);
-	if (!trng_devices.is_init) {
-		INIT_LIST_HEAD(&trng_devices.list);
-		trng_devices.is_init = true;
-	}
-
+	mutex_lock(&trng_devices.lock);
 	list_add_tail(&trng->list, &trng_devices.list);
-	mutex_unlock(&trng_device_lock);
+	mutex_unlock(&trng_devices.lock);
 }
 
 static int hisi_trng_del_from_list(struct hisi_trng *trng)
 {
 	int ret = -EBUSY;
 
-	mutex_lock(&trng_device_lock);
-
+	mutex_lock(&trng_devices.lock);
 	if (!trng->ctx_num) {
 		list_del(&trng->list);
 		ret = 0;
 	}
-
-	mutex_unlock(&trng_device_lock);
+	mutex_unlock(&trng_devices.lock);
 
 	return ret;
 }
@@ -316,6 +307,11 @@ static int hisi_trng_probe(struct platform_device *pdev)
 	trng->is_used = false;
 	trng->ctx_num = 0;
 	trng->ver = readl(trng->base + HISI_TRNG_VERSION);
+	if (!trng_devices.is_init) {
+		INIT_LIST_HEAD(&trng_devices.list);
+		mutex_init(&trng_devices.lock);
+		trng_devices.is_init = true;
+	}
 
 	hisi_trng_add_to_list(trng);
 	if (trng->ver != HISI_TRNG_VER_V1 &&
