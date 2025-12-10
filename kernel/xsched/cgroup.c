@@ -78,6 +78,7 @@ static void xcu_cg_initialize_components(struct xsched_group *xcg)
 	INIT_LIST_HEAD(&xcg->children_groups);
 	xsched_quota_timeout_init(xcg);
 	INIT_WORK(&xcg->refill_work, xsched_quota_refill);
+	WRITE_ONCE(xcg->is_offline, false);
 }
 
 void xcu_cg_subsys_init(void)
@@ -113,9 +114,9 @@ static void xcg_perxcu_cfs_rq_deinit(struct xsched_group *xcg, int max_id)
 		xcu = xsched_cu_mgr[i];
 		mutex_lock(&xcu->xcu_lock);
 		dequeue_ctx(&xcg->perxcu_priv[i].xse, xcu);
-		mutex_unlock(&xcu->xcu_lock);
 		kfree(xcg->perxcu_priv[i].cfs_rq);
 		xcg->perxcu_priv[i].cfs_rq = NULL;
+		mutex_unlock(&xcu->xcu_lock);
 	}
 }
 
@@ -242,9 +243,22 @@ static void xcu_css_free(struct cgroup_subsys_state *css)
 {
 	struct xsched_group *xcg = xcu_cg_from_css(css);
 
+	if (!xsched_group_is_root(xcg)) {
+		switch (xcg->sched_class) {
+		case XSCHED_TYPE_CFS:
+			xcu_cfs_cg_deinit(xcg);
+			break;
+		default:
+			XSCHED_INFO("xcu_cgroup: deinit RT group css=0x%lx\n",
+			       (uintptr_t)&xcg->css);
+			break;
+		}
+	}
+
+	list_del(&xcg->group_node);
+
 	kmem_cache_free(xsched_group_cache, xcg);
 }
-
 
 static void delay_xcu_cg_set_file_show_workfn(struct work_struct *work)
 {
@@ -298,21 +312,12 @@ static void xcu_css_offline(struct cgroup_subsys_state *css)
 	struct xsched_group *xcg;
 
 	xcg = xcu_cg_from_css(css);
-	if (!xsched_group_is_root(xcg)) {
-		switch (xcg->sched_class) {
-		case XSCHED_TYPE_CFS:
-			xcu_cfs_cg_deinit(xcg);
-			break;
-		default:
-			XSCHED_INFO("xcu_cgroup: deinit RT group css=0x%lx\n",
-			       (uintptr_t)&xcg->css);
-			break;
-		}
-	}
+
+	WRITE_ONCE(xcg->is_offline, true);
+
 	hrtimer_cancel(&xcg->quota_timeout);
 	cancel_work_sync(&xcg->refill_work);
 	cancel_work_sync(&xcg->file_show_work);
-	list_del(&xcg->group_node);
 }
 
 static void xsched_group_xse_attach(struct xsched_group *xg,
@@ -640,6 +645,11 @@ static int xcu_write_s64(struct cgroup_subsys_state *css, struct cftype *cft,
 
 	css_get(css);
 	xcucg = xcu_cg_from_css(css);
+
+	if (xcucg->sched_class == XSCHED_TYPE_RT) {
+		css_put(css);
+		return -EINVAL;
+	}
 
 	switch (cft->private) {
 	case XCU_FILE_PERIOD_MS:

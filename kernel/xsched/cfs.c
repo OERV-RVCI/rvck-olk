@@ -63,7 +63,14 @@ static inline struct xsched_entity_cfs *
 xs_pick_first(struct xsched_rq_cfs *cfs_rq)
 {
 	struct xsched_entity_cfs *xse_cfs;
-	struct rb_node *left = rb_first_cached(&cfs_rq->ctx_timeline);
+	struct rb_node *left;
+
+	if (!cfs_rq) {
+		XSCHED_WARN("the rq cannot be NULL @ %s\n", __func__);
+		return NULL;
+	}
+
+	left = rb_first_cached(&cfs_rq->ctx_timeline);
 
 	if (!left)
 		return NULL;
@@ -159,12 +166,25 @@ static void enqueue_ctx_fair(struct xsched_entity *xse, struct xsched_cu *xcu)
 {
 	int task_delta;
 	struct xsched_entity_cfs *first;
-	struct xsched_rq_cfs *rq;
+	struct xsched_rq_cfs *rq, *sub_rq;
 	struct xsched_entity_cfs *xse_cfs = &xse->cfs;
 
 	rq = xse_cfs->cfs_rq = xse_parent_grp_xcu(xse_cfs)->cfs_rq;
+	if (!rq) {
+		XSCHED_WARN("the parent rq this xse [%d] attached cannot be NULL @ %s\n",
+			xse->tgid, __func__);
+		return;
+	}
+
+	sub_rq = xse_this_grp_xcu(xse_cfs)->cfs_rq;
+	if (xse->is_group && !sub_rq) {
+		XSCHED_WARN("the sub_rq this cgroup-type xse [%d] owned cannot be NULL @ %s\n",
+			xse->tgid, __func__);
+		return;
+	}
+
 	task_delta =
-		(xse->is_group) ? xse_this_grp_xcu(xse_cfs)->cfs_rq->nr_running : 1;
+		(xse->is_group) ? sub_rq->nr_running : 1;
 
 	/* If no XSE or only empty groups */
 	if (xs_pick_first(rq) == NULL || rq->min_xruntime == XSCHED_TIME_INF)

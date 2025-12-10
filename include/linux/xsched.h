@@ -296,6 +296,8 @@ struct xsched_group {
 	/* to control the xcu.{period, quota, shares} files shown or not */
 	struct cgroup_file xcu_file[NR_XCU_FILE_TYPES];
 	struct work_struct file_show_work;
+
+	bool is_offline;
 };
 #endif /* CONFIG_CGROUP_XCU */
 
@@ -326,7 +328,7 @@ xse_this_grp(struct xsched_entity_cfs *xse_cfs)
 }
 #endif /* CONFIG_CGROUP_XCU */
 
-static inline int xse_integrity_check(const struct xsched_entity *xse)
+static inline int xse_integrity_check(struct xsched_entity *xse)
 {
 	if (!xse) {
 		XSCHED_ERR("xse is null @ %s\n", __func__);
@@ -337,6 +339,15 @@ static inline int xse_integrity_check(const struct xsched_entity *xse)
 		XSCHED_ERR("xse->class is null @ %s\n", __func__);
 		return -EINVAL;
 	}
+
+#ifdef CONFIG_CGROUP_XCU
+	if (xse->is_group && !xse_this_grp_xcu(&xse->cfs)->cfs_rq) {
+		// Can only be in the free process
+		XSCHED_ERR("the sub_rq this cgroup-type xse [%d] owned cannot be NULL @ %s\n",
+			xse->tgid, __func__);
+		return -EINVAL;
+	}
+#endif /* CONFIG_CGROUP_XCU */
 
 	return 0;
 }
