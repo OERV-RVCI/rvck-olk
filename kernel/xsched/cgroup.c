@@ -360,6 +360,8 @@ static int xcu_can_attach(struct cgroup_taskset *tset)
 
 		/* record entry for this task */
 		entry = kmem_cache_zalloc(xcg_attach_entry_cache, GFP_KERNEL);
+		if (!entry)
+			return -ENOMEM;
 		entry->task = task;
 		entry->old_xcg = old_xcg;
 		entry->new_xcg = dst_xcg;
