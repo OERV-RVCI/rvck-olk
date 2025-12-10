@@ -7,6 +7,7 @@
 #include <linux/vstream.h>
 #include <linux/xcu_group.h>
 #include <linux/xsched_types.h>
+#include <linux/math64.h>
 
 #ifndef pr_fmt
 #define pr_fmt(fmt) fmt
@@ -268,8 +269,7 @@ struct xsched_group {
 	int prio;
 
 	/* Bandwidth setting: shares value set by user */
-	u64 shares_cfg;
-	u64 shares_cfg_red;
+	u32 shares_cfg;
 	u32 weight;
 	u64 children_shares_sum;
 
@@ -465,7 +465,10 @@ int delete_ctx(struct xsched_context *ctx);
 void xsched_group_inherit(struct task_struct *tsk, struct xsched_entity *xse);
 void xcu_cg_subsys_init(void);
 void xcu_cfs_root_cg_init(struct xsched_cu *xcu);
-void xcu_grp_shares_update(struct xsched_group *parent);
+void xcu_grp_shares_update(struct xsched_group *parent,
+	struct xsched_group *child, u32 shares_cfg);
+void xcu_grp_shares_add(struct xsched_group *parent, struct xsched_group *child);
+void xcu_grp_shares_sub(struct xsched_group *parent, struct xsched_group *child);
 void xsched_group_xse_detach(struct xsched_entity *xse);
 
 void xsched_quota_init(void);
@@ -485,5 +488,21 @@ void xsched_quota_refill(struct work_struct *work);
 #define SCHED_CLASS_MAX_LENGTH 4
 
 #endif
+
+static inline u64 xs_calc_delta(u64 delta_exec, u32 base_weight, u32 weight)
+{
+	if (unlikely(weight == 0))
+		weight = 1;
+
+	if (weight == base_weight)
+		return delta_exec;
+
+	return mul_u64_u32_div(delta_exec, base_weight, weight);
+}
+
+static inline u64 xs_calc_delta_fair(u64 delta_exec, u32 weight)
+{
+	return xs_calc_delta(delta_exec, XSCHED_CFG_SHARE_DFLT, weight);
+}
 
 #endif /* !__LINUX_XSCHED_H__ */

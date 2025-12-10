@@ -164,7 +164,7 @@ static int xcu_cfs_cg_init(struct xsched_group *xcg,
 	}
 
 	xcg->shares_cfg = XSCHED_CFG_SHARE_DFLT;
-	xcu_grp_shares_update(parent_xg);
+	xcu_grp_shares_add(parent_xg, xcg);
 	xcg->period = XSCHED_CFS_QUOTA_PERIOD_MS;
 	xcg->quota = XSCHED_TIME_INF;
 	xcg->runtime = 0;
@@ -175,7 +175,7 @@ static int xcu_cfs_cg_init(struct xsched_group *xcg,
 static void xcu_cfs_cg_deinit(struct xsched_group *xcg)
 {
 	xcg_perxcu_cfs_rq_deinit(xcg, num_active_xcu);
-	xcu_grp_shares_update(xcg->parent);
+	xcu_grp_shares_sub(xcg->parent, xcg);
 }
 
 /**
@@ -593,47 +593,52 @@ static s64 xcu_read_s64(struct cgroup_subsys_state *css, struct cftype *cft)
 	return ret;
 }
 
-void xcu_grp_shares_update(struct xsched_group *parent)
+void xcu_grp_shares_update(struct xsched_group *parent, struct xsched_group *child, u32 shares_cfg)
 {
 	int id;
 	struct xsched_cu *xcu;
-	struct xsched_group *children;
-	u64 rem, sh_sum = 0, sh_gcd = 0, w_gcd = 0, sh_prod_red = 1;
 
-	list_for_each_entry(children, &parent->children_groups, group_node) {
-		if (children->sched_class == XSCHED_TYPE_CFS)
-			sh_gcd = gcd(sh_gcd, children->shares_cfg);
+	if (child->sched_class != XSCHED_TYPE_CFS)
+		return;
+
+	parent->children_shares_sum -= child->shares_cfg;
+
+	child->shares_cfg = shares_cfg;
+	child->weight = child->shares_cfg;
+
+	for_each_active_xcu(xcu, id) {
+		mutex_lock(&xcu->xcu_lock);
+		child->perxcu_priv[id].xse.cfs.weight = child->weight;
+		mutex_unlock(&xcu->xcu_lock);
 	}
 
-	list_for_each_entry(children, &parent->children_groups, group_node) {
-		if (children->sched_class == XSCHED_TYPE_CFS) {
-			sh_sum += children->shares_cfg;
-			children->shares_cfg_red = div64_u64(children->shares_cfg, sh_gcd);
-			div64_u64_rem(sh_prod_red, children->shares_cfg_red, &rem);
-			if (rem)
-				sh_prod_red *= children->shares_cfg_red;
-		}
+	parent->children_shares_sum += child->shares_cfg;
+}
+
+void xcu_grp_shares_add(struct xsched_group *parent, struct xsched_group *child)
+{
+	int id;
+	struct xsched_cu *xcu;
+
+	if (child->sched_class != XSCHED_TYPE_CFS)
+		return;
+
+	child->weight = child->shares_cfg;
+	for_each_active_xcu(xcu, id) {
+		mutex_lock(&xcu->xcu_lock);
+		child->perxcu_priv[id].xse.cfs.weight = child->weight;
+		mutex_unlock(&xcu->xcu_lock);
 	}
 
-	parent->children_shares_sum = sh_sum;
+	parent->children_shares_sum += child->shares_cfg;
+}
 
-	list_for_each_entry(children, &parent->children_groups, group_node) {
-		if (children->sched_class == XSCHED_TYPE_CFS) {
-			children->weight = div64_u64(sh_prod_red, children->shares_cfg_red);
-			w_gcd = gcd(w_gcd, children->weight);
-		}
-	}
+void xcu_grp_shares_sub(struct xsched_group *parent, struct xsched_group *child)
+{
+	if (child->sched_class != XSCHED_TYPE_CFS)
+		return;
 
-	list_for_each_entry(children, &parent->children_groups, group_node) {
-		if (children->sched_class == XSCHED_TYPE_CFS) {
-			children->weight = div64_u64(children->weight, w_gcd);
-			for_each_active_xcu(xcu, id) {
-				mutex_lock(&xcu->xcu_lock);
-				children->perxcu_priv[id].xse.cfs.weight = children->weight;
-				mutex_unlock(&xcu->xcu_lock);
-			}
-		}
-	}
+	parent->children_shares_sum -= child->shares_cfg;
 }
 
 static int xcu_write_s64(struct cgroup_subsys_state *css, struct cftype *cft,
@@ -675,12 +680,11 @@ static int xcu_write_s64(struct cgroup_subsys_state *css, struct cftype *cft,
 		xsched_quota_timeout_update(xcucg);
 		break;
 	case XCU_FILE_SHARES:
-		if (val < XCU_SHARES_MIN || val > U64_MAX) {
+		if (val < XCU_SHARES_MIN || val > U32_MAX) {
 			ret = -EINVAL;
 			break;
 		}
-		xcucg->shares_cfg = val;
-		xcu_grp_shares_update(xcucg->parent);
+		xcu_grp_shares_update(xcucg->parent, xcucg, val);
 		break;
 	default:
 		XSCHED_ERR("invalid operation %lu @ %s\n", cft->private, __func__);
@@ -716,7 +720,7 @@ static int xcu_stat(struct seq_file *sf, void *v)
 	}
 
 	seq_printf(sf, "exec_runtime:	%llu\n", exec_runtime);
-	seq_printf(sf, "shares cfg:	%llu/%llu x%u\n", xcucg->shares_cfg,
+	seq_printf(sf, "shares cfg:	%u/%llu x%u\n", xcucg->shares_cfg,
 		   xcucg->parent->children_shares_sum, xcucg->weight);
 	seq_printf(sf, "quota:	%lld\n", xcucg->quota);
 	seq_printf(sf, "used:	%lld\n", xcucg->runtime);

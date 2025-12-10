@@ -89,7 +89,7 @@ static void xs_update(struct xsched_entity_cfs *xse_cfs, u64 delta)
 	struct xsched_group_xcu_priv *xg = xse_parent_grp_xcu(xse_cfs);
 
 	for (; xg; xse_cfs = &xg->xse.cfs, xg = &xcg_parent_grp_xcu(xg)) {
-		u64 new_xrt = xse_cfs->xruntime + delta * xse_cfs->weight;
+		u64 new_xrt = xse_cfs->xruntime + xs_calc_delta_fair(delta, xse_cfs->weight);
 
 		xs_cfs_rq_update(xse_cfs, new_xrt);
 		xse_cfs->sum_exec_runtime += delta;
@@ -115,7 +115,8 @@ static void xg_update(struct xsched_group_xcu_priv *xg, int task_delta)
 		xg->cfs_rq->nr_running += task_delta;
 		entry = xs_pick_first(xg->cfs_rq);
 		if (entry)
-			new_xrt = xg->xse.cfs.sum_exec_runtime * xg->xse.cfs.weight;
+			new_xrt = xs_calc_delta_fair(xg->xse.cfs.sum_exec_runtime,
+					xg->xse.cfs.weight);
 		else
 			new_xrt = XSCHED_TIME_INF;
 
