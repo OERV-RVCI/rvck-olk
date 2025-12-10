@@ -116,6 +116,7 @@ struct hpre_curve25519_ctx {
 	/* gx coordinate */
 	unsigned char *g;
 	dma_addr_t dma_g;
+	struct crypto_kpp *soft_tfm;
 };
 
 struct hpre_ctx {
@@ -1771,6 +1772,9 @@ static int hpre_curve25519_set_secret(struct crypto_kpp *tfm, const void *buf,
 	struct device *dev = ctx->dev;
 	int ret = -EINVAL;
 
+	if (ctx->fallback)
+		return crypto_kpp_set_secret(ctx->curve25519.soft_tfm, buf, len);
+
 	if (len != CURVE25519_KEY_SIZE ||
 	    !crypto_memneq(buf, curve25519_null_point, CURVE25519_KEY_SIZE)) {
 		dev_err(dev, "key is null or key len is not 32bytes!\n");
@@ -2011,9 +2015,44 @@ clear_all:
 	return ret;
 }
 
+static int hpre_curve25519_generate_public_key(struct kpp_request *req)
+{
+	struct crypto_kpp *tfm = crypto_kpp_reqtfm(req);
+	struct hpre_ctx *ctx = kpp_tfm_ctx(tfm);
+	int ret;
+
+	if (ctx->fallback) {
+		kpp_request_set_tfm(req, ctx->curve25519.soft_tfm);
+		ret = crypto_kpp_generate_public_key(req);
+		kpp_request_set_tfm(req, tfm);
+		return ret;
+	}
+
+	return hpre_curve25519_compute_value(req);
+}
+
+static int hpre_curve25519_compute_shared_secret(struct kpp_request *req)
+{
+	struct crypto_kpp *tfm = crypto_kpp_reqtfm(req);
+	struct hpre_ctx *ctx = kpp_tfm_ctx(tfm);
+	int ret;
+
+	if (ctx->fallback) {
+		kpp_request_set_tfm(req, ctx->curve25519.soft_tfm);
+		ret = crypto_kpp_compute_shared_secret(req);
+		kpp_request_set_tfm(req, tfm);
+		return ret;
+	}
+
+	return hpre_curve25519_compute_value(req);
+}
+
 static unsigned int hpre_curve25519_max_size(struct crypto_kpp *tfm)
 {
 	struct hpre_ctx *ctx = kpp_tfm_ctx(tfm);
+
+	if (ctx->fallback)
+		return crypto_kpp_maxsize(ctx->curve25519.soft_tfm);
 
 	return ctx->key_sz;
 }
@@ -2021,15 +2060,37 @@ static unsigned int hpre_curve25519_max_size(struct crypto_kpp *tfm)
 static int hpre_curve25519_init_tfm(struct crypto_kpp *tfm)
 {
 	struct hpre_ctx *ctx = kpp_tfm_ctx(tfm);
+	const char *alg = kpp_alg_name(tfm);
+	int ret;
 
-	kpp_set_reqsize(tfm, sizeof(struct hpre_asym_request) + hpre_align_pd());
+	ret = hpre_ctx_init(ctx, HPRE_V3_ECC_ALG_TYPE);
+	if (!ret) {
+		kpp_set_reqsize(tfm, sizeof(struct hpre_asym_request) + hpre_align_pd());
+		return 0;
+	} else if (ret != -ENODEV) {
+		return ret;
+	}
 
-	return hpre_ctx_init(ctx, HPRE_V3_ECC_ALG_TYPE);
+	ctx->curve25519.soft_tfm = crypto_alloc_kpp(alg, 0, CRYPTO_ALG_NEED_FALLBACK);
+	if (IS_ERR(ctx->curve25519.soft_tfm)) {
+		pr_err("Failed to alloc curve25519 tfm!\n");
+		return PTR_ERR(ctx->curve25519.soft_tfm);
+	}
+
+	crypto_kpp_set_flags(ctx->curve25519.soft_tfm, crypto_kpp_get_flags(tfm));
+	ctx->fallback = true;
+
+	return 0;
 }
 
 static void hpre_curve25519_exit_tfm(struct crypto_kpp *tfm)
 {
 	struct hpre_ctx *ctx = kpp_tfm_ctx(tfm);
+
+	if (ctx->fallback) {
+		crypto_free_kpp(ctx->curve25519.soft_tfm);
+		return;
+	}
 
 	hpre_ecc_clear_ctx(ctx, true, false);
 }
@@ -2122,8 +2183,8 @@ static struct kpp_alg ecdh_curves[] = {
 
 static struct kpp_alg curve25519_alg = {
 	.set_secret = hpre_curve25519_set_secret,
-	.generate_public_key = hpre_curve25519_compute_value,
-	.compute_shared_secret = hpre_curve25519_compute_value,
+	.generate_public_key = hpre_curve25519_generate_public_key,
+	.compute_shared_secret = hpre_curve25519_compute_shared_secret,
 	.max_size = hpre_curve25519_max_size,
 	.init = hpre_curve25519_init_tfm,
 	.exit = hpre_curve25519_exit_tfm,
@@ -2133,6 +2194,7 @@ static struct kpp_alg curve25519_alg = {
 		.cra_name = "curve25519",
 		.cra_driver_name = "hpre-curve25519",
 		.cra_module = THIS_MODULE,
+		.cra_flags = CRYPTO_ALG_NEED_FALLBACK,
 	},
 };
 
