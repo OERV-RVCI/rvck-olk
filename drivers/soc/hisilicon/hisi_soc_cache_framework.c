@@ -59,11 +59,11 @@ static int hisi_soc_cache_lock(int cpu, phys_addr_t addr, size_t size)
 	struct list_head *head;
 	int ret = -ENOMEM;
 
+	guard(spinlock)(&soc_cache_devs[HISI_SOC_L3C].lock);
+
 	/* Avoid null pointer when there is no instance onboard. */
 	if (soc_cache_devs[HISI_SOC_L3C].inst_num <= 0)
 		return ret;
-
-	guard(spinlock)(&soc_cache_devs[HISI_SOC_L3C].lock);
 
 	/* Iterate L3C instances to perform operation, break loop once found. */
 	head = &soc_cache_devs[HISI_SOC_L3C].node;
@@ -92,11 +92,11 @@ static int hisi_soc_cache_unlock(int cpu, phys_addr_t addr)
 	struct list_head *head;
 	int ret = 0;
 
+	guard(spinlock)(&soc_cache_devs[HISI_SOC_L3C].lock);
+
 	/* Avoid null pointer when there is no instance onboard. */
 	if (soc_cache_devs[HISI_SOC_L3C].inst_num <= 0)
 		return ret;
-
-	guard(spinlock)(&soc_cache_devs[HISI_SOC_L3C].lock);
 
 	/* Iterate L3C instances to perform operation, break loop once found. */
 	head = &soc_cache_devs[HISI_SOC_L3C].node;
@@ -154,19 +154,18 @@ static int hisi_soc_cache_maint_pte_entry(pte_t *pte, unsigned long addr,
 				unsigned long next, struct mm_walk *walk)
 {
 #ifdef HISI_SOC_CACHE_LLT
-	unsigned int mnt_type = *((unsigned int *)walk->priv);
+	struct hisi_soc_cache_ioctl_param *param = walk->priv;
 #else
-	unsigned int mnt_type = *((unsigned int *)walk->private);
+	struct hisi_soc_cache_ioctl_param *param = walk->private;
 #endif
-	size_t size = next - addr;
-	phys_addr_t paddr;
+	size_t size = min(next - addr, param->size + param->addr - addr);
+	unsigned long offset = offset_in_page(max(addr, param->addr));
+	phys_addr_t paddr = PFN_PHYS(pte_pfn(*pte)) + offset;
 
 	if (!pte_present(ptep_get(pte)))
 		return -EINVAL;
 
-	paddr = PFN_PHYS(pte_pfn(*pte)) + offset_in_page(addr);
-
-	return hisi_soc_cache_maintain(paddr, size, mnt_type);
+	return hisi_soc_cache_maintain(paddr, size, param->op_type);
 }
 
 static const struct mm_walk_ops hisi_soc_cache_maint_walk = {
@@ -421,12 +420,8 @@ static int hisi_soc_cache_mmap(struct file *file, struct vm_area_struct *vma)
 	if (ret)
 		goto out_clr;
 
-	if (vma->vm_pgoff > PAGE_SIZE)
-		return -EINVAL;
-
-	ret = remap_pfn_range(vma, vma->vm_start,
-			      (addr >> PAGE_SHIFT) + vma->vm_pgoff,
-			      size, vma->vm_page_prot);
+	ret = remap_pfn_range(vma, vma->vm_start, addr >> PAGE_SHIFT, size,
+			      vma->vm_page_prot);
 	if (ret)
 		goto out_page;
 
@@ -460,25 +455,24 @@ out_clr:
 	return ret;
 }
 
-static int __hisi_soc_cache_maintain(unsigned long __user vaddr, size_t size,
-				     enum hisi_soc_cache_maint_type mnt_type)
+static int __hisi_soc_cache_maintain(struct hisi_soc_cache_ioctl_param *param)
 {
-	unsigned long start = untagged_addr(vaddr);
+	unsigned long start = untagged_addr(param->addr);
 	struct vm_area_struct *vma;
 	int ret = 0;
 
 	/* MakeInvalid is not allowed for calls from userspace. */
-	if (mnt_type >= HISI_CACHE_MAINT_MAKEINVALID)
+	if (param->op_type >= HISI_CACHE_MAINT_MAKEINVALID)
 		return -EINVAL;
 
 	/* Prevent overflow of vaddr + size. */
-	if (!size || vaddr + size < vaddr)
+	if (!param->size || start + param->size < start)
 		return -EINVAL;
 
 	mmap_read_lock_killable(current->mm);
-	vma = vma_lookup(current->mm, vaddr);
 
-	if (!range_in_vma(vma, vaddr, vaddr + size)) {
+	vma = vma_lookup(current->mm, param->addr);
+	if (!range_in_vma(vma, start, start + param->size)) {
 		ret = -EINVAL;
 		goto out;
 	}
@@ -489,9 +483,9 @@ static int __hisi_soc_cache_maintain(unsigned long __user vaddr, size_t size,
 		goto out;
 	}
 
-	ret = walk_page_range(current->mm, start, start + size,
-			&hisi_soc_cache_maint_walk, &mnt_type);
-
+	ret = walk_page_range(current->mm, PAGE_ALIGN_DOWN(start),
+			PAGE_ALIGN(start + param->size),
+			&hisi_soc_cache_maint_walk, param);
 out:
 	mmap_read_unlock(current->mm);
 	return ret;
@@ -499,29 +493,21 @@ out:
 
 static long hisi_soc_cache_mgmt_ioctl(struct file *file, u32 cmd, unsigned long arg)
 {
-	struct hisi_soc_cache_ioctl_param *param =
-		kzalloc(sizeof(struct hisi_soc_cache_ioctl_param), GFP_KERNEL);
+	struct hisi_soc_cache_ioctl_param param;
 	long ret;
 
-	if (!param)
-		return -ENOMEM;
-
-	if (copy_from_user(param, (void __user *)arg, sizeof(*param))) {
-		ret = -EFAULT;
-		goto out;
-	}
+	if (copy_from_user(&param, (void __user *)arg, sizeof(param)))
+		return -EFAULT;
 
 	switch (cmd) {
 	case HISI_CACHE_MAINTAIN:
-		ret = __hisi_soc_cache_maintain(param->addr, param->size,
-						param->op_type);
+		ret = __hisi_soc_cache_maintain(&param);
 		break;
 	default:
 		ret = -EINVAL;
 		break;
 	}
-out:
-	kfree(param);
+
 	return ret;
 }
 

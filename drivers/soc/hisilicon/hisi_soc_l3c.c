@@ -239,7 +239,7 @@ static int hisi_soc_l3c_do_lock(struct hisi_soc_comp *l3c_comp,
 
 	regset = hisi_soc_l3c_alloc_lock_reg_set(soc_l3c, addr, size);
 	if (regset < 0)
-		return -EBUSY;
+		return regset;
 
 	if (!hisi_l3c_lock_ctrl_wait_finished(soc_l3c, regset,
 					      HISI_L3C_LOCK_CTRL_LOCK_DONE)) {
@@ -352,9 +352,6 @@ static void hisi_soc_l3c_remove_locks(struct hisi_soc_l3c *soc_l3c)
 	guard(spinlock)(&soc_l3c->reg_lock);
 
 	xa_for_each(&soc_l3c->lock_sets, regset, entry) {
-		timeout = hisi_l3c_lock_ctrl_wait_finished(soc_l3c, regset,
-						HISI_L3C_LOCK_CTRL_UNLOCK_DONE);
-
 		ctrl = readl(base + l3c_lock_reg_offset(HISI_L3C_LOCK_CTRL,
 							regset));
 		ctrl = (ctrl | HISI_L3C_LOCK_CTRL_UNLOCK_EN) &
@@ -504,12 +501,12 @@ static int hisi_soc_l3c_remove(struct platform_device *pdev)
 	unsigned long idx;
 	struct hisi_soc_l3c_lock_region *entry;
 
-	hisi_soc_l3c_remove_locks(soc_l3c);
-
 	hisi_soc_comp_inst_del(&soc_l3c->comp);
 
 	cpuhp_state_remove_instance_nocalls(hisi_l3c_cpuhp_state,
 					    &soc_l3c->node);
+
+	hisi_soc_l3c_remove_locks(soc_l3c);
 
 	xa_for_each(&soc_l3c->lock_sets, idx, entry) {
 		entry = xa_erase(&soc_l3c->lock_sets, idx);
@@ -592,7 +589,7 @@ static int __init hisi_soc_l3c_init(void)
 
 	ret = platform_driver_register(&hisi_soc_l3c_driver);
 	if (ret)
-		cpuhp_remove_multi_state(CPUHP_AP_ONLINE_DYN);
+		cpuhp_remove_multi_state(hisi_l3c_cpuhp_state);
 
 	return ret;
 }
@@ -601,7 +598,7 @@ module_init(hisi_soc_l3c_init);
 static void __exit hisi_soc_l3c_exit(void)
 {
 	platform_driver_unregister(&hisi_soc_l3c_driver);
-	cpuhp_remove_multi_state(CPUHP_AP_ONLINE_DYN);
+	cpuhp_remove_multi_state(hisi_l3c_cpuhp_state);
 }
 module_exit(hisi_soc_l3c_exit);
 
