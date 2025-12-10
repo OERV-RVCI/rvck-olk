@@ -57,7 +57,7 @@ struct dma_device *dma_get_device_list(u32 *num_devices)
 
 	xa_for_each(cdma_devs_tbl, index, cdev) {
 		attr = &cdev->base.attr;
-		if (cdev->status == CDMA_SUSPEND) {
+		if (cdev->status >= CDMA_SUSPEND) {
 			pr_warn("cdma device is not prepared, eid = 0x%x.\n",
 				attr->eid.dw0);
 			continue;
@@ -150,7 +150,7 @@ struct dma_device *dma_get_device_by_eid(struct dev_eid *eid)
 
 	xa_for_each(cdma_devs_tbl, index, cdev) {
 		attr = &cdev->base.attr;
-		if (cdev->status == CDMA_SUSPEND) {
+		if (cdev->status >= CDMA_SUSPEND) {
 			pr_warn("cdma device is not prepared, eid = 0x%x.\n",
 				attr->eid.dw0);
 			continue;
@@ -203,7 +203,7 @@ int dma_create_context(struct dma_device *dma_dev)
 		return -EINVAL;
 	}
 
-	if (cdev->status == CDMA_SUSPEND) {
+	if (cdev->status >= CDMA_SUSPEND) {
 		pr_warn("cdma device is not prepared, eid = 0x%x.\n",
 			dma_dev->attr.eid.dw0);
 		return -EINVAL;
@@ -302,7 +302,7 @@ int dma_alloc_queue(struct dma_device *dma_dev, int ctx_id, struct queue_cfg *cf
 		return -EINVAL;
 	}
 
-	if (cdev->status == CDMA_SUSPEND) {
+	if (cdev->status >= CDMA_SUSPEND) {
 		pr_warn("cdma device is not prepared, eid = 0x%x.\n",
 			dma_dev->attr.eid.dw0);
 		return -EINVAL;
@@ -367,7 +367,7 @@ void dma_free_queue(struct dma_device *dma_dev, int queue_id)
 	}
 
 	ctx_res = (struct cdma_ctx_res *)dma_dev->private_data;
-	queue = (struct cdma_queue *)xa_load(&ctx_res->queue_xa, queue_id);
+	queue = xa_load(&ctx_res->queue_xa, queue_id);
 	if (!queue) {
 		dev_err(cdev->dev, "no queue found in this device, id = %d\n",
 			queue_id);
@@ -414,7 +414,7 @@ struct dma_seg *dma_register_seg(struct dma_device *dma_dev, int ctx_id,
 		return NULL;
 	}
 
-	if (cdev->status == CDMA_SUSPEND) {
+	if (cdev->status >= CDMA_SUSPEND) {
 		pr_warn("cdma device is not prepared, eid = 0x%x.\n",
 			dma_dev->attr.eid.dw0);
 		return NULL;
@@ -558,7 +558,7 @@ static int cdma_param_transfer(struct dma_device *dma_dev, int queue_id,
 		return -EINVAL;
 	}
 
-	if (tmp_dev->status == CDMA_SUSPEND) {
+	if (tmp_dev->status >= CDMA_SUSPEND) {
 		pr_warn("cdma device is not prepared, eid = 0x%x.\n", eid);
 		return -EINVAL;
 	}
@@ -818,7 +818,7 @@ int dma_poll_queue(struct dma_device *dma_dev, int queue_id, u32 cr_cnt,
 		return -EINVAL;
 	}
 
-	if (cdev->status == CDMA_SUSPEND) {
+	if (cdev->status >= CDMA_SUSPEND) {
 		pr_warn("cdma device is not prepared, eid = 0x%x.\n", eid);
 		return -EINVAL;
 	}
