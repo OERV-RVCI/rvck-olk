@@ -89,7 +89,10 @@ static void xsched_task_free(struct kref *kref)
 	list_del(&ctx->ctx_node);
 	mutex_unlock(&xcu->ctx_list_lock);
 
+	mutex_lock(&xcu->xcu_lock);
+	dequeue_ctx(&ctx->xse, xcu);
 	kfree(ctx);
+	mutex_unlock(&xcu->xcu_lock);
 }
 
 struct xsched_cu *xcu_find(uint32_t type,
