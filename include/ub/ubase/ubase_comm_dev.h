@@ -18,7 +18,6 @@ struct iova_slot;
 #define UBASE_IOVA_COMM_PFN_CNT 1
 #define UBASE_MAX_DSCP		(64)
 #define UBASE_MAX_SL_NUM	(16U)
-#define UBASE_MAX_REQ_VL_NUM	(8U)
 #define UBASE_MAX_VL_NUM	(16U)
 #if UBASE_MAX_VL_NUM < IEEE_8021QAZ_MAX_TCS
 #error "UBASE_MAX_VL_NUM can't less than IEEE_8021QAZ_MAX_TCS"
@@ -144,7 +143,6 @@ struct ubase_caps {
  * struct ubase_res_caps - ubase resource capbilities
  * @max_cnt: the resource max count
  * @start_idx: start index
- * @reserved_cnt: reserved count
  * @depth: the queue depth of the resource
  */
 struct ubase_res_caps {
@@ -173,10 +171,6 @@ struct ubase_pmem_caps {
  * @jtg_max_cnt: jetty group max count
  * @rc_max_cnt: rc max count
  * @rc_que_depth: rc queue depth
- * @ccc_max_cnt: ccc max count
- * @dest_addr_max_cnt: dest addr max count
- * @seid_upi_max_cnt:seid upi max count
- * @tpm_max_cnt: tpm max count
  * @cqe_size: cqe size
  */
 struct ubase_adev_caps {
@@ -251,7 +245,6 @@ struct ubase_resource_space {
 
 /**
  * struct ubase_adev_qos - ubase auxiliary device qos information
- * @rdma_vl_num: rdma vl number
  * @rdma_tp_vl_num: rdma tp vl number
  * @rdma_ctp_vl_num: rdma ctp vl number
  * @rdma_tp_resp_vl_offset: rdma tp response vl offset,
@@ -260,15 +253,12 @@ struct ubase_resource_space {
  *			     rdma_ctp_resp_vl = rdma_ctp_resp_vl + rdma_ctp_resp_vl_offset
  * @max_vl: max vl number
  * @resv: reserved bits
- * @rdma_sl_num: rdma sl number
  * @rdma_tp_sl_num: rdma tp sl number
  * @rdma_ctp_sl_num: rdma ctp sl number
  * @nic_sl_num: nic sl number
  * @nic_vl_num: nic vl number
- * @rdma_vl: rdma vl
  * @rdma_tp_req_vl: rdma tp request vl
  * @rdma_ctp_req_vl: rdma ctp request vl
- * @rdma_sl: rdma sl
  * @rdma_tp_sl: rdma tp sl
  * @rdma_ctp_sl: rdma ctp sl
  * @nic_sl: nic sl
@@ -278,15 +268,11 @@ struct ubase_resource_space {
  */
 struct ubase_adev_qos {
 	/* udma/cdma resource */
-	u8	sl_num;
-	u8	sl[UBASE_MAX_SL_NUM];
 	u8	tp_sl_num;
 	u8	tp_sl[UBASE_MAX_SL_NUM];
 	u8	ctp_sl_num;
 	u8	ctp_sl[UBASE_MAX_SL_NUM];
 
-	u8	vl_num;
-	u8	vl[UBASE_MAX_VL_NUM];
 	u8	tp_vl_num;
 	u8	tp_resp_vl_offset;
 	u8	tp_req_vl[UBASE_MAX_VL_NUM];
@@ -318,22 +304,6 @@ struct ubase_ue_node {
 	u16			bus_ue_id;
 };
 
-struct ubase_ue_caps {
-	u8	ceq_vector_num;
-	u8	aeq_vector_num;
-	u32	aeqe_depth;
-	u32	ceqe_depth;
-	u32	jfs_max_cnt;
-	u32	jfs_depth;
-	u32	jfr_max_cnt;
-	u32	jfr_depth;
-	u32	jfc_max_cnt;
-	u32	jfc_depth;
-	u32	rc_max_cnt;
-	u32	rc_depth;
-	u32	jtg_max_cnt;
-};
-
 #define UBASE_BUS_EID_LEN 4
 
 /**
@@ -349,9 +319,13 @@ bool ubase_adev_ctrlq_supported(struct auxiliary_device *adev);
 bool ubase_adev_eth_mac_supported(struct auxiliary_device *adev);
 bool ubase_adev_mac_stats_supported(struct auxiliary_device *aux_dev);
 bool ubase_adev_prealloc_supported(struct auxiliary_device *aux_dev);
+bool ubase_adev_ip_over_urma_supported(struct auxiliary_device *adev);
+bool ubase_adev_ip_over_urma_utp_supported(struct auxiliary_device *adev);
+
 struct ubase_resource_space *ubase_get_io_base(struct auxiliary_device *adev);
 struct ubase_resource_space *ubase_get_mem_base(struct auxiliary_device *adev);
 struct ubase_caps *ubase_get_dev_caps(struct auxiliary_device *adev);
+const struct ubase_adev_com *ubase_get_mdrv_data(struct auxiliary_device *adev);
 struct ubase_adev_caps *ubase_get_unic_caps(struct auxiliary_device *adev);
 struct ubase_adev_caps *ubase_get_udma_caps(struct auxiliary_device *adev);
 struct ubase_adev_caps *ubase_get_cdma_caps(struct auxiliary_device *adev);

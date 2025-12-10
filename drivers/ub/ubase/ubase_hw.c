@@ -24,7 +24,7 @@ struct ubase_dma_buf_desc {
 	bool (*is_supported)(struct ubase_dev *dev);
 };
 
-#define UBASE_DEFINE_DMA_BUFS(udev) \
+#define UBASE_DEFINE_TA_DMA_BUFS(udev) \
 	struct ubase_dma_buf_desc bufs[] = { \
 		{ &(udev)->ta_ctx.extdb_buf, UBASE_OPC_TA_EXTDB_VA_CONFIG, \
 		  &ubase_dev_ta_extdb_buf_supported }, \
@@ -107,7 +107,7 @@ static void ubase_check_dev_caps_comm(struct ubase_dev *udev)
 
 static int ubase_check_dev_caps_extdb(struct ubase_dev *udev)
 {
-	UBASE_DEFINE_DMA_BUFS(udev);
+	UBASE_DEFINE_TA_DMA_BUFS(udev);
 	int i;
 
 	for (i = 0; i < ARRAY_SIZE(bufs); i++) {
@@ -586,7 +586,7 @@ static void ubase_uninit_dma_buf(struct ubase_dev *udev,
 
 static int ubase_init_ta_ext_buf(struct ubase_dev *udev)
 {
-	UBASE_DEFINE_DMA_BUFS(udev);
+	UBASE_DEFINE_TA_DMA_BUFS(udev);
 	int i, ret;
 
 	for (i = 0; i < ARRAY_SIZE(bufs); i++) {
@@ -610,7 +610,7 @@ err_out:
 
 static void ubase_uninit_ta_ext_buf(struct ubase_dev *udev)
 {
-	UBASE_DEFINE_DMA_BUFS(udev);
+	UBASE_DEFINE_TA_DMA_BUFS(udev);
 	int i;
 
 	for (i = 0; i < ARRAY_SIZE(bufs); i++) {
@@ -649,16 +649,27 @@ int ubase_query_hw_oor_caps(struct ubase_dev *udev)
 
 int ubase_query_port_bitmap(struct ubase_dev *udev)
 {
+#define OPCODE_CNT 2
+
 	struct ubase_caps *dev_caps = &udev->caps.dev_caps;
 	struct ubase_query_port_bitmap_resp resp = {0};
+	enum ubase_opcode_type opcode[OPCODE_CNT];
 	struct ubase_cmd_buf in, out;
-	int ret;
+	int ret, i;
 
-	ubase_fill_inout_buf(&in, UBASE_OPC_QUERY_PORT_BITMAP, true, 0, NULL);
-	ubase_fill_inout_buf(&out, UBASE_OPC_QUERY_PORT_BITMAP, true,
-			     sizeof(resp), &resp);
+	opcode[0] = UBASE_OPC_QUERY_UB_PORT_BITMAP;
+	opcode[1] = UBASE_OPC_QUERY_PORT_BITMAP;
 
-	ret = __ubase_cmd_send_inout(udev, &in, &out);
+	for (i = 0; i < OPCODE_CNT; i++) {
+		ubase_fill_inout_buf(&in, opcode[i], true, 0, NULL);
+		ubase_fill_inout_buf(&out, opcode[i], true, sizeof(resp), &resp);
+		ret = __ubase_cmd_send_inout(udev, &in, &out);
+		if (ret != -EOPNOTSUPP)
+			break;
+
+		dev_warn(udev->dev,
+			 "The function of querying real-time traffic in UBOE mode is not supported.\n");
+	}
 	if (ret && ret != -EPERM) {
 		dev_err(udev->dev,
 			"failed to query port bitmap, ret = %d.\n", ret);

@@ -46,6 +46,7 @@ MODULE_PARM_DESC(debug, "enable unic debug log, 0:disable, others:enable, defaul
 
 #define DEFAULT_MSG_LEVEL (NETIF_MSG_PROBE | NETIF_MSG_LINK | \
 			   NETIF_MSG_IFDOWN | NETIF_MSG_IFUP)
+#define DEFAULT_RSS_SIZE 1
 
 static struct workqueue_struct *unic_wq;
 
@@ -308,7 +309,7 @@ static int unic_init_channels_attr(struct unic_dev *unic_dev)
 
 	channels->vl.vl_num = 1;
 	channels->rss_vl_num = 1;
-	channels->rss_size = 1;
+	channels->rss_size = DEFAULT_RSS_SIZE;
 	channels->num = channels->rss_size * channels->rss_vl_num;
 	channels->sqebb_depth = unic_caps->jfs.depth;
 	channels->rqe_depth = unic_caps->jfr.depth;
@@ -994,10 +995,9 @@ int unic_change_rss_size(struct unic_dev *unic_dev, u32 new_rss_size,
 	struct unic_channels *channels = &unic_dev->channels;
 	int ret;
 
-	dev_info(unic_dev->comdev.adev->dev.parent,
-		 "change rss_size from %u to %u.\n", org_rss_size, new_rss_size);
-
 	mutex_lock(&channels->mutex);
+
+	set_bit(UNIC_STATE_CHANNEL_INVALID, &unic_dev->state);
 	__unic_uninit_channels(unic_dev);
 
 	channels->rss_size = new_rss_size;
@@ -1009,6 +1009,8 @@ int unic_change_rss_size(struct unic_dev *unic_dev, u32 new_rss_size,
 	if (ret)
 		dev_err(unic_dev->comdev.adev->dev.parent,
 			"failed to change rss_size, ret = %d.\n", ret);
+	else
+		clear_bit(UNIC_STATE_CHANNEL_INVALID, &unic_dev->state);
 
 	mutex_unlock(&channels->mutex);
 
@@ -1017,17 +1019,12 @@ int unic_change_rss_size(struct unic_dev *unic_dev, u32 new_rss_size,
 
 int unic_update_channels(struct unic_dev *unic_dev, u8 vl_num)
 {
-	struct auxiliary_device *adev = unic_dev->comdev.adev;
 	struct unic_channels *channels = &unic_dev->channels;
-	u32 new_rss_size, old_rss_size = channels->rss_size;
+	u32 old_rss_size = channels->rss_size;
 
 	channels->rss_vl_num = unic_get_rss_vl_num(unic_dev, vl_num);
-	if (old_rss_size * channels->rss_vl_num > unic_channels_max_num(adev))
-		new_rss_size = unic_get_max_rss_size(unic_dev);
-	else
-		new_rss_size = old_rss_size;
 
-	return unic_change_rss_size(unic_dev, new_rss_size, old_rss_size);
+	return unic_change_rss_size(unic_dev, DEFAULT_RSS_SIZE, old_rss_size);
 }
 
 static struct net_device *unic_alloc_netdev(struct auxiliary_device *adev)
@@ -1096,7 +1093,7 @@ int unic_dev_init(struct auxiliary_device *adev)
 		goto err_unregister_event;
 	}
 
-	unic_query_ip_by_ctrlq(adev);
+	unic_query_ip_addr(adev);
 	unic_start_dev_period_task(netdev);
 
 	return 0;

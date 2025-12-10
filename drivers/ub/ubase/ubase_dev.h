@@ -42,6 +42,30 @@
 	dev_warn(_udev->dev, "(pid %d) " fmt,                                 \
 		 current->pid, ##__VA_ARGS__)
 
+#define ubase_err_rl(_udev, log_cnt, fmt, ...) do {                           \
+	if (__ratelimit(&(_udev->log_rs.rs)))                                   \
+		dev_err(_udev->dev, "(pid %d) " fmt,                          \
+			 current->pid, ##__VA_ARGS__);                        \
+	else                                                                  \
+		(log_cnt)++;                                                  \
+} while (0)
+
+#define ubase_info_rl(_udev, log_cnt, fmt, ...) do {                          \
+	if (__ratelimit(&(_udev->log_rs.rs)))                                   \
+		dev_info(_udev->dev, "(pid %d) " fmt,                         \
+			 current->pid, ##__VA_ARGS__);                        \
+	else                                                                  \
+		(log_cnt)++;                                                  \
+} while (0)
+
+#define ubase_warn_rl(_udev, log_cnt, fmt, ...) do {                          \
+	if (__ratelimit(&(_udev->log_rs.rs)))                                   \
+		dev_warn(_udev->dev, "(pid %d) " fmt,                         \
+			 current->pid, ##__VA_ARGS__);                        \
+	else                                                                  \
+		(log_cnt)++;                                                  \
+} while (0)
+
 struct ubase_adev {
 	struct auxiliary_device adev;
 	struct ubase_dev *udev;
@@ -70,7 +94,6 @@ struct ubase_dev_caps {
 	struct ubase_adev_caps	udma_caps;
 	struct ubase_adev_caps	unic_caps;
 	struct ubase_caps	dev_caps;
-	struct ubase_ue_caps	ue_caps;
 };
 
 struct ubase_mbox_cmd {
@@ -125,6 +148,7 @@ enum ubase_dev_state_bit {
 	UBASE_STATE_HIMAC_RESETTING_B,
 	UBASE_STATE_CTX_READY_B,
 	UBASE_STATE_PREALLOC_OK_B,
+	UBASE_STATE_RST_WAIT_DEACTIVE_B,
 };
 
 struct ubase_crq_event_nbs {
@@ -253,12 +277,19 @@ struct ubase_prealloc_mem_info {
 	struct ubase_pmem_ctx	udma;
 };
 
+struct ubase_log_rs {
+	struct ratelimit_state rs;
+	u16 ctrlq_self_seq_invalid_log_cnt;
+	u16 ctrlq_other_seq_invalid_log_cnt;
+};
+
 struct ubase_dev {
 	struct device		*dev;
 	int			dev_id;
 	struct ubase_priv	priv;
 	struct ubase_hw		hw;
 
+	bool			use_fixed_rc_num;
 	struct ubase_dev_caps	caps;
 	struct ubase_adev_qos	qos;
 	struct ubase_dbgfs	dbgfs;
@@ -293,6 +324,7 @@ struct ubase_dev {
 	struct ubase_arq_msg_ring	arq;
 	struct ubase_prealloc_mem_info	pmem_info;
 	u8			dev_mac[ETH_ALEN];
+	struct ubase_log_rs	log_rs;
 };
 
 #define UBASE_ERR_MSG_LEN	128
