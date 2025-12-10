@@ -340,6 +340,7 @@ static int cgroup_ifs_tsc_init(void)
 #endif
 	if (!freq) {
 		pr_warn("Disable CGROUP IFS: no constant tsc\n");
+		ifs_enable = false;
 		return -1;
 	}
 
