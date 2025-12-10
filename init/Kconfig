@@ -1390,6 +1390,7 @@ config CGROUP_FILES
 config CGROUP_IFS
 	bool "Cgroup-based Interference Statistics"
 	default n
+	depends on X86 || ARM64
 	select KERNFS
 	select IRQ_TIME_ACCOUTING
 	help
