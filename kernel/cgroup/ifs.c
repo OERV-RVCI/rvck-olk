@@ -477,6 +477,16 @@ static int cgroup_ifs_show(struct seq_file *seq, void *v)
 		return -EINVAL;
 	}
 
+#ifdef CONFIG_CGROUP_CPUACCT
+	if ((!cgroup_subsys_on_dfl(cpuacct_cgrp_subsys) && cgroup_on_dfl(cgrp)) ||
+	    (cgroup_subsys_on_dfl(cpuacct_cgrp_subsys) && !cgroup_on_dfl(cgrp))) {
+		pr_info("cgroup version mismatch: subsystem %s, cgroup %s\n",
+			cgroup_subsys_on_dfl(cpuacct_cgrp_subsys) ? "v2" : "v1",
+			cgroup_on_dfl(cgrp) ? "v2" : "v1");
+		return -EOPNOTSUPP;
+	}
+#endif
+
 	ret = print_sum_time(ifs, seq);
 	if (ret)
 		return ret;
