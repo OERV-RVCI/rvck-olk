@@ -587,4 +587,14 @@ static __init int cgroup_ifs_enable(void)
 	static_branch_enable(&cgrp_ifs_enabled);
 	return 0;
 }
-late_initcall_sync(cgroup_ifs_enable);
+
+/*
+ * Execution Timing Constraints:
+ * 1. Must be late enough (e.g., after SUBSYS_INITCALL) to avoid the
+ * intermediate state of the core cgroup subsystem initialization, ensuring
+ * all internal structures are stable.
+ * 2. Must execute strictly before cgroup_v1_ifs_init(), which runs at
+ * LATE_INITCALL_SYNC, as cgroup_v1_ifs_init() relies on 'cgrp_ifs_enabled'
+ * being set before its execution begins.
+ */
+device_initcall(cgroup_ifs_enable);
