@@ -95,36 +95,21 @@ static inline uint32_t get_next_prio_rt(struct xsched_rq *xrq)
 
 static struct xsched_entity *pick_next_ctx_rt(struct xsched_cu *xcu)
 {
-	struct xsched_entity *result;
 	int next_prio;
 
 	next_prio = get_next_prio_rt(&xcu->xrq);
-	if (next_prio >= NR_XSE_PRIO) {
-		XSCHED_DEBUG("No pending kicks in RT class @ %s\n", __func__);
+	if (next_prio >= NR_XSE_PRIO)
 		return NULL;
-	}
 
-	result = xrq_next_xse(xcu, next_prio);
-	if (!result)
-		XSCHED_ERR("Next XSE not found @ %s\n", __func__);
-	else
-		XSCHED_DEBUG("Next XSE %u at prio %u @ %s\n", result->tgid, next_prio, __func__);
-
-	return result;
+	return xrq_next_xse(xcu, next_prio);
 }
 
 static void put_prev_ctx_rt(struct xsched_entity *xse)
 {
 	xse->rt.timeslice -= xse->last_exec_runtime;
-	XSCHED_DEBUG(
-		"Update XSE=%d timeslice=%lld, XSE submitted=%lld in RT class @ %s\n",
-		xse->tgid, xse->rt.timeslice,
-		xse->last_exec_runtime, __func__);
 
 	if (xse->rt.timeslice <= 0) {
 		xse->rt.timeslice = XSCHED_RT_TIMESLICE;
-		XSCHED_DEBUG("Refill XSE=%d kick_slice=%lld in RT class @ %s\n",
-			    xse->tgid, xse->rt.timeslice, __func__);
 		xse_rt_move_tail(xse);
 	}
 }

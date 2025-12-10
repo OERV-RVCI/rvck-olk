@@ -31,27 +31,33 @@ struct xsched_group *root_xcg = &root_xsched_group;
 static struct kmem_cache *xsched_group_cache __read_mostly;
 static struct kmem_cache *xcg_attach_entry_cache __read_mostly;
 static LIST_HEAD(xcg_attach_list);
+static DEFINE_MUTEX(xcg_mutex);
+static DEFINE_MUTEX(xcu_file_show_mutex);
 
 static const char xcu_sched_name[XSCHED_TYPE_NUM][4] = {
 	[XSCHED_TYPE_RT] = "rt",
 	[XSCHED_TYPE_CFS] = "cfs"
 };
 
-static int xcu_cg_set_file_show(struct xsched_group *xg)
+static int xcu_cg_set_file_show(struct xsched_group *xg, int sched_class)
 {
 	if (!xg) {
 		XSCHED_ERR("xsched_group is NULL.\n");
 		return -EINVAL;
 	}
 
+	mutex_lock(&xcu_file_show_mutex);
 	/* Update visibility of related files based on sched_class */
 	for (int type_name = XCU_FILE_PERIOD_MS; type_name < NR_XCU_FILE_TYPES; type_name++) {
-		if (unlikely(!xg->xcu_file[type_name].kn))
+		if (unlikely(!xg->xcu_file[type_name].kn)) {
+			mutex_unlock(&xcu_file_show_mutex);
 			return -EBUSY;
+		}
 
-		cgroup_file_show(&xg->xcu_file[type_name], xg->sched_class == XSCHED_TYPE_CFS);
+		cgroup_file_show(&xg->xcu_file[type_name], sched_class == XSCHED_TYPE_CFS);
 	}
 
+	mutex_unlock(&xcu_file_show_mutex);
 	return 0;
 }
 
@@ -72,6 +78,7 @@ static void xcu_cg_initialize_components(struct xsched_group *xcg)
 	INIT_LIST_HEAD(&xcg->children_groups);
 	xsched_quota_timeout_init(xcg);
 	INIT_WORK(&xcg->refill_work, xsched_quota_refill);
+	WRITE_ONCE(xcg->is_offline, false);
 }
 
 void xcu_cg_subsys_init(void)
@@ -98,6 +105,21 @@ void xcu_cfs_root_cg_init(struct xsched_cu *xcu)
 	root_xcg->perxcu_priv[id].xse.cfs.weight = XSCHED_CFS_WEIGHT_DFLT;
 }
 
+static void xcg_perxcu_cfs_rq_deinit(struct xsched_group *xcg, int max_id)
+{
+	struct xsched_cu *xcu;
+	int i;
+
+	for (i = 0; i < max_id; i++) {
+		xcu = xsched_cu_mgr[i];
+		mutex_lock(&xcu->xcu_lock);
+		dequeue_ctx(&xcg->perxcu_priv[i].xse, xcu);
+		kfree(xcg->perxcu_priv[i].cfs_rq);
+		xcg->perxcu_priv[i].cfs_rq = NULL;
+		mutex_unlock(&xcu->xcu_lock);
+	}
+}
+
 /**
  * xcu_cfs_cg_init() - Initialize xsched_group cfs runqueues and bw control.
  * @xcg: new xsched_cgroup
@@ -110,7 +132,7 @@ void xcu_cfs_root_cg_init(struct xsched_cu *xcu)
 static int xcu_cfs_cg_init(struct xsched_group *xcg,
 				struct xsched_group *parent_xg)
 {
-	int id = 0, err, i;
+	int id = 0;
 	struct xsched_cu *xcu;
 	struct xsched_rq_cfs *sub_cfs_rq;
 
@@ -118,11 +140,11 @@ static int xcu_cfs_cg_init(struct xsched_group *xcg,
 		xcg->perxcu_priv[id].xcu_id = id;
 		xcg->perxcu_priv[id].self = xcg;
 
-		sub_cfs_rq = kzalloc(sizeof(struct xsched_rq_cfs), GFP_KERNEL);
+		sub_cfs_rq = kzalloc(sizeof(*sub_cfs_rq), GFP_KERNEL);
 		if (!sub_cfs_rq) {
 			XSCHED_ERR("Fail to alloc cfs runqueue on xcu %d\n", id);
-			err = -ENOMEM;
-			goto alloc_error;
+			xcg_perxcu_cfs_rq_deinit(xcg, id);
+			return -ENOMEM;
 		}
 		xcg->perxcu_priv[id].cfs_rq = sub_cfs_rq;
 		xcg->perxcu_priv[id].cfs_rq->ctx_timeline = RB_ROOT_CACHED;
@@ -142,38 +164,18 @@ static int xcu_cfs_cg_init(struct xsched_group *xcg,
 	}
 
 	xcg->shares_cfg = XSCHED_CFG_SHARE_DFLT;
-	xcu_grp_shares_update(parent_xg);
+	xcu_grp_shares_add(parent_xg, xcg);
 	xcg->period = XSCHED_CFS_QUOTA_PERIOD_MS;
 	xcg->quota = XSCHED_TIME_INF;
 	xcg->runtime = 0;
 
 	return 0;
-
-alloc_error:
-	for (i = 0; i < id; i++) {
-		xcu = xsched_cu_mgr[i];
-		mutex_lock(&xcu->xcu_lock);
-		dequeue_ctx(&xcg->perxcu_priv[i].xse, xcu);
-		mutex_unlock(&xcu->xcu_lock);
-
-		kfree(xcg->perxcu_priv[i].cfs_rq);
-	}
-
-	return err;
 }
 
 static void xcu_cfs_cg_deinit(struct xsched_group *xcg)
 {
-	uint32_t id;
-	struct xsched_cu *xcu;
-
-	for_each_active_xcu(xcu, id) {
-		mutex_lock(&xcu->xcu_lock);
-		dequeue_ctx(&xcg->perxcu_priv[id].xse, xcu);
-		mutex_unlock(&xcu->xcu_lock);
-		kfree(xcg->perxcu_priv[id].cfs_rq);
-	}
-	xcu_grp_shares_update(xcg->parent);
+	xcg_perxcu_cfs_rq_deinit(xcg, num_active_xcu);
+	xcu_grp_shares_sub(xcg->parent, xcg);
 }
 
 /**
@@ -230,7 +232,7 @@ xcu_css_alloc(struct cgroup_subsys_state *parent_css)
 	if (!parent_css)
 		return &root_xsched_group.css;
 
-	xg = kmem_cache_alloc(xsched_group_cache, GFP_KERNEL | __GFP_ZERO);
+	xg = kmem_cache_zalloc(xsched_group_cache, GFP_KERNEL);
 	if (!xg)
 		return ERR_PTR(-ENOMEM);
 
@@ -241,9 +243,22 @@ static void xcu_css_free(struct cgroup_subsys_state *css)
 {
 	struct xsched_group *xcg = xcu_cg_from_css(css);
 
+	if (!xsched_group_is_root(xcg)) {
+		switch (xcg->sched_class) {
+		case XSCHED_TYPE_CFS:
+			xcu_cfs_cg_deinit(xcg);
+			break;
+		default:
+			XSCHED_INFO("xcu_cgroup: deinit RT group css=0x%lx\n",
+			       (uintptr_t)&xcg->css);
+			break;
+		}
+	}
+
+	list_del(&xcg->group_node);
+
 	kmem_cache_free(xsched_group_cache, xcg);
 }
-
 
 static void delay_xcu_cg_set_file_show_workfn(struct work_struct *work)
 {
@@ -251,8 +266,13 @@ static void delay_xcu_cg_set_file_show_workfn(struct work_struct *work)
 
 	xg = container_of(work, struct xsched_group, file_show_work);
 
+	if (!xg) {
+		XSCHED_ERR("xsched_group cannot be null @ %s", __func__);
+		return;
+	}
+
 	for (int i = 0; i < XCUCG_SET_FILE_RETRY_COUNT; i++) {
-		if (!xcu_cg_set_file_show(xg))
+		if (!xcu_cg_set_file_show(xg, xg->sched_class))
 			return;
 
 		mdelay(XCUCG_SET_FILE_DELAY_MS);
@@ -292,20 +312,12 @@ static void xcu_css_offline(struct cgroup_subsys_state *css)
 	struct xsched_group *xcg;
 
 	xcg = xcu_cg_from_css(css);
-	if (!xsched_group_is_root(xcg)) {
-		switch (xcg->sched_class) {
-		case XSCHED_TYPE_CFS:
-			xcu_cfs_cg_deinit(xcg);
-			break;
-		default:
-			XSCHED_INFO("xcu_cgroup: deinit RT group css=0x%lx\n",
-			       (uintptr_t)&xcg->css);
-			break;
-		}
-	}
+
+	WRITE_ONCE(xcg->is_offline, true);
+
 	hrtimer_cancel(&xcg->quota_timeout);
 	cancel_work_sync(&xcg->refill_work);
-	list_del(&xcg->group_node);
+	cancel_work_sync(&xcg->file_show_work);
 }
 
 static void xsched_group_xse_attach(struct xsched_group *xg,
@@ -360,18 +372,20 @@ static int xcu_can_attach(struct cgroup_taskset *tset)
 		old_xcg = xcu_cg_from_css(old_css);
 
 		ret = xcu_task_can_attach(task, old_xcg);
-		if (ret)
-			break;
+		if (ret < 0)
+			return ret;
 
 		/* record entry for this task */
-		entry = kmem_cache_alloc(xcg_attach_entry_cache, GFP_KERNEL | __GFP_ZERO);
+		entry = kmem_cache_zalloc(xcg_attach_entry_cache, GFP_KERNEL);
+		if (!entry)
+			return -ENOMEM;
 		entry->task = task;
 		entry->old_xcg = old_xcg;
 		entry->new_xcg = dst_xcg;
 		list_add_tail(&entry->node, &xcg_attach_list);
 	}
 
-	return ret;
+	return 0;
 }
 
 static void xcu_cancel_attach(struct cgroup_taskset *tset)
@@ -496,22 +510,17 @@ static int xcu_cg_set_sched_class(struct xsched_group *xg, int type)
 		xcu_cfs_cg_deinit(xg);
 		break;
 	default:
-		XSCHED_INFO("xcu_cgroup: the original sched_class is RT, css=0x%lx\n",
-			       (uintptr_t)&xg->css);
 		break;
 	}
 
 	/* update type */
 	xg->sched_class = type;
-	xcu_cg_set_file_show(xg);
 
 	/* init new type if necessary */
 	switch (type) {
 	case XSCHED_TYPE_CFS:
 		return xcu_cfs_cg_init(xg, xg->parent);
 	default:
-		XSCHED_INFO("xcu_cgroup: the target sched_class is RT, css=0x%lx\n",
-			       (uintptr_t)&xg->css);
 		return 0;
 	}
 }
@@ -520,7 +529,7 @@ static ssize_t xcu_sched_class_write(struct kernfs_open_file *of, char *buf,
 				size_t nbytes, loff_t off)
 {
 	struct cgroup_subsys_state *css = of_css(of);
-	struct xsched_group *xg = xcu_cg_from_css(css);
+	struct xsched_group *xg;
 	char type_name[SCHED_CLASS_MAX_LENGTH];
 	int type;
 
@@ -533,20 +542,31 @@ static ssize_t xcu_sched_class_write(struct kernfs_open_file *of, char *buf,
 		if (!strcmp(type_name, xcu_sched_name[type]))
 			break;
 	}
-
 	if (type == XSCHED_TYPE_NUM)
 		return -EINVAL;
 
 	if (!list_empty(&css->children))
 		return -EBUSY;
 
+	css_get(css);
+	xg = xcu_cg_from_css(css);
+
 	/* only the first level of root can switch scheduler type */
-	if (!xsched_group_is_root(xg->parent))
+	if (!xsched_group_is_root(xg->parent)) {
+		css_put(css);
 		return -EINVAL;
+	}
 
+	mutex_lock(&xcg_mutex);
 	ret = xcu_cg_set_sched_class(xg, type);
+	mutex_unlock(&xcg_mutex);
 
-	return (ret) ? ret : nbytes;
+	if (!ret)
+		xcu_cg_set_file_show(xg, type);
+
+	css_put(css);
+
+	return ret ? ret : nbytes;
 }
 
 static s64 xcu_read_s64(struct cgroup_subsys_state *css, struct cftype *cft)
@@ -573,57 +593,68 @@ static s64 xcu_read_s64(struct cgroup_subsys_state *css, struct cftype *cft)
 	return ret;
 }
 
-void xcu_grp_shares_update(struct xsched_group *parent)
+void xcu_grp_shares_update(struct xsched_group *parent, struct xsched_group *child, u32 shares_cfg)
 {
 	int id;
 	struct xsched_cu *xcu;
-	struct xsched_group *children;
-	u64 rem, sh_sum = 0, sh_gcd = 0, w_gcd = 0, sh_prod_red = 1;
 
-	lockdep_assert_held(&cgroup_mutex);
+	if (child->sched_class != XSCHED_TYPE_CFS)
+		return;
 
-	list_for_each_entry(children, &parent->children_groups, group_node) {
-		if (children->sched_class == XSCHED_TYPE_CFS)
-			sh_gcd = gcd(sh_gcd, children->shares_cfg);
+	parent->children_shares_sum -= child->shares_cfg;
+
+	child->shares_cfg = shares_cfg;
+	child->weight = child->shares_cfg;
+
+	for_each_active_xcu(xcu, id) {
+		mutex_lock(&xcu->xcu_lock);
+		child->perxcu_priv[id].xse.cfs.weight = child->weight;
+		mutex_unlock(&xcu->xcu_lock);
 	}
 
-	list_for_each_entry(children, &parent->children_groups, group_node) {
-		if (children->sched_class == XSCHED_TYPE_CFS) {
-			sh_sum += children->shares_cfg;
-			children->shares_cfg_red = div64_u64(children->shares_cfg, sh_gcd);
-			div64_u64_rem(sh_prod_red, children->shares_cfg_red, &rem);
-			if (rem)
-				sh_prod_red *= children->shares_cfg_red;
-		}
+	parent->children_shares_sum += child->shares_cfg;
+}
+
+void xcu_grp_shares_add(struct xsched_group *parent, struct xsched_group *child)
+{
+	int id;
+	struct xsched_cu *xcu;
+
+	if (child->sched_class != XSCHED_TYPE_CFS)
+		return;
+
+	child->weight = child->shares_cfg;
+	for_each_active_xcu(xcu, id) {
+		mutex_lock(&xcu->xcu_lock);
+		child->perxcu_priv[id].xse.cfs.weight = child->weight;
+		mutex_unlock(&xcu->xcu_lock);
 	}
 
-	parent->children_shares_sum = sh_sum;
+	parent->children_shares_sum += child->shares_cfg;
+}
 
-	list_for_each_entry(children, &parent->children_groups, group_node) {
-		if (children->sched_class == XSCHED_TYPE_CFS) {
-			children->weight = div64_u64(sh_prod_red, children->shares_cfg_red);
-			w_gcd = gcd(w_gcd, children->weight);
-		}
-	}
+void xcu_grp_shares_sub(struct xsched_group *parent, struct xsched_group *child)
+{
+	if (child->sched_class != XSCHED_TYPE_CFS)
+		return;
 
-	list_for_each_entry(children, &parent->children_groups, group_node) {
-		if (children->sched_class == XSCHED_TYPE_CFS) {
-			children->weight = div64_u64(children->weight, w_gcd);
-			for_each_active_xcu(xcu, id) {
-				mutex_lock(&xcu->xcu_lock);
-				children->perxcu_priv[id].xse.cfs.weight = children->weight;
-				mutex_unlock(&xcu->xcu_lock);
-			}
-		}
-	}
+	parent->children_shares_sum -= child->shares_cfg;
 }
 
 static int xcu_write_s64(struct cgroup_subsys_state *css, struct cftype *cft,
 			s64 val)
 {
 	int ret = 0;
-	struct xsched_group *xcucg = xcu_cg_from_css(css);
+	struct xsched_group *xcucg;
 	s64 quota_ns;
+
+	css_get(css);
+	xcucg = xcu_cg_from_css(css);
+
+	if (xcucg->sched_class == XSCHED_TYPE_RT) {
+		css_put(css);
+		return -EINVAL;
+	}
 
 	switch (cft->private) {
 	case XCU_FILE_PERIOD_MS:
@@ -649,20 +680,19 @@ static int xcu_write_s64(struct cgroup_subsys_state *css, struct cftype *cft,
 		xsched_quota_timeout_update(xcucg);
 		break;
 	case XCU_FILE_SHARES:
-		if (val < XCU_SHARES_MIN || val > U64_MAX) {
+		if (val < XCU_SHARES_MIN || val > U32_MAX) {
 			ret = -EINVAL;
 			break;
 		}
-		cgroup_lock();
-		xcucg->shares_cfg = val;
-		xcu_grp_shares_update(xcucg->parent);
-		cgroup_unlock();
+		xcu_grp_shares_update(xcucg->parent, xcucg, val);
 		break;
 	default:
 		XSCHED_ERR("invalid operation %lu @ %s\n", cft->private, __func__);
 		ret = -EINVAL;
 		break;
 	}
+
+	css_put(css);
 
 	return ret;
 }
@@ -690,7 +720,7 @@ static int xcu_stat(struct seq_file *sf, void *v)
 	}
 
 	seq_printf(sf, "exec_runtime:	%llu\n", exec_runtime);
-	seq_printf(sf, "shares cfg:	%llu/%llu x%u\n", xcucg->shares_cfg,
+	seq_printf(sf, "shares cfg:	%u/%llu x%u\n", xcucg->shares_cfg,
 		   xcucg->parent->children_shares_sum, xcucg->weight);
 	seq_printf(sf, "quota:	%lld\n", xcucg->quota);
 	seq_printf(sf, "used:	%lld\n", xcucg->runtime);

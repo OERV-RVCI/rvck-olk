@@ -110,8 +110,6 @@ static struct xsched_entity *__raw_pick_next_ctx(struct xsched_cu *xcu)
 				return NULL;
 			}
 
-			XSCHED_DEBUG("xse %d scheduled=%zu total=%zu @ %s\n",
-				next->tgid, scheduled, next->total_scheduled, __func__);
 			break;
 		}
 	}
@@ -230,8 +228,6 @@ static void submit_kick(struct vstream_metadata *vsm)
 		XSCHED_ERR(
 			"Fail to send Vstream id %u tasks to a device for processing.\n",
 			vs->id);
-
-	XSCHED_DEBUG("Vstream id %u submit vsm: sq_tail %u\n", vs->id, vsm->sq_tail);
 }
 
 static void submit_wait(struct vstream_metadata *vsm)
@@ -347,11 +343,8 @@ struct vstream_metadata *xsched_vsm_fetch_first(struct vstream_info *vs)
 {
 	struct vstream_metadata *vsm;
 
-	if (!vs || list_empty(&vs->metadata_list)) {
-		XSCHED_DEBUG("No metadata to fetch from vs %u @ %s\n",
-			vs->id, __func__);
+	if (!vs || list_empty(&vs->metadata_list))
 		return NULL;
-	}
 
 	spin_lock(&vs->stream_lock);
 	vsm = list_first_entry(&vs->metadata_list, struct vstream_metadata, node);
