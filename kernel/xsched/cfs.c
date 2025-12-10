@@ -62,7 +62,6 @@ static void xs_cfs_rq_update(struct xsched_entity_cfs *xse_cfs, u64 new_xrt)
 static inline struct xsched_entity_cfs *
 xs_pick_first(struct xsched_rq_cfs *cfs_rq)
 {
-	struct xsched_entity_cfs *xse_cfs;
 	struct rb_node *left;
 
 	if (!cfs_rq) {
@@ -75,8 +74,7 @@ xs_pick_first(struct xsched_rq_cfs *cfs_rq)
 	if (!left)
 		return NULL;
 
-	xse_cfs = rb_entry(left, struct xsched_entity_cfs, run_node);
-	return xse_cfs;
+	return rb_entry(left, struct xsched_entity_cfs, run_node);
 }
 
 /**
@@ -114,11 +112,8 @@ static void xg_update(struct xsched_group_xcu_priv *xg, int task_delta)
 	for (; xg; xg = &xcg_parent_grp_xcu(xg)) {
 		xg->cfs_rq->nr_running += task_delta;
 		entry = xs_pick_first(xg->cfs_rq);
-		if (entry)
-			new_xrt = xs_calc_delta_fair(xg->xse.cfs.sum_exec_runtime,
-					xg->xse.cfs.weight);
-		else
-			new_xrt = XSCHED_TIME_INF;
+		new_xrt = entry ? xs_calc_delta_fair(entry->xruntime, xg->xse.cfs.weight)
+			: XSCHED_TIME_INF;
 
 		xg->cfs_rq->min_xruntime = new_xrt;
 		xg->xse.cfs.xruntime = new_xrt;
@@ -209,10 +204,13 @@ static struct xsched_entity *pick_next_ctx_fair(struct xsched_cu *xcu)
 	if (!xse)
 		return NULL;
 
-	for (; XSCHED_SE_OF(xse)->is_group; xse = xs_pick_first(rq)) {
-		if (!xse || CFS_INNER_RQ_EMPTY(xse))
-			return NULL;
+	for (; xse && XSCHED_SE_OF(xse)->is_group; xse = xs_pick_first(rq))
 		rq = xse_this_grp_xcu(xse)->cfs_rq;
+
+	if (!xse) {
+		XSCHED_DEBUG("the xse this xcu [%u] is trying to pick is NULL @ %s\n",
+			xcu->id, __func__);
+		return NULL;
 	}
 
 	return container_of(xse, struct xsched_entity, cfs);
