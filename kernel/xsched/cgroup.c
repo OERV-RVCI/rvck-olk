@@ -31,6 +31,7 @@ struct xsched_group *root_xcg = &root_xsched_group;
 static struct kmem_cache *xsched_group_cache __read_mostly;
 static struct kmem_cache *xcg_attach_entry_cache __read_mostly;
 static LIST_HEAD(xcg_attach_list);
+static DEFINE_MUTEX(xcg_mutex);
 
 static const char xcu_sched_name[XSCHED_TYPE_NUM][4] = {
 	[XSCHED_TYPE_RT] = "rt",
@@ -537,7 +538,9 @@ static ssize_t xcu_sched_class_write(struct kernfs_open_file *of, char *buf,
 	if (!xsched_group_is_root(xg->parent))
 		return -EINVAL;
 
+	mutex_lock(&xcg_mutex);
 	ret = xcu_cg_set_sched_class(xg, type);
+	mutex_unlock(&xcg_mutex);
 
 	return (ret) ? ret : nbytes;
 }
