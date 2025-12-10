@@ -132,7 +132,6 @@
 
 #define QM_ABNORMAL_INT_SOURCE		0x100000
 #define QM_ABNORMAL_INT_MASK		0x100004
-#define QM_ABNORMAL_INT_MASK_VALUE	0x7fff
 #define QM_ABNORMAL_INT_STATUS		0x100008
 #define QM_ABNORMAL_INT_SET		0x10000c
 #define QM_ABNORMAL_INF00		0x100010
@@ -157,6 +156,8 @@
 #define QM_DB_TIMEOUT			BIT(10)
 #define QM_OF_FIFO_OF			BIT(11)
 #define QM_RAS_AXI_ERROR		(BIT(0) | BIT(1) | BIT(12))
+#define QM_RAS_MASK_ALL			GENMASK(31, 0)
+#define QM_RAS_CLEAR_ALL		GENMASK(31, 0)
 
 #define QM_RESET_WAIT_TIMEOUT		400
 #define QM_PEH_VENDOR_ID		0x1000d8
@@ -1227,6 +1228,11 @@ static irqreturn_t qm_aeq_thread(int irq, void *data)
 
 	atomic64_inc(&qm->debug.dfx.aeq_irq_cnt);
 
+	if (qm_pm_get_sync(qm)) {
+		dev_err(&qm->pdev->dev, "failed to get runtime PM for aeq handle\n");
+		return IRQ_HANDLED;
+	}
+
 	while (QM_AEQE_PHASE(dw0) == qm->status.aeqc_phase) {
 		type = (dw0 >> QM_AEQE_TYPE_SHIFT) & QM_AEQE_TYPE_MASK;
 		qp_id = dw0 & QM_AEQE_CQN_MASK;
@@ -1261,6 +1267,8 @@ static irqreturn_t qm_aeq_thread(int irq, void *data)
 	}
 
 	qm_db(qm, 0, QM_DOORBELL_CMD_AEQ, qm->status.aeq_head, 0);
+
+	qm_pm_put_sync(qm);
 
 	return IRQ_HANDLED;
 }
@@ -1521,7 +1529,7 @@ static int qm_get_vft_v2(struct hisi_qm *qm, u32 *base, u32 *number)
 
 static void qm_hw_error_init_v1(struct hisi_qm *qm)
 {
-	writel(QM_ABNORMAL_INT_MASK_VALUE, qm->io_base + QM_ABNORMAL_INT_MASK);
+	writel(QM_RAS_MASK_ALL, qm->io_base + QM_ABNORMAL_INT_MASK);
 }
 
 static void qm_hw_error_cfg(struct hisi_qm *qm)
@@ -1530,7 +1538,7 @@ static void qm_hw_error_cfg(struct hisi_qm *qm)
 
 	qm->error_mask = qm_err->nfe | qm_err->ce | qm_err->fe;
 	/* clear QM hw residual error source */
-	writel(qm->error_mask, qm->io_base + QM_ABNORMAL_INT_SOURCE);
+	writel(QM_RAS_CLEAR_ALL, qm->io_base + QM_ABNORMAL_INT_SOURCE);
 
 	/* configure error type */
 	writel(qm_err->ce, qm->io_base + QM_RAS_CE_ENABLE);
@@ -1541,43 +1549,28 @@ static void qm_hw_error_cfg(struct hisi_qm *qm)
 
 static void qm_hw_error_init_v2(struct hisi_qm *qm)
 {
-	u32 irq_unmask;
-
 	qm_hw_error_cfg(qm);
 
-	irq_unmask = ~qm->error_mask;
-	irq_unmask &= readl(qm->io_base + QM_ABNORMAL_INT_MASK);
-	writel(irq_unmask, qm->io_base + QM_ABNORMAL_INT_MASK);
+	writel(~qm->error_mask, qm->io_base + QM_ABNORMAL_INT_MASK);
 }
 
 static void qm_hw_error_uninit_v2(struct hisi_qm *qm)
 {
-	u32 irq_mask = qm->error_mask;
-
-	irq_mask |= readl(qm->io_base + QM_ABNORMAL_INT_MASK);
-	writel(irq_mask, qm->io_base + QM_ABNORMAL_INT_MASK);
+	writel(QM_RAS_MASK_ALL, qm->io_base + QM_ABNORMAL_INT_MASK);
 }
 
 static void qm_hw_error_init_v3(struct hisi_qm *qm)
 {
-	u32 irq_unmask;
-
 	qm_hw_error_cfg(qm);
 
 	/* enable close master ooo when hardware error happened */
 	writel(qm->err_info.qm_err.shutdown_mask, qm->io_base + QM_OOO_SHUTDOWN_SEL);
-
-	irq_unmask = ~qm->error_mask;
-	irq_unmask &= readl(qm->io_base + QM_ABNORMAL_INT_MASK);
-	writel(irq_unmask, qm->io_base + QM_ABNORMAL_INT_MASK);
+	writel(~qm->error_mask, qm->io_base + QM_ABNORMAL_INT_MASK);
 }
 
 static void qm_hw_error_uninit_v3(struct hisi_qm *qm)
 {
-	u32 irq_mask = qm->error_mask;
-
-	irq_mask |= readl(qm->io_base + QM_ABNORMAL_INT_MASK);
-	writel(irq_mask, qm->io_base + QM_ABNORMAL_INT_MASK);
+	writel(QM_RAS_MASK_ALL, qm->io_base + QM_ABNORMAL_INT_MASK);
 
 	/* disable close master ooo when hardware error happened */
 	writel(0x0, qm->io_base + QM_OOO_SHUTDOWN_SEL);
@@ -3089,9 +3082,9 @@ void hisi_qm_wait_task_finish(struct hisi_qm *qm, struct hisi_qm_list *qm_list)
 		msleep(WAIT_PERIOD);
 	}
 
-	while (test_bit(QM_RST_SCHED, &qm->misc_ctl) ||
-	       test_bit(QM_RESETTING, &qm->misc_ctl))
-		msleep(WAIT_PERIOD);
+	/* Cancel possible RAS reset process during the uninstallation procedure. */
+	if (qm->fun_type == QM_HW_PF)
+		cancel_work_sync(&qm->rst_work);
 
 	if (test_bit(QM_SUPPORT_MB_COMMAND, &qm->caps))
 		flush_work(&qm->cmd_process);
@@ -4644,8 +4637,6 @@ static int qm_controller_reset_prepare(struct hisi_qm *qm)
 	if (ret)
 		pci_err(pdev, "failed to stop by vfs in soft reset!\n");
 
-	clear_bit(QM_RST_SCHED, &qm->misc_ctl);
-
 	return 0;
 }
 
@@ -4954,12 +4945,8 @@ static int qm_controller_reset(struct hisi_qm *qm)
 	pci_info(pdev, "Controller resetting...\n");
 
 	ret = qm_controller_reset_prepare(qm);
-	if (ret) {
-		hisi_qm_set_hw_reset(qm, QM_RESET_STOP_TX_OFFSET);
-		hisi_qm_set_hw_reset(qm, QM_RESET_STOP_RX_OFFSET);
-		clear_bit(QM_RST_SCHED, &qm->misc_ctl);
-		return ret;
-	}
+	if (ret)
+		goto err_prepare;
 
 	hisi_qm_show_last_dfx_regs(qm);
 	if (qm->err_ini->show_last_dfx_regs)
@@ -4976,6 +4963,13 @@ static int qm_controller_reset(struct hisi_qm *qm)
 	pci_info(pdev, "Controller reset complete\n");
 
 	return 0;
+
+err_prepare:
+	pci_info(pdev, "Controller reset_prepare failed\n");
+	writel(ACC_MASTER_GLOBAL_CTRL_SHUTDOWN,
+	       qm->io_base + ACC_MASTER_GLOBAL_CTRL);
+	hisi_qm_set_hw_reset(qm, QM_RESET_STOP_TX_OFFSET);
+	hisi_qm_set_hw_reset(qm, QM_RESET_STOP_RX_OFFSET);
 
 err_reset:
 	pci_err(pdev, "Controller reset failed (%d)\n", ret);
@@ -5144,17 +5138,13 @@ static irqreturn_t qm_rsvd_irq(int irq, void *data)
 static irqreturn_t qm_abnormal_irq(int irq, void *data)
 {
 	struct hisi_qm *qm = data;
-	enum acc_err_result ret;
 
 	atomic64_inc(&qm->debug.dfx.abnormal_irq_cnt);
-	ret = qm_process_dev_error(qm);
-	if (ret == ACC_ERR_NEED_RESET) {
-		if (!test_bit(QM_DRIVER_DOWN, &qm->misc_ctl) &&
-		    !test_and_set_bit(QM_RST_SCHED, &qm->misc_ctl))
-			schedule_work(&qm->rst_work);
-		else if (test_bit(QM_DRIVER_DOWN, &qm->misc_ctl))
-			pci_warn(qm->pdev, "Driver is down, need reload driver!\n");
-	}
+
+	if (!test_bit(QM_DRIVER_DOWN, &qm->misc_ctl))
+		schedule_work(&qm->rst_work);
+	else
+		pci_warn(qm->pdev, "Driver is down, need to reload driver!\n");
 
 	return IRQ_HANDLED;
 }
@@ -5183,7 +5173,13 @@ static void hisi_qm_controller_reset(struct work_struct *rst_work)
 
 	ret = qm_pm_get_sync(qm);
 	if (ret) {
-		clear_bit(QM_RST_SCHED, &qm->misc_ctl);
+		dev_err(&qm->pdev->dev, "failed to get runtime PM for controller\n");
+		return;
+	}
+
+	ret = qm_process_dev_error(qm);
+	if (ret != ACC_ERR_NEED_RESET) {
+		qm_pm_put_sync(qm);
 		return;
 	}
 
