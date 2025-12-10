@@ -49,6 +49,7 @@ struct cgroup_ifs cgroup_root_ifs = {
 };
 
 DEFINE_STATIC_KEY_FALSE(cgrp_ifs_enabled);
+DEFINE_STATIC_KEY_TRUE(cgrp_ifs_tsc_available);
 
 #ifdef CONFIG_CGROUP_IFS_DEFAULT_ENABLED
 static bool ifs_enable = true;
@@ -315,7 +316,8 @@ static void tdesc_init(struct ifs_tdesc *desc, u64 freq)
 static void cgroup_ifs_tdesc_init(void)
 {
 	tdesc_init(&ifs_tdesc[IFS_TIMER_CLK], NSEC_PER_SEC);
-	tdesc_init(&ifs_tdesc[IFS_TIMER_TSC], this_cpu_read(ifs_tsc_freq));
+	if (cgroup_ifs_tsc_available())
+		tdesc_init(&ifs_tdesc[IFS_TIMER_TSC], this_cpu_read(ifs_tsc_freq));
 }
 
 static u64 tsc_cycles_to_nsec(u64 tsc_cycles)
@@ -327,7 +329,7 @@ static u64 tsc_cycles_to_nsec(u64 tsc_cycles)
 #endif
 }
 
-static int cgroup_ifs_tsc_init(void)
+static void cgroup_ifs_tsc_init(void)
 {
 	u64 freq = 0;
 	int cpu;
@@ -339,15 +341,13 @@ static int cgroup_ifs_tsc_init(void)
 		freq = tsc_khz * 1000;
 #endif
 	if (!freq) {
-		pr_warn("Disable CGROUP IFS: no constant tsc\n");
-		ifs_enable = false;
-		return -1;
+		pr_warn("IFS: no constant tsc, use default clocksource as time source\n");
+		static_branch_disable(&cgrp_ifs_tsc_available);
+		return;
 	}
 
 	for_each_possible_cpu(cpu)
 		per_cpu(ifs_tsc_freq, cpu) = freq;
-
-	return 0;
 }
 
 static bool should_print(int type)
@@ -361,6 +361,11 @@ static bool should_print(int type)
 		return ifs_irq_enable;
 #endif
 	return true;
+}
+
+static bool use_tsc(enum ifs_types t)
+{
+	return cgroup_ifs_tsc_available() && (t == IFS_SPINLOCK || t == IFS_MUTEX);
 }
 
 static int print_sum_time(struct cgroup_ifs *ifs, struct seq_file *seq)
@@ -382,7 +387,7 @@ static int print_sum_time(struct cgroup_ifs *ifs, struct seq_file *seq)
 	for (i = 0; i < NR_IFS_TYPES; i++) {
 		if (!should_print(i))
 			continue;
-		if (i == IFS_SPINLOCK || i == IFS_MUTEX)
+		if (use_tsc(i))
 			time[i] = tsc_cycles_to_nsec(time[i]);
 		seq_printf(seq, "%-18s%llu\n", ifs_type_name(i), time[i]);
 	}
@@ -426,7 +431,7 @@ static int print_hist_count(struct cgroup_ifs *ifs, struct seq_file *seq)
 		if (!should_print(i))
 			continue;
 
-		if (i == IFS_SPINLOCK || i == IFS_MUTEX)
+		if (use_tsc(i))
 			desc = &ifs_tdesc[IFS_TIMER_TSC];
 		else
 			desc = &ifs_tdesc[IFS_TIMER_CLK];
@@ -533,9 +538,7 @@ void cgroup_ifs_init(void)
 	if (!ifs_enable)
 		return;
 
-	if (cgroup_ifs_tsc_init() < 0)
-		return;
-
+	cgroup_ifs_tsc_init();
 	BUG_ON(cgroup_init_cftypes(NULL, cgroup_ifs_files));
 	cgroup_ifs_tdesc_init();
 }
@@ -579,9 +582,6 @@ void cgroup_ifs_enable_irq_account(bool enable)
 static __init int cgroup_ifs_enable(void)
 {
 	if (!ifs_enable)
-		return 0;
-
-	if (!this_cpu_read(ifs_tsc_freq))
 		return 0;
 
 	static_branch_enable(&cgrp_ifs_enabled);

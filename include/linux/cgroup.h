@@ -920,6 +920,12 @@ static inline bool cgroup_ifs_enabled(void)
 	return static_branch_unlikely(&cgrp_ifs_enabled);
 }
 
+DECLARE_STATIC_KEY_TRUE(cgrp_ifs_tsc_available);
+static inline bool cgroup_ifs_tsc_available(void)
+{
+	return static_branch_likely(&cgrp_ifs_tsc_available);
+}
+
 static inline struct cgroup_ifs *cgroup_ifs(struct cgroup *cgrp)
 {
 	return cgroup_ino(cgrp) == 1 ? &cgroup_root_ifs : cgrp->ifs;
@@ -955,19 +961,22 @@ static inline void cgroup_ifs_account_delta(struct cgroup_ifs_cpu *ifsc,
 
 static inline u64 cgroup_ifs_time_counter(void)
 {
+	if (cgroup_ifs_tsc_available()) {
 #if defined(__aarch64__)
-	u64 counter;
+		u64 counter;
 
-	asm volatile("mrs %0, cntvct_el0" : "=r" (counter) :: "memory");
-	return counter;
+		asm volatile("mrs %0, cntvct_el0" : "=r" (counter) :: "memory");
+		return counter;
 #elif defined(__x86_64__)
-	unsigned int lo, hi;
+		unsigned int lo, hi;
 
-	asm volatile("rdtsc" : "=a"(lo), "=d"(hi) :: "memory");
-	return ((u64)hi << 32) | lo;
-#else
-	return sched_clock();
+		asm volatile("rdtsc" : "=a"(lo), "=d"(hi) :: "memory");
+		return ((u64)hi << 32) | lo;
 #endif
+	}
+
+	/* fallback */
+	return sched_clock();
 }
 
 static inline void cgroup_ifs_enter_lock(u64 *clock)
