@@ -475,7 +475,7 @@ int mpi3mr_process_admin_reply_q(struct mpi3mr_ioc *mrioc)
  * @op_reply_q: op_reply_qinfo object
  * @reply_ci: operational reply descriptor's queue consumer index
  *
- * Returns reply descriptor frame address
+ * Returns: reply descriptor frame address
  */
 static inline struct mpi3_default_reply_descriptor *
 mpi3mr_get_reply_desc(struct op_reply_qinfo *op_reply_q, u32 reply_ci)
@@ -1133,7 +1133,7 @@ static int mpi3mr_issue_and_process_mur(struct mpi3mr_ioc *mrioc,
  * during reset/resume
  * @mrioc: Adapter instance reference
  *
- * Return zero if the new IOCFacts parameters value is compatible with
+ * Return: zero if the new IOCFacts parameters value is compatible with
  * older values else return -EPERM
  */
 static int
@@ -3570,7 +3570,7 @@ static const struct {
  * mpi3mr_print_ioc_info - Display controller information
  * @mrioc: Adapter instance reference
  *
- * Display controller personalit, capability, supported
+ * Display controller personality, capability, supported
  * protocols etc.
  *
  * Return: Nothing
@@ -3579,20 +3579,20 @@ static void
 mpi3mr_print_ioc_info(struct mpi3mr_ioc *mrioc)
 {
 	int i = 0, bytes_written = 0;
-	char personality[16];
+	const char *personality;
 	char protocol[50] = {0};
 	char capabilities[100] = {0};
 	struct mpi3mr_compimg_ver *fwver = &mrioc->facts.fw_ver;
 
 	switch (mrioc->facts.personality) {
 	case MPI3_IOCFACTS_FLAGS_PERSONALITY_EHBA:
-		strncpy(personality, "Enhanced HBA", sizeof(personality));
+		personality = "Enhanced HBA";
 		break;
 	case MPI3_IOCFACTS_FLAGS_PERSONALITY_RAID_DDR:
-		strncpy(personality, "RAID", sizeof(personality));
+		personality = "RAID";
 		break;
 	default:
-		strncpy(personality, "Unknown", sizeof(personality));
+		personality = "Unknown";
 		break;
 	}
 
