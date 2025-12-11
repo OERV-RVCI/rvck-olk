@@ -1390,7 +1390,9 @@ config CGROUP_FILES
 config CGROUP_IFS
 	bool "Cgroup-based Interference Statistics"
 	default n
+	depends on X86 || ARM64
 	select KERNFS
+	select SCHED_INFO
 	select IRQ_TIME_ACCOUTING
 	help
 	  This option will provide online low-overhead interference

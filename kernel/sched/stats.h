@@ -136,7 +136,7 @@ __schedstats_from_se(struct sched_entity *se)
 #define QOS_THROTTLED	2
 #endif
 
-#ifdef CONFIG_CGROUP_IFS
+#if defined(CONFIG_CGROUP_IFS) && defined(CONFIG_SCHED_INFO)
 static inline void ifs_account_rundelay(struct task_struct *task, u64 delta)
 {
 	/*
