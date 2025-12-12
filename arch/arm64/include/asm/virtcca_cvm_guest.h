@@ -6,6 +6,8 @@
 #define __VIRTCCA_CVM_GUEST_H
 
 #ifdef CONFIG_HISI_VIRTCCA_GUEST
+#include <linux/percpu.h>
+
 struct device;
 
 DECLARE_PER_CPU(unsigned int, virtcca_unpark_idle_notify);
