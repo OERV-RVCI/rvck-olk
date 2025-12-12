@@ -75,6 +75,7 @@ enum landlock_rule_type;
 struct cachestat_range;
 struct cachestat;
 struct vstream_args;
+struct xsched_attr;
 
 #include <linux/types.h>
 #include <linux/aio_abi.h>
