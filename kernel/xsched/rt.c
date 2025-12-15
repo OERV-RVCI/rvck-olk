@@ -168,17 +168,20 @@ void xsched_rt_prio_set(pid_t tgid, unsigned int prio)
 		mutex_lock(&xcu->xcu_lock);
 
 		ctx = ctx_find_by_tgid_and_xcu(tgid, xcu);
-		if (ctx) {
-			xse = &ctx->xse;
-			xse->rt.prio = clamp_t(unsigned int, prio, XSE_PRIO_HIGH, XSE_PRIO_LOW);
-			if (xse->on_rq) {
-				xse_rt_del(xse);
-				xse_rt_add(xse, xcu);
-			}
+		if (!ctx || ctx->xse.class != &rt_xsched_class) {
+			mutex_unlock(&xcu->xcu_lock);
+			mutex_unlock(&xcu->ctx_list_lock);
+			continue;
+		}
+
+		xse = &ctx->xse;
+		xse->rt.prio = clamp_t(unsigned int, prio, XSE_PRIO_HIGH, XSE_PRIO_LOW);
+		if (xse->on_rq) {
+			xse_rt_del(xse);
+			xse_rt_add(xse, xcu);
 		}
 
 		mutex_unlock(&xcu->xcu_lock);
 		mutex_unlock(&xcu->ctx_list_lock);
 	}
 }
-
