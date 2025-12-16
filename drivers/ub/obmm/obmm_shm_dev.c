@@ -155,6 +155,17 @@ static const char *obmm_vma_name(struct vm_area_struct *vma __always_unused)
 	return "OBMM_SHM";
 }
 
+static unsigned long obmm_pagesize(struct vm_area_struct *vma)
+{
+	struct file *filp = vma->vm_file;
+	struct obmm_region *reg = (struct obmm_region *)filp->private_data;
+
+	if (reg->mmap_granu == OBMM_MMAP_GRANU_PMD)
+		return PMD_SIZE;
+	else
+		return PAGE_SIZE;
+}
+
 static const struct vm_operations_struct obmm_vm_ops = {
 	.open = obmm_vma_open,
 	.close = obmm_vma_close,
@@ -164,6 +175,7 @@ static const struct vm_operations_struct obmm_vm_ops = {
 	.fault = obmm_vma_fault,
 	.access = obmm_vma_access,
 	.name = obmm_vma_name,
+	.pagesize = obmm_pagesize,
 };
 
 static int obmm_shm_fops_open(struct inode *inode, struct file *file)
@@ -321,6 +333,11 @@ static int obmm_shm_fops_mmap(struct file *file, struct vm_area_struct *vma)
 		pr_debug("trying hugepage mmap\n");
 		mmap_granu = OBMM_MMAP_GRANU_PMD;
 		offset &= ~OBMM_MMAP_FLAG_HUGETLB_PMD;
+		if (vma->vm_start % PMD_SIZE || vma->vm_end % PMD_SIZE) {
+			pr_err("error running huge mmap for not pmd-aligned vma: %#lx-%#lx\n",
+				vma->vm_start, vma->vm_end);
+			return -EINVAL;
+		}
 	} else {
 		mmap_granu = OBMM_MMAP_GRANU_PAGE;
 	}
@@ -857,6 +874,7 @@ static long obmm_shm_fops_ioctl(struct file *file, unsigned int cmd, unsigned lo
 const struct file_operations obmm_shm_fops = { .owner = THIS_MODULE,
 					       .unlocked_ioctl = obmm_shm_fops_ioctl,
 					       .mmap = obmm_shm_fops_mmap,
+					       .get_unmapped_area = thp_get_unmapped_area,
 					       .open = obmm_shm_fops_open,
 					       .flush = obmm_shm_fops_flush,
 					       .release = obmm_shm_fops_release };
