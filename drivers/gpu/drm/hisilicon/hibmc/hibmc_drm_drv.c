@@ -250,9 +250,19 @@ static int hibmc_hw_map(struct hibmc_drm_private *priv)
 	struct drm_device *dev = &priv->dev;
 	struct pci_dev *pdev = to_pci_dev(dev->dev);
 	resource_size_t ioaddr, iosize;
+	unsigned long flags;
+	unsigned long bar;
 
-	ioaddr = pci_resource_start(pdev, 1);
-	iosize = pci_resource_len(pdev, 1);
+	flags = pci_resource_flags(pdev, 0);
+	if (flags & IORESOURCE_MEM_64)
+		bar = 2; /* 64-bit bar, change to bar2 */
+	else if (flags & IORESOURCE_MEM)
+		bar = 1;
+	else
+		return -ENODEV;
+
+	ioaddr = pci_resource_start(pdev, bar);
+	iosize = pci_resource_len(pdev, bar);
 	priv->mmio = devm_ioremap(dev->dev, ioaddr, iosize);
 	if (!priv->mmio) {
 		drm_err(dev, "Cannot map mmio region\n");
