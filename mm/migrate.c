@@ -1290,6 +1290,14 @@ static int migrate_folio_unmap(new_folio_t get_new_folio,
 		/* Establish migration ptes */
 		VM_BUG_ON_FOLIO(folio_test_anon(src) &&
 			       !folio_test_ksm(src) && !anon_vma, src);
+
+		/*
+		 * Racy check here to avoid page table walking and modifications
+		 * as much as possible.
+		 */
+		if (unlikely(folio_maybe_dma_pinned(src)))
+			goto out;
+
 		try_to_migrate(src, mode == MIGRATE_ASYNC ? TTU_BATCH_FLUSH : 0);
 		old_page_state |= PAGE_WAS_MAPPED;
 	}
@@ -1463,6 +1471,14 @@ static int unmap_and_move_huge_page(new_folio_t get_new_folio,
 
 	if (folio_mapped(src)) {
 		enum ttu_flags ttu = 0;
+
+		/*
+		 * Racy check folio is pinned, try to avoid unnecessary page
+		 * table unmapping and restoring, because the subsequent
+		 * move_to_new_folio will eventually check the reference count.
+		 */
+		if (unlikely(folio_maybe_dma_pinned(src)))
+			goto unlock_put_anon;
 
 		if (!folio_test_anon(src)) {
 			/*
