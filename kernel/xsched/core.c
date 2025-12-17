@@ -174,15 +174,14 @@ int delete_ctx(struct xsched_context *ctx)
 	if (curr_xse == xse)
 		xcu->xrq.curr_xse = NULL;
 	dequeue_ctx(xse, xcu);
-	--xcu->nr_ctx;
-	mutex_unlock(&xcu->xcu_lock);
-
-	xse->class->xse_deinit(xse);
 
 #ifdef CONFIG_CGROUP_XCU
 	xsched_group_xse_detach(xse);
 #endif
 
+	mutex_unlock(&xcu->xcu_lock);
+
+	xse->class->xse_deinit(xse);
 	return 0;
 }
 

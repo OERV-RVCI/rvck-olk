@@ -87,6 +87,7 @@ static void xsched_task_free(struct kref *kref)
 
 	delete_ctx(ctx);
 	list_del(&ctx->ctx_node);
+	--xcu->nr_ctx;
 	mutex_unlock(&xcu->ctx_list_lock);
 
 	mutex_lock(&xcu->xcu_lock);
