@@ -196,7 +196,7 @@ static int xcu_cg_init(struct xsched_group *xcg,
 		return xcu_cfs_cg_init(xcg, parent_xg);
 	default:
 		XSCHED_INFO("xcu_cgroup: init RT group css=0x%lx\n",
-		       (uintptr_t)&xcg->css);
+					(uintptr_t)&xcg->css);
 		break;
 	}
 
@@ -242,20 +242,6 @@ xcu_css_alloc(struct cgroup_subsys_state *parent_css)
 static void xcu_css_free(struct cgroup_subsys_state *css)
 {
 	struct xsched_group *xcg = xcu_cg_from_css(css);
-
-	if (!xsched_group_is_root(xcg)) {
-		switch (xcg->sched_class) {
-		case XSCHED_TYPE_CFS:
-			xcu_cfs_cg_deinit(xcg);
-			break;
-		default:
-			XSCHED_INFO("xcu_cgroup: deinit RT group css=0x%lx\n",
-			       (uintptr_t)&xcg->css);
-			break;
-		}
-	}
-
-	list_del(&xcg->group_node);
 
 	kmem_cache_free(xsched_group_cache, xcg);
 }
@@ -318,6 +304,20 @@ static void xcu_css_offline(struct cgroup_subsys_state *css)
 	hrtimer_cancel(&xcg->quota_timeout);
 	cancel_work_sync(&xcg->refill_work);
 	cancel_work_sync(&xcg->file_show_work);
+
+	if (!xsched_group_is_root(xcg)) {
+		switch (xcg->sched_class) {
+		case XSCHED_TYPE_CFS:
+			xcu_cfs_cg_deinit(xcg);
+			break;
+		default:
+			XSCHED_INFO("xcu_cgroup: deinit RT group css=0x%lx\n",
+						(uintptr_t)&xcg->css);
+			break;
+		}
+	}
+
+	list_del(&xcg->group_node);
 }
 
 static void xsched_group_xse_attach(struct xsched_group *xg,
