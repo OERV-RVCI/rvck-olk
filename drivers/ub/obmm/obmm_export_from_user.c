@@ -255,6 +255,10 @@ static int obmm_cmd_export_pid_allowed(struct obmm_cmd_export_pid *cmd)
 		pr_err("ALLOW_MMAP flag is not allowed in export_user_addr.\n");
 		return -EINVAL;
 	}
+	if (cmd->flags & OBMM_EXPORT_FLAG_FAST) {
+		pr_err("FAST flag is not allowed in export_user_addr.\n");
+		return -EINVAL;
+	}
 
 	if (cmd->length == 0) {
 		pr_err("export sizeof 0 memory is not allowed.\n");
@@ -278,6 +282,8 @@ alloc_export_region_from_obmm_cmd_export_pid(const struct obmm_cmd_export_pid *e
 
 	if (e_reg == NULL)
 		return ERR_PTR(-ENOMEM);
+
+	atomic_set(&e_reg->region.device_released, 1);
 
 	e_reg->mem_desc_pid.pid = export_pid->pid;
 	e_reg->mem_desc_pid.user_va = export_pid->va;
