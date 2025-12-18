@@ -1,13 +1,15 @@
-/* SPDX-License-Identifier: GPL-2.0 */
-#ifndef _XSCHED_TYPE_H
-#define _XSCHED_TYPE_H
+/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
+#ifndef _UAPI_LINUX_XSCHED_TYPES_H
+#define _UAPI_LINUX_XSCHED_TYPES_H
+
+#include <linux/types.h>
 
 struct xsched_attr {
 	/* Scheduling class type, from enum xcu_sched_class */
-	unsigned int xsched_class;
+	__u32 xsched_class;
 
 	/* RT scheduling priority, from enum xse_prio */
-	unsigned int xsched_priority;
+	__u32 xsched_priority;
 };
 
 enum xcu_sched_class {
@@ -24,4 +26,4 @@ enum xse_prio {
 	XSE_PRIO_DFLT = XSE_PRIO_LOW
 };
 
-#endif /* ! _XSCHED_TYPE_H */
+#endif /* _UAPI_LINUX_XSCHED_TYPES_H */

@@ -2,7 +2,7 @@
 #ifndef _LINUX_VSTREAM_H
 #define _LINUX_VSTREAM_H
 
-#include <uapi/linux/xcu_vstream.h>
+#include <uapi/linux/xsched/xcu_vstream.h>
 #include <linux/ktime.h>
 
 #define MAX_VSTREAM_SIZE 2048

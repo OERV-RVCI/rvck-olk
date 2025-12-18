@@ -42,7 +42,7 @@
 #include <linux/kabi.h>
 
 #ifdef CONFIG_XCU_SCHEDULER
-#include <linux/xsched_types.h>
+#include <uapi/linux/xsched/types.h>
 #endif
 
 /* task_struct member predeclarations (sorted alphabetically): */

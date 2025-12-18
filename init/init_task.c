@@ -15,7 +15,7 @@
 
 #include <linux/uaccess.h>
 #ifdef CONFIG_XCU_SCHEDULER
-#include <linux/xsched_types.h>
+#include <uapi/linux/xsched/types.h>
 #endif
 
 static struct signal_struct init_signals = {

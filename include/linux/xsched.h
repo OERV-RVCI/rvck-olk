@@ -4,10 +4,10 @@
 
 #include <linux/cgroup.h>
 #include <linux/kref.h>
+#include <linux/math64.h>
 #include <linux/vstream.h>
 #include <linux/xcu_group.h>
-#include <linux/xsched_types.h>
-#include <linux/math64.h>
+#include <uapi/linux/xsched/types.h>
 
 #define XSCHED_LOG_PREFIX "XSched"
 #define XSCHED_INFO(fmt, ...)                                                  \
