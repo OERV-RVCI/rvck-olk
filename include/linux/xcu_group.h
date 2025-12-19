@@ -3,7 +3,7 @@
 #define __XSCHED_XCU_GROUP_H__
 
 #include <linux/idr.h>
-#include <uapi/linux/xcu_vstream.h>
+#include <uapi/linux/xsched/xcu_vstream.h>
 
 #ifndef CONFIG_XSCHED_NR_CUS
 #define CONFIG_XSCHED_NR_CUS 128

@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
-#ifndef _UAPI_XCU_VSTREAM_H
-#define _UAPI_XCU_VSTREAM_H
+#ifndef _UAPI_LINUX_XSCHED_XCU_VSTREAM_H
+#define _UAPI_LINUX_XSCHED_XCU_VSTREAM_H
 
 #include <linux/types.h>
 
@@ -74,4 +74,4 @@ typedef struct vstream_args {
 	KABI_RESERVE_BYTES(2, 8);
 } vstream_args_t;
 
-#endif /* _UAPI_LINUX_SCHED_H */
+#endif /* _UAPI_LINUX_XSCHED_XCU_VSTREAM_H */
