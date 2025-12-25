@@ -583,6 +583,15 @@ static int folio_migrate_mc_copy(struct folio *dst, struct folio *src,
 	if (mode == MIGRATE_SYNC_NO_COPY)
 		return 0;
 
+	if (mode == MIGRATE_ASYNC_DMA_OFFLOADING) {
+		if (folio_test_hugetlb(src) ||
+		    folio_test_pmd_mappable(src)) {
+			/* if dma offloading fail, fallback */
+			if (!folio_dma_copy(dst, src))
+				return 0;
+		}
+	}
+
 	return folio_mc_copy(dst, src);
 }
 

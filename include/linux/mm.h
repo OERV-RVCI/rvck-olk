@@ -1330,6 +1330,14 @@ void put_pages_list(struct list_head *pages);
 void split_page(struct page *page, unsigned int order);
 void folio_copy(struct folio *dst, struct folio *src);
 int folio_mc_copy(struct folio *dst, struct folio *src);
+#ifdef CONFIG_MIGRATE_PAGES_DMA_OFFLOADING
+int folio_dma_copy(struct folio *dst, struct folio *src);
+#else
+static inline int folio_dma_copy(struct folio *dst, struct folio *src)
+{
+	return -ENODEV;
+}
+#endif
 
 unsigned long nr_free_buffer_pages(void);
 
