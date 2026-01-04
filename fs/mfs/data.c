@@ -430,12 +430,9 @@ static vm_fault_t mfs_filemap_map_pages(struct vm_fault *vmf,
 {
 	struct file *cfile, *file = vmf->vma->vm_file;
 	struct mfs_file_info *fi = file->private_data;
-	size_t isize = i_size_read(file_inode(file));
 	const struct vm_operations_struct *cvm_ops;
 	struct vm_area_struct cvma, *vma, **vma_;
-	struct range_ctx ctx;
 	vm_fault_t ret;
-	int err;
 
 	vma = vmf->vma;
 	memcpy(&cvma, vma, sizeof(struct vm_area_struct));
@@ -445,27 +442,8 @@ static vm_fault_t mfs_filemap_map_pages(struct vm_fault *vmf,
 
 	if (unlikely(!cvm_ops->map_pages))
 		return 0;
-	if ((start_pgoff << PAGE_SHIFT) >= isize)
-		return 0;
 
 	(void)get_file(cfile);
-	ctx.file = cfile;
-	ctx.object = file_inode(file)->i_private;
-	ctx.off = start_pgoff << PAGE_SHIFT;
-	ctx.len = min_t(size_t, isize - ctx.off, (end_pgoff - start_pgoff) << PAGE_SHIFT);
-	ctx.op = MFS_OP_FAROUND;
-	ctx.sync = false;
-	ctx.checker = range_check_mem;
-	if (need_sync_event(file_inode(file)->i_sb)) {
-		ctx.sync = true;
-		ctx.checker = range_check_disk;
-	}
-	err = mfs_check_range(&ctx);
-	if (err) {
-		fput(cfile);
-		return 0;
-	}
-
 	vma_ = (struct vm_area_struct **)&vmf->vma;
 	*vma_ = &cvma;
 	ret = cvm_ops->map_pages(vmf, start_pgoff, end_pgoff);

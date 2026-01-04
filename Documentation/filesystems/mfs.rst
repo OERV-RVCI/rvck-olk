@@ -110,11 +110,9 @@ Currently the opcode is defined as follows::
 	enum mfs_opcode {
 		MFS_OP_READ = 0,
 		MFS_OP_FAULT,
-		MFS_OP_FAROUND,
 	};
 
-where means: normal read event, page fault event and the fault around event
-before ongoing fault.
+where means: normal read event and page fault event.
 
 Running mode
 ============
