@@ -937,6 +937,7 @@ copy_present_page(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma
 	folio_add_new_anon_rmap(new_folio, dst_vma, addr, RMAP_EXCLUSIVE);
 	folio_add_lru_vma(new_folio, dst_vma);
 	rss[MM_ANONPAGES]++;
+	add_reliable_folio_counter(new_folio, dst_vma->vm_mm, 1);
 
 	/* All done, just insert the new page copy in the child */
 	pte = mk_pte(&new_folio->page, dst_vma->vm_page_prot);
@@ -1021,6 +1022,7 @@ copy_present_ptes(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma
 			folio_dup_file_rmap_ptes(folio, page, nr);
 			rss[mm_counter_file(folio)] += nr;
 		}
+		add_reliable_folio_counter(folio, dst_vma->vm_mm, nr);
 		if (any_writable)
 			pte = pte_mkwrite(pte, src_vma);
 		__copy_present_ptes(dst_vma, src_vma, dst_pte, src_pte, pte,
@@ -1048,8 +1050,8 @@ copy_present_ptes(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma
 	} else {
 		folio_dup_file_rmap_pte(folio, page);
 		rss[mm_counter_file(folio)]++;
-		add_reliable_folio_counter(folio, dst_vma->vm_mm, 1);
 	}
+	add_reliable_folio_counter(folio, dst_vma->vm_mm, 1);
 
 copy_pte:
 	__copy_present_ptes(dst_vma, src_vma, dst_pte, src_pte, pte, addr, 1);
