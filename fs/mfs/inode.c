@@ -90,18 +90,21 @@ retry:
 			dput(dentry);
 			goto retry;
 		}
+		inode_unlock(cdir);
 	} else {
 		/* dir or file, symlink will be considerred the regular file */
 		ret = vfs_create(&nop_mnt_idmap, cdir, dentry, linode->i_mode, true);
 		if (ret)
 			goto new_err;
+		inode_unlock(cdir);
 		ret = vfs_truncate(cpath, linode->i_size);
 		if (ret)
 			goto truncate_err;
 	}
-	goto out;
+	return ret;
 
 truncate_err:
+	inode_lock_nested(cdir, I_MUTEX_PARENT);
 	_ret = vfs_unlink(&nop_mnt_idmap, cdir, dentry, NULL);
 	if (_ret)
 		pr_err("cleanup failed for file:%s, err:%d\n", name, _ret);
