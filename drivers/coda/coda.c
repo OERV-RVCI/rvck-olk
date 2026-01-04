@@ -240,7 +240,7 @@ static void delete_coda_dev_obj(u32 sid)
  * %true if the root bd is secure
  * %false if the root bd is non-secure
  */
-static bool is_cc_root_bd(u32 root_bd)
+bool is_cc_root_bd(u32 root_bd)
 {
 	int bkt;
 	struct coda_dev_hash_node *obj;
@@ -683,6 +683,12 @@ static int virtcca_create_ste_entry(struct pci_dev *pci_dev, bool host, bool new
 		smmu_domain = to_smmu_domain(iommu_get_dma_domain(&(pci_dev->dev)));
 	else
 		smmu_domain = to_smmu_domain(iommu_get_domain_for_dev(&(pci_dev->dev)));
+
+	if (!smmu_domain->smmu) {
+		dev_err(&(pci_dev->dev), "CoDA: Security smmu has not been correctly set\n");
+		kfree(params_ptr);
+		return -EINVAL;
+	}
 
 	data = io_pgtable_ops_to_pgtable(smmu_domain->pgtbl_ops);
 	cfg = &data->cfg;

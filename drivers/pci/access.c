@@ -96,7 +96,9 @@ int pci_generic_config_read(struct pci_bus *bus, unsigned int devfn,
 		return PCIBIOS_DEVICE_NOT_FOUND;
 
 #ifdef CONFIG_HISI_VIRTCCA_CODA
-	if (is_virtcca_cvm_enable() && is_cc_dev(PCI_DEVID(bus->number, devfn)))
+	if (is_virtcca_cvm_enable() &&
+	    (is_cc_dev(PCI_DEVID(bus->number, devfn)) ||
+	     is_cc_root_bd((PCI_DEVID(bus->number, devfn)))))
 		return virtcca_pci_generic_config_read(addr, bus->number, devfn, size, val);
 #endif
 
@@ -121,7 +123,9 @@ int pci_generic_config_write(struct pci_bus *bus, unsigned int devfn,
 		return PCIBIOS_DEVICE_NOT_FOUND;
 
 #ifdef CONFIG_HISI_VIRTCCA_CODA
-	if (is_virtcca_cvm_enable() && is_cc_dev(PCI_DEVID(bus->number, devfn)))
+	if (is_virtcca_cvm_enable() &&
+	    (is_cc_dev(PCI_DEVID(bus->number, devfn)) ||
+	     is_cc_root_bd((PCI_DEVID(bus->number, devfn)))))
 		return virtcca_pci_generic_config_write(addr, bus->number, devfn, size, val);
 #endif
 
