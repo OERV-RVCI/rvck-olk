@@ -24,9 +24,11 @@ static int fd_release(struct inode *inode, struct file *file)
 	if (object->fd > 0) {
 		object->fd = -1;
 		object->anon_file = NULL;
+		up_write(&object->rwsem);
 		iput(object->mfs_inode);
+	} else {
+		up_write(&object->rwsem);
 	}
-	up_write(&object->rwsem);
 	return 0;
 }
 
