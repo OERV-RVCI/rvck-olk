@@ -1823,8 +1823,8 @@ static struct folio *shmem_alloc_folio(gfp_t gfp, int order,
 	pgoff_t ilx;
 	struct page *page;
 
-	mpol = shmem_get_pgoff_policy(info, index, 0, &ilx);
-	page = alloc_pages_mpol(gfp, 0, mpol, ilx, numa_node_id());
+	mpol = shmem_get_pgoff_policy(info, index, order, &ilx);
+	page = alloc_pages_mpol(gfp, order, mpol, ilx, numa_node_id());
 	mpol_cond_put(mpol);
 
 	return page_rmappable_folio(page);
