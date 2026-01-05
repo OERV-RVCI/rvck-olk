@@ -19,6 +19,13 @@ enum migrate_mode {
 	MIGRATE_SYNC_NO_COPY,
 };
 
+/*
+ * Actually the macro MIGRATE_ASYNC_DMA_OFFLOADING definition should be
+ * placed within enum migrate_mode, but for KABI compatibility, it is
+ * defined here alone.
+ */
+#define MIGRATE_ASYNC_DMA_OFFLOADING	(10)
+
 enum migrate_reason {
 	MR_COMPACTION,
 	MR_MEMORY_FAILURE,

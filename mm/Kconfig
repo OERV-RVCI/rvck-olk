@@ -696,6 +696,18 @@ config MIGRATION
 	  pages as migration can relocate pages to satisfy a huge page
 	  allocation instead of reclaiming.
 
+config MIGRATE_PAGES_DMA_OFFLOADING
+	bool "Support to use DMA channels for page migration"
+	depends on DMA_ENGINE
+	depends on MIGRATION
+	default y
+	help
+	  This config enhances page migration by introducing a new mode
+	  that offloads copy operations to UB-DMA hardware based on the
+	  DMA engine framework, with automatic fallback to CPU migration
+	  if DMA migration fails. DMA migration supports both asynchronous
+	  and synchronous modes to facilitate debugging.
+
 config DEVICE_MIGRATION
 	def_bool MIGRATION && ZONE_DEVICE
 
