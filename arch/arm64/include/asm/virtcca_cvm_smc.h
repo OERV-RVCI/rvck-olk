@@ -73,7 +73,42 @@
  * arg1: Paddr of memory to unmap
  * arg2: Size of memory to unmap
  */
- #define SMC_TSI_SEC_MEM_UNMAP              SMC_TSI_FID(0x19C)
+#define SMC_TSI_SEC_MEM_UNMAP              SMC_TSI_FID(0x19C)
+
+/*
+ * arg1: Paddr of might binded guest_rd
+ * arg2: Paddr of structure to get attr
+ * arg3: Size of structure to get attr
+ * ret0: Status / error
+ */
+#define SMC_TSI_MIGVM_GET_ATTR				SMC_TSI_FID(0x19D)
+
+/*
+ * arg1: Paddr of might binded guest_rd
+ * arg2: Paddr of structure to get attr
+ * arg3: Size of structure to get attr
+ * ret0: Status / error
+ */
+#define SMC_TSI_MIGVM_SET_SLOT				SMC_TSI_FID(0x19E)
+
+/*
+ * arg1: Paddr of might binded guest_rd
+ * arg2: Paddr of structure to get attr
+ * arg3: Size of structure to get attr
+ * ret0: Status / error
+ */
+#define SMC_TSI_MIGVM_PEEK_BINDINGRD		SMC_TSI_FID(0x19F)
+
+/*
+ * arg1: Paddr of dest rd
+ * arg2: Paddr of queue
+ */
+#define SMC_TSI_MIG_INTEGRITY_CHECKSUM_INIT	SMC_TSI_FID(0x1A0)
+
+/*
+ * arg1: Paddr of dest rd
+ */
+#define SMC_TSI_MIG_INTEGRITY_CHECKSUM_LOOP	SMC_TSI_FID(0x1A1)
 
 static inline unsigned long tsi_get_version(void)
 {
@@ -171,5 +206,51 @@ static inline unsigned long tsi_get_device_cert(unsigned char *device_cert,
 	return res.a0;
 }
 
+static inline unsigned long tsi_peek_binding_list(void *user_buf)
+{
+	struct arm_smccc_res res;
+
+	arm_smccc_1_1_smc(SMC_TSI_MIGVM_PEEK_BINDINGRD, virt_to_phys(user_buf), &res);
+
+	return res.a0;
+}
+
+static inline unsigned long tsi_migvm_get_attr(unsigned long guest_rd, void *user_buf)
+{
+	struct arm_smccc_res res;
+
+	arm_smccc_1_1_smc(SMC_TSI_MIGVM_GET_ATTR, guest_rd, virt_to_phys(user_buf), &res);
+
+	return res.a0;
+}
+
+static inline unsigned long tsi_migvm_set_slot(unsigned long guest_rd, void *user_buf)
+{
+	struct arm_smccc_res res;
+
+	arm_smccc_1_1_smc(SMC_TSI_MIGVM_SET_SLOT, guest_rd, virt_to_phys(user_buf), &res);
+
+	return res.a0;
+}
+
+static inline unsigned long tsi_mig_integrity_checksum_init(unsigned long dst_rd,
+	unsigned long queue_pa)
+{
+	struct arm_smccc_res res;
+
+	arm_smccc_1_1_smc(SMC_TSI_MIG_INTEGRITY_CHECKSUM_INIT, dst_rd, queue_pa, &res);
+
+	return res.a0;
+}
+
+static inline unsigned long tsi_mig_integrity_checksum_loop(unsigned long guest_rd,
+	unsigned long thread_id)
+{
+	struct arm_smccc_res res;
+
+	arm_smccc_1_1_smc(SMC_TSI_MIG_INTEGRITY_CHECKSUM_LOOP, guest_rd, thread_id, &res);
+
+	return res.a0;
+}
 #endif /* CONFIG_HISI_VIRTCCA_GUEST */
 #endif  /* __ASM_VIRTCCA_CVM_SMC_H_ */

@@ -9,6 +9,7 @@
 #include <linux/vmalloc.h>
 #include <linux/swiotlb.h>
 #include <linux/pci.h>
+#include <linux/cdev.h>
 #include <linux/virtcca_cvm_domain.h>
 
 #include <asm/cacheflush.h>
@@ -229,3 +230,250 @@ void virtcca_its_free_shared_pages(void *addr, int order)
 
 	swiotlb_free(&cvm_alloc_device, (struct page *)addr, (1 << order) * PAGE_SIZE);
 }
+
+#define DEVICE_NAME "migvm_queue_mem"
+
+// IOCTL cmd define
+#define QUEUE_IOCTL_MAGIC 'q'
+#define MIGVM_CREATE_QUEUE _IOWR(QUEUE_IOCTL_MAGIC, 1, unsigned long)
+#define MIGVM_DESTROY_QUEUE _IO(QUEUE_IOCTL_MAGIC, 2)
+
+#define QUEUE_SIZE (64 * 1024 - 8) // Queue size (64KB - 8B)
+#define ALLOC_PAGE (4)
+
+struct driver_data {
+	dev_t devno;
+	struct cdev cdev;
+	struct class *cls;
+	struct mig_queue_device *queue_dev;
+};
+
+struct mig_integrity_share_queue_addr_s {
+	uint64_t send_buf_ipa;
+	uint64_t recv_buf_ipa;
+};
+
+struct mig_queue_device {
+	struct page *send_page;
+	struct page *recv_page;
+	unsigned long rd;
+	struct mig_integrity_share_queue_addr_s queue_addr;
+};
+
+static struct driver_data *driver_data_ptr;
+
+static struct mig_queue_device *migvm_queue_dev_create(unsigned long rd)
+{
+	struct mig_queue_device *dev = kzalloc(sizeof(*dev), GFP_KERNEL);
+
+	if (!dev)
+		return NULL;
+
+	/* Allocate send buffer */
+	dev->send_page = alloc_pages(GFP_KERNEL, ALLOC_PAGE);
+	if (!dev->send_page) {
+		kfree(dev);
+		return NULL;
+	}
+	dev->queue_addr.send_buf_ipa = page_to_phys(dev->send_page);
+	memset(page_address(dev->send_page), 0, QUEUE_SIZE);
+
+	/* Allocate receive buffer */
+	dev->recv_page = alloc_pages(GFP_KERNEL, ALLOC_PAGE);
+	if (!dev->recv_page) {
+		__free_page(dev->send_page);
+		kfree(dev);
+		return NULL;
+	}
+
+	dev->queue_addr.recv_buf_ipa = page_to_phys(dev->recv_page);
+	memset(page_address(dev->recv_page), 0, QUEUE_SIZE);
+
+	if (tsi_mig_integrity_checksum_init(rd, virt_to_phys((void *)&dev->queue_addr))) {
+		__free_page(dev->send_page);
+		__free_page(dev->recv_page);
+		kfree(dev);
+		return NULL;
+	}
+
+	dev->rd = rd;
+	return dev;
+}
+
+static void migvm_queue_dev_destroy(struct mig_queue_device *dev)
+{
+	if (dev) {
+		if (dev->recv_page)
+			__free_page(dev->recv_page);
+		if (dev->send_page)
+			__free_page(dev->send_page);
+		kfree(dev);
+	}
+}
+
+static int migvm_queue_dev_mmap(struct mig_queue_device *dev, struct vm_area_struct *vma)
+{
+	if (!dev || !vma)
+		return -EINVAL;
+	unsigned long size = vma->vm_end - vma->vm_start;
+	unsigned long pfn;
+
+	switch (vma->vm_pgoff) {
+	case 0:
+		pfn = dev->queue_addr.send_buf_ipa >> PAGE_SHIFT;
+		break;
+	case 1:
+		pfn = dev->queue_addr.recv_buf_ipa >> PAGE_SHIFT;
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	if (remap_pfn_range(vma, vma->vm_start, pfn, size, vma->vm_page_prot))
+		return -EAGAIN;
+	return 0;
+}
+
+static int migvm_queue_open(struct inode *inode, struct file *filp)
+{
+	if (!inode)
+		return -EINVAL;
+
+	struct driver_data *data = container_of(inode->i_cdev, struct driver_data, cdev);
+
+	if (!data || !filp)
+		return -EINVAL;
+	data->queue_dev = NULL;
+	filp->private_data = data;
+	return 0;
+}
+
+static int migvm_queue_release(struct inode *inode, struct file *filp)
+{
+	if (!filp)
+		return -EINVAL;
+
+	struct driver_data *data = filp->private_data;
+
+	if (!data)
+		return -EINVAL;
+	if (data->queue_dev) {
+		migvm_queue_dev_destroy(data->queue_dev);
+		data->queue_dev = NULL;
+	}
+	return 0;
+}
+
+static long migvm_queue_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+{
+	if (!filp)
+		return -EINVAL;
+
+	struct driver_data *data = filp->private_data;
+
+	if (!data)
+		return -EINVAL;
+
+	switch (cmd) {
+	case MIGVM_CREATE_QUEUE:
+		if (!data->queue_dev) {
+			unsigned long rd;
+
+			if (copy_from_user(&rd, (void __user *)arg, sizeof(unsigned long)))
+				return -EFAULT;
+			data->queue_dev = migvm_queue_dev_create(rd);
+
+			if (!data->queue_dev)
+				return -ENOMEM;
+		}
+		break;
+	case MIGVM_DESTROY_QUEUE:
+		if (data->queue_dev) {
+			migvm_queue_dev_destroy(data->queue_dev);
+			data->queue_dev = NULL;
+		}
+		break;
+	default:
+		return -ENOTTY;
+	}
+	return 0;
+}
+
+static int migvm_queue_mmap(struct file *filp, struct vm_area_struct *vma)
+{
+	if (!filp || !vma)
+		return -EINVAL;
+
+	struct driver_data *data = filp->private_data;
+
+	if (!data)
+		return -EINVAL;
+
+	return migvm_queue_dev_mmap(data->queue_dev, vma);
+}
+
+static const struct file_operations queue_fops = {
+	.owner = THIS_MODULE,
+	.open = migvm_queue_open,
+	.release = migvm_queue_release,
+	.unlocked_ioctl = migvm_queue_ioctl,
+	.mmap = migvm_queue_mmap,
+};
+
+static int __init migvm_queue_driver_init(void)
+{
+	int ret;
+	struct driver_data *data;
+
+	data = kzalloc(sizeof(*data), GFP_KERNEL);
+	if (!data)
+		return -ENOMEM;
+
+	ret = alloc_chrdev_region(&data->devno, 0, 1, DEVICE_NAME);
+	if (ret < 0)
+		goto fail_alloc_dev;
+
+	cdev_init(&data->cdev, &queue_fops);
+	data->cdev.owner = THIS_MODULE;
+
+	ret = cdev_add(&data->cdev, data->devno, 1);
+	if (ret < 0)
+		goto fail_cdev_add;
+
+	data->cls = class_create(DEVICE_NAME);
+	if (IS_ERR(data->cls)) {
+		ret = PTR_ERR(data->cls);
+		goto fail_class_create;
+	}
+
+	device_create(data->cls, NULL, data->devno, NULL, DEVICE_NAME);
+	driver_data_ptr = data;
+
+	pr_info("Migvm queue driver loaded. Major=%d\n", MAJOR(data->devno));
+	return 0;
+
+fail_class_create:
+	cdev_del(&data->cdev);
+fail_cdev_add:
+	unregister_chrdev_region(data->devno, 1);
+fail_alloc_dev:
+	kfree(data);
+	return ret;
+}
+
+static void __exit migvm_queue_driver_exit(void)
+{
+	if (driver_data_ptr) {
+		device_destroy(driver_data_ptr->cls, driver_data_ptr->devno);
+		class_destroy(driver_data_ptr->cls);
+		cdev_del(&driver_data_ptr->cdev);
+		unregister_chrdev_region(driver_data_ptr->devno, 1);
+		kfree(driver_data_ptr);
+		driver_data_ptr = NULL;
+	}
+	pr_info("Migvm queue driver unloaded\n");
+}
+
+module_init(migvm_queue_driver_init);
+module_exit(migvm_queue_driver_exit);
+MODULE_LICENSE("GPL");
