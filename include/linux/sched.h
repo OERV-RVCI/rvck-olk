@@ -584,9 +584,9 @@ struct sched_entity {
 	u64				min_vruntime;
 
 	struct list_head		group_node;
-	unsigned char			on_rq;
-	unsigned char			rel_deadline;
-					/* hole */
+	unsigned int on_rq;
+	KABI_FILL_HOLE(unsigned char rel_deadline)
+					/* 3 holes left here */
 
 	u64				exec_start;
 	u64				sum_exec_runtime;
