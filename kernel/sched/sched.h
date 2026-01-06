@@ -671,7 +671,7 @@ struct cfs_rq {
 	u64			avg_load;
 
 	u64			exec_clock;
-	u64			zero_vruntime;
+	KABI_REPLACE(u64 min_vruntime, u64 zero_vruntime)
 #ifdef CONFIG_SCHED_CORE
 	unsigned int		forceidle_seq;
 	u64			zero_vruntime_fi;
