@@ -217,8 +217,8 @@ static u64 arm_spe_to_htpg(void)
 		reg |= boost_spe->sft_cfg << SYS_OMHTPG_EL1_SFT_CFG_SHIFT;
 
 	if (boost_spe->boost_spe_pa_flt_en || boost_spe->rmt_acc_pa_flt_en) {
-		reg |= 1 < SYS_OMHTPG_EL1_PAEN_SHIFT;
-		reg |= 1 < SYS_OMHTPG_EL1_RMPAFLEN_SHIFT;
+		reg |= 1ULL << SYS_OMHTPG_EL1_PAEN_SHIFT;
+		reg |= 1ULL << SYS_OMHTPG_EL1_RMPAFLEN_SHIFT;
 
 		if (boost_spe->pa_flt_pt < 0x8000000 && boost_spe->pa_flt_mask < 0x8000000) {
 			reg |= boost_spe->pa_flt_pt << SYS_OMHTPG_EL1_PAFL_SHIFT;
