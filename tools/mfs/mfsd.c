@@ -109,10 +109,8 @@ static int process_req(int fd)
 		pr_err("invalid message length, read:%d, need:%d\n", ret, msg->len);
 		return -1;
 	}
-	if (msg->opcode == MFS_OP_READ || msg->opcode == MFS_OP_FAULT ||
-	    msg->opcode == MFS_OP_FAROUND) {
+	if (msg->opcode == MFS_OP_READ || msg->opcode == MFS_OP_FAULT)
 		return process_read(msg);
-	}
 	pr_err("invalid opcode:%d\n", msg->opcode);
 	return -1;
 }
