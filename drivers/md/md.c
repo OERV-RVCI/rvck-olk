@@ -7669,26 +7669,19 @@ static int md_ioctl(struct block_device *bdev, blk_mode_t mode,
 	switch (cmd) {
 	case GET_ARRAY_INFO:
 		if (!mddev->raid_disks && !mddev->external)
-			err = -ENODEV;
-		else
-			err = get_array_info(mddev, argp);
-		goto out;
+			return -ENODEV;
+		return get_array_info(mddev, argp);
 
 	case GET_DISK_INFO:
 		if (!mddev->raid_disks && !mddev->external)
-			err = -ENODEV;
-		else
-			err = get_disk_info(mddev, argp);
-		goto out;
+			return -ENODEV;
+		return get_disk_info(mddev, argp);
 
 	case SET_DISK_FAULTY:
-		err = set_disk_faulty(mddev, new_decode_dev(arg));
-		goto out;
+		return set_disk_faulty(mddev, new_decode_dev(arg));
 
 	case GET_BITMAP_FILE:
-		err = get_bitmap_file(mddev, argp);
-		goto out;
-
+		return get_bitmap_file(mddev, argp);
 	}
 
 	if (cmd == STOP_ARRAY || cmd == STOP_ARRAY_RO) {
@@ -7698,13 +7691,11 @@ static int md_ioctl(struct block_device *bdev, blk_mode_t mode,
 		mutex_lock(&mddev->open_mutex);
 		if (mddev->pers && atomic_read(&mddev->openers) > 1) {
 			mutex_unlock(&mddev->open_mutex);
-			err = -EBUSY;
-			goto out;
+			return -EBUSY;
 		}
 		if (test_and_set_bit(MD_CLOSING, &mddev->flags)) {
 			mutex_unlock(&mddev->open_mutex);
-			err = -EBUSY;
-			goto out;
+			return -EBUSY;
 		}
 		mutex_unlock(&mddev->open_mutex);
 		sync_blockdev(bdev);
