@@ -3570,6 +3570,7 @@ void nbl_write_all_regs(void *priv)
 		nbl_sec071_data = nbl_sec071_2p_data;
 	}
 
+	nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
 	for (i = 0; i < NBL_SEC006_SIZE; i++) {
 		if ((i + 1) % NBL_SEC_BLOCK_SIZE == 0)
 			nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
@@ -3577,9 +3578,11 @@ void nbl_write_all_regs(void *priv)
 		nbl_hw_wr32(phy_mgt, NBL_SEC006_REGI(i), nbl_sec006_data[i]);
 	}
 
+	nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
 	for (i = 0; i < NBL_SEC007_SIZE; i++)
 		nbl_hw_wr32(phy_mgt, NBL_SEC007_REGI(i), nbl_sec007_data[i]);
 
+	nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
 	for (i = 0; i < NBL_SEC008_SIZE; i++) {
 		if ((i + 1) % NBL_SEC_BLOCK_SIZE == 0)
 			nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
@@ -3587,6 +3590,7 @@ void nbl_write_all_regs(void *priv)
 		nbl_hw_wr32(phy_mgt, NBL_SEC008_REGI(i), nbl_sec008_data[i]);
 	}
 
+	nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
 	for (i = 0; i < NBL_SEC009_SIZE; i++) {
 		if ((i + 1) % NBL_SEC_BLOCK_SIZE == 0)
 			nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
@@ -3594,9 +3598,11 @@ void nbl_write_all_regs(void *priv)
 		nbl_hw_wr32(phy_mgt, NBL_SEC009_REGI(i), nbl_sec009_data[i]);
 	}
 
+	nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
 	for (i = 0; i < NBL_SEC010_SIZE; i++)
 		nbl_hw_wr32(phy_mgt, NBL_SEC010_REGI(i), nbl_sec010_data[i]);
 
+	nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
 	for (i = 0; i < NBL_SEC011_SIZE; i++) {
 		if ((i + 1) % NBL_SEC_BLOCK_SIZE == 0)
 			nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
@@ -3604,21 +3610,27 @@ void nbl_write_all_regs(void *priv)
 		nbl_hw_wr32(phy_mgt, NBL_SEC011_REGI(i), nbl_sec011_data[i]);
 	}
 
+	nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
 	for (i = 0; i < NBL_SEC012_SIZE; i++)
 		nbl_hw_wr32(phy_mgt, NBL_SEC012_REGI(i), nbl_sec012_data[i]);
 
+	nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
 	for (i = 0; i < NBL_SEC013_SIZE; i++)
 		nbl_hw_wr32(phy_mgt, NBL_SEC013_REGI(i), nbl_sec013_data[i]);
 
+	nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
 	for (i = 0; i < NBL_SEC014_SIZE; i++)
 		nbl_hw_wr32(phy_mgt, NBL_SEC014_REGI(i), nbl_sec014_data[i]);
 
+	nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
 	for (i = 0; i < NBL_SEC022_SIZE; i++)
 		nbl_hw_wr32(phy_mgt, NBL_SEC022_REGI(i), nbl_sec022_data[i]);
 
+	nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
 	for (i = 0; i < NBL_SEC023_SIZE; i++)
 		nbl_hw_wr32(phy_mgt, NBL_SEC023_REGI(i), nbl_sec023_data[i]);
 
+	nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
 	for (i = 0; i < NBL_SEC024_SIZE; i++) {
 		if ((i + 1) % NBL_SEC_BLOCK_SIZE == 0)
 			nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
@@ -3626,6 +3638,7 @@ void nbl_write_all_regs(void *priv)
 		nbl_hw_wr32(phy_mgt, NBL_SEC024_REGI(i), nbl_sec024_data[i]);
 	}
 
+	nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
 	for (i = 0; i < NBL_SEC025_SIZE; i++) {
 		if ((i + 1) % NBL_SEC_BLOCK_SIZE == 0)
 			nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
@@ -3633,9 +3646,11 @@ void nbl_write_all_regs(void *priv)
 		nbl_hw_wr32(phy_mgt, NBL_SEC025_REGI(i), nbl_sec025_data[i]);
 	}
 
+	nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
 	for (i = 0; i < NBL_SEC026_SIZE; i++)
 		nbl_hw_wr32(phy_mgt, NBL_SEC026_REGI(i), nbl_sec026_data[i]);
 
+	nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
 	for (i = 0; i < NBL_SEC027_SIZE; i++) {
 		if ((i + 1) % NBL_SEC_BLOCK_SIZE == 0)
 			nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
@@ -3643,51 +3658,67 @@ void nbl_write_all_regs(void *priv)
 		nbl_hw_wr32(phy_mgt, NBL_SEC027_REGI(i), nbl_sec027_data[i]);
 	}
 
+	nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
 	for (i = 0; i < NBL_SEC028_SIZE; i++)
 		nbl_hw_wr32(phy_mgt, NBL_SEC028_REGI(i), nbl_sec028_data[i]);
 
+	nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
 	for (i = 0; i < NBL_SEC029_SIZE; i++)
 		nbl_hw_wr32(phy_mgt, NBL_SEC029_REGI(i), nbl_sec029_data[i]);
 
+	nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
 	for (i = 0; i < NBL_SEC030_SIZE; i++)
 		nbl_hw_wr32(phy_mgt, NBL_SEC030_REGI(i), nbl_sec030_data[i]);
 
+	nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
 	for (i = 0; i < NBL_SEC039_SIZE; i++)
 		nbl_hw_wr32(phy_mgt, NBL_SEC039_REGI(i), nbl_sec039_data[i]);
 
+	nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
 	for (i = 0; i < NBL_SEC040_SIZE; i++)
 		nbl_hw_wr32(phy_mgt, NBL_SEC040_REGI(i), nbl_sec040_data[i]);
 
+	nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
 	for (i = 0; i < NBL_SEC046_SIZE; i++)
 		nbl_hw_wr32(phy_mgt, NBL_SEC046_REGI(i), nbl_sec046_data[i]);
 
+	nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
 	for (i = 0; i < NBL_SEC047_SIZE; i++)
 		nbl_hw_wr32(phy_mgt, NBL_SEC047_REGI(i), nbl_sec047_data[i]);
 
+	nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
 	for (i = 0; i < NBL_SEC052_SIZE; i++)
 		nbl_hw_wr32(phy_mgt, NBL_SEC052_REGI(i), nbl_sec052_data[i]);
 
+	nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
 	for (i = 0; i < NBL_SEC053_SIZE; i++)
 		nbl_hw_wr32(phy_mgt, NBL_SEC053_REGI(i), nbl_sec053_data[i]);
 
+	nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
 	for (i = 0; i < NBL_SEC058_SIZE; i++)
 		nbl_hw_wr32(phy_mgt, NBL_SEC058_REGI(i), nbl_sec058_data[i]);
 
+	nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
 	for (i = 0; i < NBL_SEC059_SIZE; i++)
 		nbl_hw_wr32(phy_mgt, NBL_SEC059_REGI(i), nbl_sec059_data[i]);
 
+	nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
 	for (i = 0; i < NBL_SEC062_SIZE; i++)
 		nbl_hw_wr32(phy_mgt, NBL_SEC062_REGI(i), nbl_sec062_data[i]);
 
+	nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
 	for (i = 0; i < NBL_SEC063_SIZE; i++)
 		nbl_hw_wr32(phy_mgt, NBL_SEC063_REGI(i), nbl_sec063_data[i]);
 
+	nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
 	for (i = 0; i < NBL_SEC065_SIZE; i++)
 		nbl_hw_wr32(phy_mgt, NBL_SEC065_REGI(i), nbl_sec065_data[i]);
 
+	nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
 	for (i = 0; i < NBL_SEC066_SIZE; i++)
 		nbl_hw_wr32(phy_mgt, NBL_SEC066_REGI(i), nbl_sec066_data[i]);
 
+	nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
 	for (i = 0; i < NBL_SEC071_SIZE; i++) {
 		if ((i + 1) % NBL_SEC_BLOCK_SIZE == 0)
 			nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
@@ -3695,27 +3726,35 @@ void nbl_write_all_regs(void *priv)
 		nbl_hw_wr32(phy_mgt, NBL_SEC071_REGI(i), nbl_sec071_data[i]);
 	}
 
+	nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
 	for (i = 0; i < NBL_SEC072_SIZE; i++)
 		nbl_hw_wr32(phy_mgt, NBL_SEC072_REGI(i), nbl_sec072_data[i]);
 
+	nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
 	for (i = 0; i < NBL_SEC116_SIZE; i++)
 		nbl_hw_wr32(phy_mgt, NBL_SEC116_REGI(i), nbl_sec116_data[i]);
 
+	nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
 	for (i = 0; i < NBL_SEC124_SIZE; i++)
 		nbl_hw_wr32(phy_mgt, NBL_SEC124_REGI(i), nbl_sec124_data[i]);
 
+	nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
 	for (i = 0; i < NBL_SEC125_SIZE; i++)
 		nbl_hw_wr32(phy_mgt, NBL_SEC125_REGI(i), nbl_sec125_data[i]);
 
+	nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
 	for (i = 0; i < NBL_SEC126_SIZE; i++)
 		nbl_hw_wr32(phy_mgt, NBL_SEC126_REGI(i), nbl_sec126_data[i]);
 
+	nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
 	for (i = 0; i < NBL_SEC137_SIZE; i++)
 		nbl_hw_wr32(phy_mgt, NBL_SEC137_REGI(i), nbl_sec137_data[i]);
 
+	nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
 	for (i = 0; i < NBL_SEC138_SIZE; i++)
 		nbl_hw_wr32(phy_mgt, NBL_SEC138_REGI(i), nbl_sec138_data[i]);
 
+	nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
 	nbl_hw_wr32(phy_mgt, NBL_SEC000_ADDR, 0x00000001);
 	nbl_hw_wr32(phy_mgt, NBL_SEC001_ADDR, 0x00000001);
 	nbl_hw_wr32(phy_mgt, NBL_SEC002_ADDR, 0x00000001);
@@ -3860,5 +3899,6 @@ void nbl_write_all_regs(void *priv)
 	nbl_hw_wr32(phy_mgt, NBL_SEC134_ADDR, 0x00000004);
 	nbl_hw_wr32(phy_mgt, NBL_SEC135_ADDR, 0x0000000e);
 	nbl_hw_wr32(phy_mgt, NBL_SEC136_ADDR, 0x0000000e);
+	nbl_hw_rd32(phy_mgt, NBL_HW_DUMMY_REG);
 }
 
