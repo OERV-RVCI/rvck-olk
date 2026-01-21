@@ -22,6 +22,8 @@ static long tmm_tsi_ioctl(struct file *file, unsigned int cmd, unsigned long arg
 static int tmm_get_tsi_version(struct virtcca_cvm_tsi_version __user *arg);
 static int tmm_get_attestation_token(struct virtcca_cvm_attestation_cmd __user *arg);
 static int tmm_get_device_cert(struct virtcca_device_cert __user *arg);
+static int tmm_get_set_migration_info(struct virtcca_migvm_info __user *arg);
+static int tmm_migvm_mem_checksum_loop(struct virtcca_migvm_checksum_info checksum_info);
 
 static const struct file_operations tmm_tsi_fops = {
 	.owner          = THIS_MODULE,
@@ -68,6 +70,8 @@ static void __exit tmm_tsi_exit(void)
 static long tmm_tsi_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	int ret;
+	struct virtcca_migvm_checksum_info checksum_info;
+	void __user *argp = (void __user *)arg;
 
 	switch (cmd) {
 	case TMM_GET_TSI_VERSION:
@@ -79,10 +83,30 @@ static long tmm_tsi_ioctl(struct file *file, unsigned int cmd, unsigned long arg
 	case TMM_GET_DEVICE_CERT:
 		ret = tmm_get_device_cert((struct virtcca_device_cert *)arg);
 		break;
+	case TMM_GET_MIGRATION_INFO:
+		ret = tmm_get_set_migration_info((struct virtcca_migvm_info *)arg);
+		break;
+	case TMM_GET_MIGVM_MEM_CHECKSUM:
+		if (copy_from_user(&checksum_info, argp,
+			sizeof(struct virtcca_migvm_checksum_info))) {
+			pr_err("tmm_tsi: mem checksum copy data from user failed\n");
+			return -ENOTTY;
+		}
+		ret = tmm_migvm_mem_checksum_loop(checksum_info);
+		break;
 	default:
 		pr_err("tmm_tsi: unknown ioctl command (0x%x)!\n", cmd);
 		return -ENOTTY;
 	}
+
+	return ret;
+}
+
+static int tmm_migvm_mem_checksum_loop(struct virtcca_migvm_checksum_info checksum_info)
+{
+	unsigned long ret;
+
+	ret = tsi_mig_integrity_checksum_loop(checksum_info.guest_rd, checksum_info.thread_id);
 
 	return ret;
 }
@@ -204,6 +228,137 @@ static int tmm_get_device_cert(struct virtcca_device_cert __user *arg)
 	return 0;
 }
 
+static int tmm_get_set_migration_info(struct virtcca_migvm_info __user *arg)
+{
+	unsigned long ret = 0;
+	struct virtcca_migvm_info migvm_info = {0};
+	struct pending_guest_rd_s *rdcontent = NULL;
+
+	if (!access_ok(arg, sizeof(*arg))) {
+		pr_err("tmm_tsi: invalid user pointer\n");
+		ret = -EFAULT;
+		goto out;
+	}
+
+	ret = copy_from_user(&migvm_info, arg, sizeof(struct virtcca_migvm_info));
+	if (ret) {
+		pr_err("tmm_tsi: copy challenge from user failed (%lu)!\n", ret);
+		ret = -EFAULT;
+		goto out;
+	}
+
+	if (migvm_info.content) {
+		if (!access_ok(migvm_info.content, migvm_info.size)) {
+			pr_err("tmm_tsi: invalid content address\n");
+			ret = -EFAULT;
+			goto out;
+		}
+	} else {
+		pr_err("tmm_tsi: invalid content pointer\n");
+		goto out;
+	}
+
+	struct migration_info *kcontent = kmalloc(sizeof(struct migration_info), GFP_KERNEL);
+
+	if (!kcontent) {
+		ret = -ENOMEM;
+		goto out;
+	}
+	if (sizeof(struct migration_info) != migvm_info.size) {
+		pr_err("tmm_tsi: size mismatch\n");
+		ret = -EINVAL;
+		goto out;
+	}
+
+	switch (migvm_info.ops) {
+	case OP_MIGRATE_GET_ATTR: {
+		if (copy_from_user(kcontent, migvm_info.content, migvm_info.size)) {
+			pr_err("tmm_tsi: copy slot value failed\n");
+			ret = -EFAULT;
+			goto out;
+		}
+		ret = tsi_migvm_get_attr(migvm_info.guest_rd, kcontent);
+		if (!ret) {
+			if (copy_to_user(migvm_info.content, kcontent, migvm_info.size)) {
+				pr_err("tmm_tsi: copy to user failed\n");
+				ret = -EFAULT;
+			}
+			pr_info("tmm_tsi: OP_MIGRATE_GET_ATTRT\n");
+		} else {
+			pr_err("tmm_tsi: get attr failed, ret = 0x%lx\n", ret);
+		}
+
+		break;
+	}
+	case OP_MIGRATE_SET_SLOT: {
+		if (copy_from_user(kcontent, migvm_info.content, migvm_info.size)) {
+			pr_err("tmm_tsi: copy slot value failed\n");
+			ret = -EFAULT;
+			goto out;
+		}
+		ret = tsi_migvm_set_slot(migvm_info.guest_rd, kcontent);
+		if (ret) {
+			pr_err("tmm_tsi: set slot failed, ret = %lx\n", ret);
+			ret = -EINVAL;
+		}
+		break;
+	}
+	case OP_MIGRATE_PEEK_RDS: {
+		if (copy_from_user(kcontent, migvm_info.content, migvm_info.size)) {
+			pr_err("tmm_tsi: copy slot value failed\n");
+			ret = -EFAULT;
+			goto out;
+		}
+
+		if (kcontent->pending_guest_rds) {
+			if (!access_ok(kcontent->pending_guest_rds,
+				sizeof(struct pending_guest_rd_s))) {
+				pr_err("tmm_tsi: invalid content pending guest rds address\n");
+				ret = -EFAULT;
+				goto out;
+			}
+		} else {
+			pr_err("tmm_tsi: invalid content pending guest rds pointer\n");
+			ret = -ENOMEM;
+			goto out;
+		}
+
+		rdcontent = kmalloc(sizeof(struct pending_guest_rd_s), GFP_KERNEL);
+		if (!rdcontent) {
+			ret = -ENOMEM;
+			goto out;
+		}
+
+		if (copy_from_user(rdcontent, kcontent->pending_guest_rds,
+			sizeof(struct pending_guest_rd_s))) {
+			pr_err("tmm_tsi: copy slot value failed\n");
+			ret = -EFAULT;
+			goto out;
+		}
+
+		ret = tsi_peek_binding_list(rdcontent);
+		if (!ret) {
+			if (copy_to_user(kcontent->pending_guest_rds, rdcontent,
+			sizeof(struct pending_guest_rd_s))) {
+				pr_err("tmm_tsi: copy to user failed\n");
+				ret = -EFAULT;
+			}
+		} else {
+			pr_err("tmm_tsi: peek rds failed, ret = 0x%lx\n", ret);
+		}
+		break;
+	}
+	default:
+		pr_err("tmm_tsi: invalid operation (%u)!\n", migvm_info.ops);
+		ret = -EINVAL;
+	}
+
+out:
+	kfree(kcontent);
+	kfree(rdcontent);
+
+	return ret;
+}
 module_init(tmm_tsi_init);
 module_exit(tmm_tsi_exit);
 

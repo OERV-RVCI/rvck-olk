@@ -14,6 +14,9 @@ enum virtcca_cvm_state {
 	CVM_STATE_DYING
 };
 
+#define VIRTCCA_MIG_DST		0
+#define VIRTCCA_MIG_SRC		1
+
 #define MAX_KAE_VF_NUM	11
 
 /*
@@ -38,6 +41,21 @@ struct tmi_cvm_params {
 	u64	kae_vf_num;
 	u64	sec_addr[MAX_KAE_VF_NUM];
 	u64	hpre_addr[MAX_KAE_VF_NUM];
+#ifndef __GENKSYMS__
+	u32 mig_enable; /* check the base capability of CVM migration */
+	u32 mig_src; /* check the CVM is source or dest*/
+	u32 migration_migvm_cap; /* the type of CVM (support migration) */
+#endif
+};
+
+/* the guest cvm and migcvm both use this structure */
+#define KVM_CVM_MIGVM_VERSION 0
+struct mig_cvm {
+	/* used by guest cvm */
+	uint8_t  version; /* kvm version of migcvm*/
+	uint64_t migvm_cid; /* vsock cid of migvm */
+	uint16_t dst_port;  /* port of destination cvm */
+	char dst_ip[16];    /* ip of destination cvm */
 };
 
 struct cvm {
@@ -76,6 +94,13 @@ struct virtcca_cvm {
 	struct kvm_numa_info numa_info;
 	struct tmi_cvm_params *params;
 	bool is_mapped; /* Whether the cvm RAM memory is mapped */
+#ifndef __GENKSYMS__
+	struct virtcca_mig_state *mig_state;
+	struct mig_cvm *mig_cvm_info;
+	u64 swiotlb_start;
+	u64 swiotlb_end;
+	u64 ipa_start;
+#endif
 };
 
 /*
@@ -157,6 +182,321 @@ static inline unsigned long cvm_ttt_level_mapsize(int level)
 
 	return (1UL << CVM_TTT_LEVEL_SHIFT(level));
 }
+
+/* virtcca MIG sub-ioctl() commands. */
+enum kvm_cvm_cmd_id {
+	/*  virtcca MIG migcvm commands. */
+	KVM_CVM_MIGCVM_SET_CID = 0,
+	KVM_CVM_MIGCVM_ATTEST,
+	KVM_CVM_MIGCVM_ATTEST_DST,
+	KVM_CVM_GET_BIND_STATUS,
+	KVM_CVM_MIG_EXPORT_ABORT,
+	/* virtcca MIG stream commands. */
+	KVM_CVM_MIG_STREAM_START,
+	KVM_CVM_MIG_EXPORT_STATE_IMMUTABLE,
+	KVM_CVM_MIG_IMPORT_STATE_IMMUTABLE,
+	KVM_CVM_MIG_EXPORT_MEM,
+	KVM_CVM_MIG_IMPORT_MEM,
+	KVM_CVM_MIG_EXPORT_TRACK,
+	KVM_CVM_MIG_IMPORT_TRACK,
+	KVM_CVM_MIG_EXPORT_PAUSE,
+	KVM_CVM_MIG_EXPORT_STATE_TEC,
+	KVM_CVM_MIG_IMPORT_STATE_TEC,
+	KVM_CVM_MIG_IMPORT_END,
+	KVM_CVM_MIG_CRC,
+	KVM_CVM_MIG_GET_MIG_INFO,
+	KVM_CVM_MIG_IS_ZERO_PAGE,
+	KVM_CVM_MIG_IMPORT_ZERO_PAGE,
+
+	KVM_CVM_MIG_CMD_NR_MAX,
+};
+
+struct kvm_virtcca_mig_cmd {
+	/* enum kvm_virtcca_cmd_id */
+	__u32 id;
+	/* flags for sub-commend. If sub-command doesn't use this, set zero. */
+	__u32 flags;
+	/*
+	 * data for each sub-command. An immediate or a pointer to the actual
+	 * data in process virtual address.  If sub-command doesn't use it,
+	 * set zero.
+	 */
+	__u64 data;
+	/*
+	 * Auxiliary error code.  The sub-command may return virtCCA SEAMCALL
+	 * status code in addition to -Exxx.
+	 * Defined for consistency with struct kvm_sev_cmd.
+	 */
+	__u64 error;
+};
+
+/* mig virtcca head*/
+#define KVM_DEV_VIRTCCA_MIG_ATTR	0x1
+
+struct kvm_dev_virtcca_mig_attr {
+#define KVM_DEV_VIRTCCA_MIG_ATTR_VERSION	0
+	__u32 version;
+/* 4KB buffer can hold 512 entries at most */
+#define VIRTCCA_MIG_BUF_LIST_PAGES_MAX		512
+	__u32 buf_list_pages;
+	__u32 max_migs;
+};
+
+#define VIRTCCA_MIG_STREAM_MBMD_MAP_OFFSET		0
+#define VIRTCCA_MIG_STREAM_GPA_LIST_MAP_OFFSET	1
+#define VIRTCCA_MIG_STREAM_MAC_LIST_MAP_OFFSET	2
+#define VIRTCCA_MIG_STREAM_BUF_LIST_MAP_OFFSET	4
+
+struct virtcca_bind_info {
+	int16_t version;
+	bool premig_done;
+};
+
+struct virtcca_dst_host_info {
+	char dst_ip[16];
+	uint16_t dst_port;
+	uint8_t version;
+};
+
+struct virtcca_mig_mbmd_data {  /* both kvm and tmm can access */
+	__u16 size;
+	__u16 mig_version;
+	__u16 migs_index; /* corresponding stream idx */
+	__u8  mb_type;
+	__u8  rsvd0; /* reserve bit */
+	__u32 mb_counter;
+	__u32 mig_epoch;
+	__u64 iv_counter;
+	__u8  type_specific_info[];
+} __packed;
+
+struct virtcca_mig_mbmd {
+	struct virtcca_mig_mbmd_data *data;
+	uint64_t hpa_and_size; /* Host physical address and size of the mbmd */
+};
+
+#define VIRTCCA_MIG_EPOCH_START_TOKEN 0xffffffff
+
+union virtcca_mig_buf_list_entry {
+	uint64_t val;
+	struct {
+		uint64_t rsvd0		: 12;
+		uint64_t pfn		: 40;
+		uint64_t rsvd1		: 11;
+		uint64_t invalid	: 1;
+	};
+};
+
+struct virtcca_mig_buf_list {
+	union virtcca_mig_buf_list_entry *entries;
+	hpa_t hpa;
+};
+
+union virtcca_mig_page_list_info {
+	uint64_t val;
+	struct {
+		uint64_t rsvd0		: 12;
+		uint64_t pfn		: 40;
+		uint64_t rsvd1		: 3;
+		uint64_t last_entry	: 9;
+	};
+};
+
+struct virtcca_mig_page_list {
+	hpa_t *entries;
+	union virtcca_mig_page_list_info info;
+};
+
+union virtcca_mig_gpa_list_entry {
+	uint64_t val;
+	struct{
+		uint64_t level		: 2;	/* Bits 1:0: Mapping level */
+		uint64_t pending	: 1;	/* Bit 2: Page is pending */
+		uint64_t reserved_0	: 4;	/* Bits 6:3 */
+		uint64_t l2_map		: 3;	/* Bits 9:7: L2 mapping flags */
+		uint64_t mig_type	: 2;	/* Bits 11:10: Migration type */
+		uint64_t gfn		: 40;	/* Bits 51:12 */
+#define GPA_LIST_OP_NOP		0
+#define GPA_LIST_OP_EXPORT	1
+#define GPA_LIST_OP_CANCEL	2
+		uint64_t operation	: 2;	/* Bits 53:52 */
+		uint64_t reserved_1	: 2;	/* Bits 55:54 */
+#define GPA_LIST_S_SUCCESS	0
+		uint64_t status		: 5;	/* Bits 56:52 */
+		uint64_t reserved_2	: 3;	/* Bits 63:61 */
+	};
+};
+
+#define TMM_MAX_DIRTY_BITMAP_LEN 8
+
+union virtcca_mig_ipa_list_info {
+	uint64_t val;
+	struct {
+		uint64_t rsvd0		: 3;
+		uint64_t first_entry: 9;
+		uint64_t pfn		: 40;
+		uint64_t rsvd1		: 3;
+		uint64_t last_entry	: 9;
+	};
+};
+
+struct virtcca_mig_gpa_list {
+	union virtcca_mig_gpa_list_entry *entries;
+	union virtcca_mig_ipa_list_info info;
+};
+
+struct virtcca_mig_mac_list {
+	void *entries;
+	hpa_t hpa;
+};
+
+union virtcca_mig_stream_info {
+	uint64_t val;
+	struct {
+		uint64_t index	: 16;
+		uint64_t rsvd	: 47;
+		uint64_t resume	: 1;
+	};
+	struct {
+		uint64_t rsvd1	  : 63;
+		uint64_t in_order : 1;
+	};
+};
+
+struct virtcca_mig_stream {
+	uint16_t idx; /* stream id */
+	uint32_t buf_list_pages;  /* ns memory page number of buf_list 5<n<512 */
+
+	struct virtcca_mig_mbmd mbmd;   /* ns memory */
+	/* for export status and mem*/
+	/* List of buffers to export/import the private memory data */
+	struct virtcca_mig_buf_list mem_buf_list;
+	/* List of buffers to export/miport the non-memory state data */
+	struct virtcca_mig_page_list page_list;
+	/* List of GPA entries used when export/import private memory */
+	struct virtcca_mig_gpa_list gpa_list;
+	/* List of MACs used when export/import private memory */
+	struct virtcca_mig_mac_list mac_list[2];
+	/* List of dest private pages */
+	struct virtcca_mig_buf_list dst_buf_list;
+	/*
+	 * List of buffers grabbed either from the private_fd allocated pages
+	 * for in-place import or from mem_buf_list for non-in-place import.
+	 */
+	struct virtcca_mig_buf_list import_mem_buf_list;
+	/*
+	 * Bitmap to get if a gpa in the gpa_list to import needs first-time
+	 * import, i.e. the leaf entry has not been set up in sept tables.
+	 * Support up to 512 pages in a batch.
+	 */
+	uint64_t first_time_import_bitmap[8];
+};
+
+struct virtcca_mig_state {
+	/* Number of streams created */
+	atomic_t streams_created;
+	hpa_t *migsc_paddrs;
+	struct virtcca_mig_gpa_list blockw_gpa_list;
+	struct virtcca_mig_stream *default_stream;
+	/* Backward stream used on migration abort during post-copy */
+	struct virtcca_mig_stream backward_stream;
+	hpa_t backward_migsc_paddr;
+	bool bugged;
+	/* Index of the next vCPU to export the state */
+	uint32_t vcpu_export_next_idx;
+	uint32_t mig_src;
+};
+
+struct virtcca_mig_capabilities {
+	uint32_t max_migs;
+	uint32_t nonmem_state_pages;
+};
+
+struct migcvm_agent_listen_cids {
+	uint64_t cid;
+};
+
+struct tmi_mig_mem_data {
+	uint64_t	gpa_list_info;
+	uint64_t	mig_buff_list_pa;
+	uint64_t	mig_cmd;
+	uint64_t	mbmd_hpa_and_size;
+	uint64_t	mac_pa0;
+	uint64_t	mac_pa1;
+};
+
+struct tmi_mig_mem {
+	struct tmi_mig_mem_data *data;
+	uint64_t addr_and_size;
+};
+
+struct tmi_mig_memslot_data {
+	uint64_t	dirty_bitmap_list[TMM_MAX_DIRTY_BITMAP_LEN];
+	uint64_t	base_gfn;
+	uint64_t	npages;
+	short		memslot_id;
+};
+
+struct tmi_mig_memslot {
+	struct tmi_mig_memslot_data *data;
+	uint64_t addr_and_size;
+};
+
+struct virtCCAMigInfo {
+	uint64_t swiotlb_start;
+	uint64_t swiotlb_end;
+};
+
+enum slot_status {
+	SLOT_IS_EMPTY = 0,
+	SLOT_NOT_BINDED,
+	SLOT_IS_BINDED,
+	SLOT_IS_READY
+};
+
+/* vsock port for migvm */
+#define MIGCVM_AGENT_PORT_SRC 9000
+#define MIGCVM_AGENT_PORT_DST 9001
+
+#define PAYLOAD_TYPE_ALL	  0
+#define PAYLOAD_TYPE_CHAR	 1
+#define PAYLOAD_TYPE_ULL	  2
+#define VSOCK_MSG_ACK		 0xb
+#define MAX_PAYLOAD_SIZE	  256
+
+/* 1 bit aligned forced */
+#pragma pack(push, 1)
+struct socket_payload {
+	char			char_payload[MAX_PAYLOAD_SIZE];
+	unsigned long long ull_payload;
+};
+struct bind_msg_s {
+	struct socket_payload payload;
+	unsigned long long session_id;
+	char			cmd[16];
+	unsigned int	payload_type;
+	unsigned int	payload_len;
+	unsigned int	success;
+};
+#pragma pack(pop)
+
+struct mig_cvm_update_info {
+	uint64_t swiotlb_start;
+	uint64_t swiotlb_end;
+	uint64_t ipa_start;
+};
+
+#define SEC_MEM "secure"
+#define NON_SEC_MEM "non-secure"
+
+struct crc_config {
+	uint64_t ipa_start;
+	uint64_t ipa_end;
+	uint64_t granularity;
+	bool is_secure;
+	bool enabled;
+};
+
 #endif
 
 #endif

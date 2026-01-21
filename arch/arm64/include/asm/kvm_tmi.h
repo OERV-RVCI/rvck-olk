@@ -34,6 +34,8 @@
 #define TMI_ERROR_TTT_DESTROY_AGAIN	14
 #define TMI_ERROR_STE_CREATED		15
 
+#define TMI_IMPORT_INCOMPLETE                        39
+
 #define TMI_RETURN_STATUS(ret)		((ret) & 0xFF)
 #define TMI_RETURN_INDEX(ret)		(((ret) >> 8) & 0xFF)
 
@@ -48,7 +50,7 @@
 #define TMI_FEATURE_REGISTER_0_HASH_SHA_256	BIT(28)
 #define TMI_FEATURE_REGISTER_0_HASH_SHA_512	BIT(29)
 
-#define TMI_CVM_PARAM_FLAG_LPA2	BIT(0)
+#define TMI_CVM_PARAM_FLAG_LPA2		BIT(0)
 #define TMI_CVM_PARAM_FLAG_SVE		BIT(1)
 #define TMI_CVM_PARAM_FLAG_PMU		BIT(2)
 
@@ -246,7 +248,7 @@ struct tmi_tec_run {
 #define TMI_FNUM_TTT_MAP_RANGE          U(0x26D)
 #define TMI_FNUM_TTT_UNMAP_RANGE        U(0x26E)
 #define TMI_FNUM_TTT_DESTROY            U(0x26F)
-#define TMI_FNUM_INF_TEST               U(0x270)
+#define TMI_FNUM_INF_TEST               U(0x271)
 #define TMI_FNUM_KAE_INIT               U(0x273)
 #define TMI_FNUM_KAE_ENABLE             U(0x274)
 #define TMI_FNUM_INFO_SHOW              U(0x275)
@@ -268,6 +270,11 @@ struct tmi_tec_run {
 #define TMI_FNUM_DEV_TTT_CREATE         U(0x285)
 #define TMI_FNUM_DEVICE_CREATE          U(0x286)
 #define TMI_FNUM_DEVICE_DESTROY         U(0x287)
+
+/* additional TMI call for migration */
+#define TMI_FNUM_MIG_CONTROL			U(0x270)
+#define TMI_FNUM_MIG_DATA				U(0x272)
+#define TMI_FNUM_MIG_ATTESTATION		U(0x276)
 
 /* TMI SMC64 PIDs handled by the SPMD */
 #define TMI_TMM_VERSION_REQ             TMI_FID(SMC_64, TMI_FNUM_VERSION_REQ)
@@ -309,6 +316,41 @@ struct tmi_tec_run {
 #define TMI_TMM_DEV_CREATE              TMI_FID(SMC_64, TMI_FNUM_DEVICE_CREATE)
 #define TMI_TMM_DEV_DESTROY             TMI_FID(SMC_64, TMI_FNUM_DEVICE_DESTROY)
 
+/* additional TMI call for migration */
+#define TMI_TMM_MIG_CONTROL				TMI_FID(SMC_64, TMI_FNUM_MIG_CONTROL)
+#define TMI_TMM_MIG_DATA				TMI_FID(SMC_64, TMI_FNUM_MIG_DATA)
+#define TMI_TMM_MIG_ATTESTATION			TMI_FID(SMC_64, TMI_FNUM_MIG_ATTESTATION)
+
+enum tmi_tmm_mig_control_fid_e {
+	TMI_TMM_GET_MIG_CONFIG,
+	TMI_TMM_MIG_STREAM_CREATE,
+	TMI_TMM_SET_TMM_MEMSLOT,
+	TMI_TMM_MIG_UPDATE_CVM_INFO,
+	TMI_TMM_MIG_MEM_REGION_PROTECT,
+	TMI_TMM_MIG_IMPORT_COMMIT,
+	TMI_TMM_DUMP_CHECKSUM,
+	TMI_TMM_MIG_EXPORT_ABORT,
+	TMI_TMM_MIG_EXPORT_PAUSE
+};
+
+enum tmi_tmm_mig_data_fid_e {
+	TMI_TMM_MIG_EXPORT_IMMUTABLE,
+	TMI_TMM_MIG_IMPORT_IMMUTABLE,
+	TMI_TMM_MIG_EXPORT_TRACK,
+	TMI_TMM_MIG_IMPORT_TRACK,
+	TMI_TMM_MIG_EXPORT_MEM,
+	TMI_TMM_MIG_IMPORT_MEM,
+	TMI_TMM_MIG_EXPORT_TEC,
+	TMI_TMM_MIG_IMPORT_TEC,
+	TMI_TMM_MIG_IS_ZERO_PAGE,
+	TMI_TMM_MIG_IMPORT_ZERO_PAGE
+};
+
+enum tmi_tmm_mig_attestation_fid_e {
+	TMI_TMM_MIG_BIND_CLEAN,
+	TMI_TMM_MIG_BIND_PEEK
+};
+
 #define TMI_ABI_VERSION_GET_MAJOR(_version) ((_version) >> 16)
 #define TMI_ABI_VERSION_GET_MINOR(_version) ((_version) & 0xFFFF)
 
@@ -333,6 +375,8 @@ struct tmi_tec_run {
 #define KVM_CAP_ARM_TMM_CFG_DBG					3
 #define KVM_CAP_ARM_TMM_CFG_PMU					4
 #define KVM_CAP_ARM_TMM_CFG_KAE					5
+#define KVM_CAP_ARM_TMM_CFG_MIG					6
+#define KVM_CAP_ARM_TMM_CFG_MIG_CVM				7
 
 #define KVM_CAP_ARM_TMM_MAX_KAE_VF_NUM		11
 
@@ -373,6 +417,18 @@ struct kvm_cap_arm_tmm_config_item {
 			__u64	sec_addr[KVM_CAP_ARM_TMM_MAX_KAE_VF_NUM];
 			__u64	hpre_addr[KVM_CAP_ARM_TMM_MAX_KAE_VF_NUM];
 		};
+#ifndef __GENKSYMS__
+		/* cfg == KVM_CAP_ARM_TMM_CFG_MIG */
+		struct {
+			__u32 mig_enable;
+			__u32 mig_src;
+		};
+
+		/* cfg == KVM_CAP_ARM_TMM_CFG_MIG_CVM */
+		struct {
+			__u32 migration_migvm_cap;
+		};
+#endif
 		/* Fix the size of the union */
 		__u8	reserved[256];
 	};
@@ -454,5 +510,35 @@ int kvm_cvm_map_ipa(struct kvm *kvm, phys_addr_t ipa, kvm_pfn_t pfn,
 	unsigned long map_size, enum kvm_pgtable_prot prot, int ret);
 void virtcca_cvm_set_secure_flag(void *vdev, void *info);
 bool is_virtcca_available(void);
+u64 tmi_mig_stream_create(u64 rd, u64 numa_set);
+u64 tmi_get_mig_config(void);
+struct arm_smccc_res tmi_export_immutable(uint64_t rd, uint64_t hpa_and_size_pa,
+					uint64_t page_or_list, uint64_t mig_cmd);
+u64 tmi_import_immutable(uint64_t rd, uint64_t hpa_and_size_pa,
+					uint64_t page_or_list, uint64_t mig_cmd);
+struct arm_smccc_res tmi_import_mem(uint64_t rd, uint64_t mig_mem_param);
+struct arm_smccc_res tmi_export_mem(uint64_t rd, uint64_t mig_mem_param);
+u64 tmi_import_track(uint64_t rd, uint64_t hpa_and_size_pa, uint64_t mig_cmd);
+u64 tmi_export_track(uint64_t rd, uint64_t hpa_and_size_pa, uint64_t mig_cmd);
+u64 tmi_import_commit(uint64_t rd);
+u64 tmi_dump_checksum(uint64_t rd, uint64_t gpa_list_addr,
+	uint64_t crc_result_addr, uint64_t granularity);
+u64 tmi_export_abort(uint64_t rd);
+struct arm_smccc_res tmi_is_zero_page(uint64_t rd, uint64_t gpa_list_info_val);
+struct arm_smccc_res tmi_import_zero_page(uint64_t rd, uint64_t gpa_list_info_val);
+u64 tmi_set_tmm_memslot(uint64_t rd, uint64_t mig_memslot_param);
+u64 tmi_import_tec(uint64_t tec_pa, uint64_t mbmd_addr_and_size,
+					uint64_t page_list_pa, uint64_t stream_info_pa);
+struct arm_smccc_res tmi_export_tec(uint64_t tec_pa, uint64_t mbmd_addr_and_size,
+					uint64_t page_list_pa, uint64_t stream_info_pa);
+u64 tmi_update_cvm_info(uint64_t rd, uint64_t cvm_update_info_addr);
+struct arm_smccc_res tmi_export_pause(uint64_t rd);
+
+/* enable the migcvm ctl */
+int kvm_migcvm_ioctl(struct kvm *kvm, unsigned long arg);
+struct arm_smccc_res tmi_mem_region_protect(u64 rd, u64 start, u64 end);
+u64 tmi_bind_clean(uint64_t rd);
+struct arm_smccc_res tmi_bind_peek(uint64_t rd);
+bool virtcca_kvm_adjust_dirty_log_range(struct kvm *kvm, phys_addr_t *start, phys_addr_t *end);
 #endif
 #endif
