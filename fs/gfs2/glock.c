@@ -822,9 +822,8 @@ skip_inval:
 		ret = ls->ls_ops->lm_lock(gl, target, lck_flags);
 		spin_lock(&gl->gl_lockref.lock);
 
-		if (ret == -EINVAL && gl->gl_target == LM_ST_UNLOCKED &&
-		    target == LM_ST_UNLOCKED &&
-		    test_bit(DFL_UNMOUNT, &ls->ls_recover_flags)) {
+		if (ret == -ENODEV && gl->gl_target == LM_ST_UNLOCKED &&
+		    target == LM_ST_UNLOCKED) {
 			/*
 			 * The lockspace has been released and the lock has
 			 * been unlocked implicitly.
