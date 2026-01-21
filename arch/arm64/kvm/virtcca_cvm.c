@@ -52,8 +52,6 @@ static bool virtcca_vtimer_adjust;
 #define TMI_IMPORT_TIMEOUT_MS	30000
 #define TMI_TRACK_TIMEOUT_MS	20
 
-#define KVM_DEV_TYPE_VIRTCCA_MIG_STREAM		0x00C
-
 static struct virtcca_mig_capabilities g_virtcca_mig_caps;
 static struct migcvm_agent_listen_cids g_migcvm_agent_listen_cid;
 static uint32_t virtcca_crc32_table[CRC_LEN];
@@ -2820,6 +2818,9 @@ static long virtcca_mig_stream_ioctl(struct kvm_device *dev, unsigned int ioctl,
 		goto out;
 	}
 
+	if (ioctl != KVM_CVM_MIG_IOCTL)
+		return -EINVAL;
+
 	switch (cvm_cmd.id) {
 	case KVM_CVM_MIG_EXPORT_STATE_IMMUTABLE:
 		r = virtcca_mig_export_state_immutable(kvm, stream,
@@ -3465,6 +3466,9 @@ static int virtcca_mig_export_abort(struct kvm *kvm)
 {
 	struct virtcca_cvm *cvm = kvm->arch.virtcca_cvm;
 	phys_addr_t target_ipa = cvm->swiotlb_start;
+	struct kvm_pgtable *pgt = kvm->arch.mmu.pgt;
+	int level;
+	uint64_t granule;
 	uint64_t ret = 0;
 
 	ret = tmi_export_abort(cvm->rd);
@@ -3475,6 +3479,27 @@ static int virtcca_mig_export_abort(struct kvm *kvm)
 
 	if (target_ipa == 0)
 		return 0;
+
+	while (target_ipa < cvm->swiotlb_end) {
+		ret = kvm_pgtable_get_leaf(pgt, target_ipa, NULL, &level);
+		if (ret) {
+			pr_err("%s: err=%llu\n", __func__, ret);
+			ret = -EIO;
+			break;
+		}
+
+		granule = kvm_granule_size(level);
+		ret = virtcca_stage2_update_leaf_attrs(pgt, target_ipa, granule,
+		KVM_PTE_LEAF_ATTR_LO_S2_S2AP_R | KVM_PTE_LEAF_ATTR_LO_S2_S2AP_W, 0, NULL, NULL, 0);
+		if (ret) {
+			pr_err("%s: err=%llu\n", __func__, ret);
+			ret = -EIO;
+			break;
+		}
+
+		kvm_call_hyp(__kvm_tlb_flush_vmid_ipa_nsh, pgt->mmu, target_ipa, level);
+		target_ipa += granule;
+	}
 
 	virtcca_mig_state_release(cvm);
 	cvm->swiotlb_start = 0;
@@ -3496,8 +3521,8 @@ static int virtcca_kvm_alloc_dirty_bitmap(struct kvm_memory_slot *memslot)
 	}
 
 	memslot->dirty_bitmap = __vmalloc_node_range(dirty_bitmap_size * 2, SZ_2M,
-		VMALLOC_START, VMALLOC_END, GFP_KERNEL | __GFP_ZERO, PAGE_KERNEL,
-		VM_ALLOW_HUGE_VMAP, current_node, __builtin_return_address(0));
+								VMALLOC_START, VMALLOC_END, GFP_KERNEL | __GFP_ZERO, PAGE_KERNEL,
+								VM_ALLOW_HUGE_VMAP, current_node, __builtin_return_address(0));
 	if (!memslot->dirty_bitmap)
 		return -ENOMEM;
 

@@ -1499,6 +1499,8 @@ enum kvm_device_type {
 #define KVM_DEV_TYPE_ARM_PV_TIME	KVM_DEV_TYPE_ARM_PV_TIME
 	KVM_DEV_TYPE_RISCV_AIA,
 #define KVM_DEV_TYPE_RISCV_AIA		KVM_DEV_TYPE_RISCV_AIA
+	KVM_DEV_TYPE_VIRTCCA_MIG_STREAM,
+#define KVM_DEV_TYPE_VIRTCCA_MIG_STREAM		KVM_DEV_TYPE_VIRTCCA_MIG_STREAM
 	KVM_DEV_TYPE_LOONGARCH_IPI,
 #define KVM_DEV_TYPE_LOONGARCH_IPI	KVM_DEV_TYPE_LOONGARCH_IPI
 	KVM_DEV_TYPE_LOONGARCH_EIOINTC,
@@ -2476,6 +2478,8 @@ struct kvm_csv3_handle_memory {
 
 /* get tmi version */
 #define KVM_GET_TMI_VERSION	_IOR(KVMIO, 0xd2, u64)
+/*virtcca migration*/
+#define KVM_CVM_MIG_IOCTL _IOWR(KVMIO, 0xd3, struct kvm_virtcca_mig_cmd)
 
 /* Available with KVM_CAP_ARM_RME, only for VMs with KVM_VM_TYPE_ARM_REALM  */
 struct kvm_arm_rmm_psci_complete {

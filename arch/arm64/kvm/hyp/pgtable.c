@@ -1617,3 +1617,14 @@ void kvm_pgtable_stage2_free_unlinked(struct kvm_pgtable_mm_ops *mm_ops, void *p
 	WARN_ON(mm_ops->page_count(pgtable) != 1);
 	mm_ops->put_page(pgtable);
 }
+
+#ifdef CONFIG_HISI_VIRTCCA_HOST
+int virtcca_stage2_update_leaf_attrs(struct kvm_pgtable *pgt, u64 addr,
+					u64 size, kvm_pte_t attr_set,
+					kvm_pte_t attr_clr, kvm_pte_t *orig_pte,
+					u32 *level, enum kvm_pgtable_walk_flags flags)
+{
+	return stage2_update_leaf_attrs(pgt, addr, size, attr_set,
+		attr_clr, orig_pte, level, flags);
+}
+#endif

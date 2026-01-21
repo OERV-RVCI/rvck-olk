@@ -767,3 +767,10 @@ enum kvm_pgtable_prot kvm_pgtable_hyp_pte_prot(kvm_pte_t pte);
 void kvm_tlb_flush_vmid_range(struct kvm_s2_mmu *mmu,
 				phys_addr_t addr, size_t size);
 #endif	/* __ARM64_KVM_PGTABLE_H__ */
+
+#ifdef CONFIG_HISI_VIRTCCA_HOST
+int virtcca_stage2_update_leaf_attrs(struct kvm_pgtable *pgt, u64 addr,
+					u64 size, kvm_pte_t attr_set,
+					kvm_pte_t attr_clr, kvm_pte_t *orig_pte,
+					u32 *level, enum kvm_pgtable_walk_flags flags);
+#endif
