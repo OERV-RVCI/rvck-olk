@@ -671,14 +671,14 @@ struct cfs_rq {
 	u64			avg_load;
 
 	u64			exec_clock;
-	u64			min_vruntime;
+	KABI_REPLACE(u64 min_vruntime, u64 zero_vruntime)
 #ifdef CONFIG_SCHED_CORE
 	unsigned int		forceidle_seq;
-	u64			min_vruntime_fi;
+	u64			zero_vruntime_fi;
 #endif
 
 #ifndef CONFIG_64BIT
-	u64			min_vruntime_copy;
+	KABI_BROKEN_REMOVE(u64 min_vruntime_copy)
 #endif
 
 	struct rb_root_cached	tasks_timeline;
