@@ -431,3 +431,80 @@ int realm_ccal_map_ram(struct kvm *kvm,
 
 	return ret;
 }
+
+static int ccal_destroy_data(struct realm *realm, unsigned long ipa,
+			     unsigned long *next_addr)
+{
+	unsigned long pa, size, granule_type, offset;
+	unsigned long rd = virt_to_phys(realm->rd);
+	int ret;
+
+	ret = rmi_ccal_data_destroy(rd, ipa, &pa, &size, &granule_type,
+				    next_addr);
+
+	if (WARN_ON(ret))
+		return -ENXIO;
+
+	if (granule_type == CCAL_GRANULE_NORMAL)
+		ret = rmi_ccal_undelegate_range(pa, size);
+	else
+		goto out_unpin;
+
+	/*
+	 * If the undelegate fails then something has gone seriously
+	 * wrong: take an extra reference to just leak pages.
+	 */
+	if (WARN_ON(ret)) {
+		for (offset = 0; offset < size; offset += PAGE_SIZE)
+			get_page(phys_to_page(pa + offset));
+	}
+
+out_unpin:
+	for (offset = 0; offset < size; offset += PAGE_SIZE)
+		unpin_user_page(phys_to_page(pa + offset));
+
+	return 0;
+}
+
+void realm_ccal_destroy_data_range(struct kvm *kvm, unsigned long start,
+				   unsigned long end)
+{
+	struct realm *realm = &kvm->arch.realm;
+	unsigned long next_addr, addr;
+	int ret;
+
+	for (addr = start; addr < end; addr = next_addr) {
+		ret = ccal_destroy_data(realm, addr, &next_addr);
+		if (ret)
+			break;
+		cond_resched_rwlock_write(&kvm->mmu_lock);
+	}
+}
+
+static int ccal_rtt_complement(struct realm *realm, unsigned long ipa,
+			       int walk_level, int level)
+{
+	/*
+	 * Walk level could be -1 if the LPA2 feature is enabled.
+	 * RMM adds 1 to both of protected level and unprotected level so that
+	 * their values can be correctly delieverd.
+	 */
+	int protected_level = (walk_level & 0xF) - 1;
+	int unprotected_level = ((walk_level >> 4) & 0xF) - 1;
+	int ret = 0;
+
+	level = max(max(protected_level, unprotected_level), level);
+	if (protected_level < level)
+		ret = realm_create_rtt_levels(realm, ipa, protected_level,
+					      level, NULL);
+
+	if (ret)
+		return ret;
+
+	ipa = (1UL << (realm->ia_bits - 1)) | ipa;
+	if (unprotected_level < level)
+		ret = realm_create_rtt_levels(realm, ipa, unprotected_level,
+					      level, NULL);
+
+	return ret;
+}

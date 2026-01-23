@@ -726,6 +726,12 @@ void kvm_realm_unmap_range(struct kvm *kvm, unsigned long start,
 	if (realm->state == REALM_STATE_NONE)
 		return;
 
+	if (is_ccal_rvm(realm)) {
+		if (unmap_private)
+			realm_ccal_destroy_data_range(kvm, start, end);
+		return;
+	}
+
 	realm_unmap_shared_range(kvm, find_map_level(realm, start, end),
 				 start, end, may_block);
 	if (unmap_private)
