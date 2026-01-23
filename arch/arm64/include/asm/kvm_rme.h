@@ -64,6 +64,9 @@ struct realm {
 	unsigned long num_aux;
 	unsigned int vmid;
 	unsigned int ia_bits;
+#ifndef __GENKSYMS__
+	bool is_ccal;
+#endif
 };
 
 /**

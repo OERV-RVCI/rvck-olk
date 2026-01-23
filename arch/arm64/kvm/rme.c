@@ -11,6 +11,7 @@
 #include <asm/virt.h>
 
 #include <asm/kvm_pgtable.h>
+#include <asm/kvm_rme_ccal.h>
 #include <asm/cca_base.h>
 
 static unsigned long rmm_feat_reg0;
@@ -1354,6 +1355,9 @@ static int kvm_rme_config_realm(struct kvm *kvm, struct kvm_enable_cap *cap)
 		break;
 	case ARM_RME_CONFIG_HASH_ALGO:
 		r = config_realm_hash_algo(realm, &cfg);
+		break;
+	case ARM_RME_CFG_CCAL:
+		config_realm_ccal(realm);
 		break;
 	default:
 		r = -EINVAL;
