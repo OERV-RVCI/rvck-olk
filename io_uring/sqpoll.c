@@ -85,6 +85,25 @@ static __cold void io_sqd_update_thread_idle(struct io_sq_data *sqd)
 	sqd->sq_thread_idle = sq_thread_idle;
 }
 
+static void io_sqd_update_wakeup_period(struct io_sq_data *sqd)
+{
+	struct io_ring_ctx *ctx;
+	ktime_t sq_thread_wakeup_period = 0;
+
+	list_for_each_entry(ctx, &sqd->ctx_list, sqd_list) {
+		if (!(ctx->ext_flags & IORING_SETUP_SQ_THREAD_FORCE_IDLE))
+			continue;
+
+		if (!sq_thread_wakeup_period) {
+			sq_thread_wakeup_period = ctx->sq_thread_wakeup_period;
+			continue;
+		}
+		sq_thread_wakeup_period = min(sq_thread_wakeup_period,
+					      ctx->sq_thread_wakeup_period);
+	}
+	WRITE_ONCE(sqd->sq_thread_wakeup_period, sq_thread_wakeup_period);
+}
+
 void io_sq_thread_finish(struct io_ring_ctx *ctx)
 {
 	struct io_sq_data *sqd = ctx->sq_data;
@@ -93,6 +112,9 @@ void io_sq_thread_finish(struct io_ring_ctx *ctx)
 		io_sq_thread_park(sqd);
 		list_del_init(&ctx->sqd_list);
 		io_sqd_update_thread_idle(sqd);
+		io_sqd_update_wakeup_period(sqd);
+		if (!sqd->sq_thread_wakeup_period)
+			hrtimer_cancel(&sqd->timer);
 		io_sq_thread_unpark(sqd);
 
 		io_put_sq_data(sqd);
@@ -157,6 +179,7 @@ static struct io_sq_data *io_get_sq_data(struct io_uring_params *p,
 	mutex_init(&sqd->lock);
 	init_waitqueue_head(&sqd->wait);
 	init_completion(&sqd->exited);
+	hrtimer_init(&sqd->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	return sqd;
 }
 
@@ -251,7 +274,7 @@ static int io_sq_thread(void *data)
 
 	mutex_lock(&sqd->lock);
 	while (1) {
-		bool cap_entries, sqt_spin = false;
+		bool cap_entries, sqt_spin = false, force_idle = false;
 
 		if (io_sqd_events_pending(sqd) || signal_pending(current)) {
 			if (io_sqd_handle_event(sqd))
@@ -263,13 +286,18 @@ static int io_sq_thread(void *data)
 		list_for_each_entry(ctx, &sqd->ctx_list, sqd_list) {
 			int ret = __io_sq_thread(ctx, cap_entries);
 
+			if (ctx->ext_flags & IORING_SETUP_SQ_THREAD_FORCE_IDLE) {
+				force_idle = true;
+				continue;
+			}
+
 			if (!sqt_spin && (ret > 0 || !wq_list_empty(&ctx->iopoll_list)))
 				sqt_spin = true;
 		}
 		if (io_run_task_work())
 			sqt_spin = true;
 
-		if (sqt_spin || !time_after(jiffies, timeout)) {
+		if (!force_idle && (sqt_spin || !time_after(jiffies, timeout))) {
 			if (sqt_spin)
 				timeout = jiffies + sqd->sq_thread_idle;
 			if (unlikely(need_resched())) {
@@ -349,8 +377,20 @@ void io_sqpoll_wait_sq(struct io_ring_ctx *ctx)
 	finish_wait(&ctx->sqo_sq_wait, &wait);
 }
 
+static enum hrtimer_restart sq_thread_hrtimer_fn(struct hrtimer *timer)
+{
+	struct io_sq_data *sqd = container_of(timer, struct io_sq_data, timer);
+	ktime_t sq_thread_wakeup_period = READ_ONCE(sqd->sq_thread_wakeup_period);
+
+	wake_up(&sqd->wait);
+	hrtimer_forward_now(timer, sq_thread_wakeup_period);
+
+	return HRTIMER_RESTART;
+}
+
 __cold int io_sq_offload_create(struct io_ring_ctx *ctx,
-				struct io_uring_params *p)
+				struct io_uring_params *p,
+				struct io_uring_params_ext *p_ext)
 {
 	struct task_struct *task_to_put = NULL;
 	int ret;
@@ -390,9 +430,19 @@ __cold int io_sq_offload_create(struct io_ring_ctx *ctx,
 		if (!ctx->sq_thread_idle)
 			ctx->sq_thread_idle = HZ;
 
+		if (ctx->ext_flags & IORING_SETUP_SQ_THREAD_FORCE_IDLE) {
+			/* reset to make this ctx skip updating sq thread idle */
+			ctx->sq_thread_idle = 0;
+			ctx->sq_thread_wakeup_period =
+				ns_to_ktime((u64)p_ext->sq_thread_wakeup_period * NSEC_PER_USEC);
+			if (!ctx->sq_thread_wakeup_period)
+				ctx->sq_thread_wakeup_period = ns_to_ktime(10 * NSEC_PER_MSEC);
+		}
+
 		io_sq_thread_park(sqd);
 		list_add(&ctx->sqd_list, &sqd->ctx_list);
 		io_sqd_update_thread_idle(sqd);
+		io_sqd_update_wakeup_period(sqd);
 		/* don't attach to a dying SQPOLL thread, would be racy */
 		ret = (attached && !sqd->thread) ? -ENXIO : 0;
 		io_sq_thread_unpark(sqd);
@@ -438,6 +488,13 @@ __cold int io_sq_offload_create(struct io_ring_ctx *ctx,
 		wake_up_new_task(tsk);
 		if (ret)
 			goto err;
+
+		if (ctx->ext_flags & IORING_SETUP_SQ_THREAD_FORCE_IDLE) {
+			sqd->timer.function = sq_thread_hrtimer_fn;
+			hrtimer_start(&sqd->timer,
+				      READ_ONCE(sqd->sq_thread_wakeup_period),
+				      HRTIMER_MODE_REL);
+		}
 	} else if (p->flags & IORING_SETUP_SQ_AFF) {
 		/* Can't have SQ_AFF without SQPOLL */
 		ret = -EINVAL;

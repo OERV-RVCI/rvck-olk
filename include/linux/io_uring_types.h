@@ -197,6 +197,7 @@ struct io_ring_ctx {
 	/* const or read-mostly hot data */
 	struct {
 		unsigned int		flags;
+		unsigned int		ext_flags;
 		unsigned int		drain_next: 1;
 		unsigned int		restricted: 1;
 		unsigned int		off_timeout_used: 1;
@@ -367,6 +368,7 @@ struct io_ring_ctx {
 	struct callback_head		poll_wq_task_work;
 	struct list_head		defer_list;
 	unsigned			sq_thread_idle;
+	ktime_t				sq_thread_wakeup_period;
 	/* protected by ->completion_lock */
 	unsigned			evfd_last_cq_tail;
 
