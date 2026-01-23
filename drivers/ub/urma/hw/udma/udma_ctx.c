@@ -123,10 +123,9 @@ err_init_ctx_resp:
 	mutex_destroy(&ctx->hugepage_lock);
 	mutex_destroy(&ctx->pgdir_mutex);
 	udma_put_usva_tid(dev, ctx);
-err_unbind_dev:
-	ummu_sva_unbind_device(ctx->sva);
 err_free_ctx:
 	kfree(ctx);
+
 	return NULL;
 }
 
@@ -169,7 +168,7 @@ int udma_free_ucontext(struct ubcore_ucontext *ucontext)
 	}
 	mutex_unlock(&ctx->hugepage_lock);
 	mutex_destroy(&ctx->hugepage_lock);
-
+	mutex_destroy(&ctx->page_lock);
 	kfree(ctx);
 
 	return 0;
@@ -396,7 +395,7 @@ udma_get_page_priv(struct udma_context *ctx, uint64_t va, uint32_t len)
 	mmap_write_lock(current->mm);
 	vma = find_vma(current->mm, va);
 	if (vma == NULL || vma->vm_start != va || vma->vm_end < va + align_size ||
-	    va & PAGE_MASK != 0 || vma->vm_end & PAGE_MASK != 0) {
+	    va & ~PAGE_MASK || vma->vm_end & ~PAGE_MASK) {
 		dev_err(ctx->dev->dev, "failed to find vma.\n");
 		ret = -EINVAL;
 		goto err_unlock;
@@ -414,7 +413,6 @@ udma_get_page_priv(struct udma_context *ctx, uint64_t va, uint32_t len)
 	if (!priv) {
 		dev_err(ctx->dev->dev, "failed to alloc page priv.\n");
 		ret = -EINVAL;
-		goto err_unlock;
 	}
 err_unlock:
 	mmap_write_unlock(current->mm);
@@ -442,7 +440,9 @@ static void udma_free_page_priv(struct udma_context *ctx, struct udma_page_priv 
 	for (i = 0; i < priv->page_num; i++)
 		__free_page(priv->pages[i]);
 	kfree(priv->pages);
+	priv->pages = NULL;
 	kfree(priv);
+	priv = NULL;
 }
 
 struct udma_page_priv *udma_get_map_page_priv(struct udma_context *ctx, uint64_t va, uint32_t len)
@@ -470,7 +470,7 @@ struct udma_page_priv *udma_get_map_page_priv(struct udma_context *ctx, uint64_t
 void udma_put_map_page_priv(struct udma_context *ctx, struct udma_page_priv *priv)
 {
 	if (ctx->dev->caps.sva_sep_mode_en)
-		udma_ioummu_unmap(ctx, UMMU_INVALID_TID, priv->va_base, priv->va_len);
+		udma_ioummu_unmap(ctx, UMMU_INVALID_TID, (uintptr_t)priv->va_base, priv->va_len);
 
 	udma_free_page_priv(ctx, priv);
 }
@@ -480,7 +480,8 @@ static struct udma_hugepage_priv *udma_list_find_before(struct udma_context *ctx
 	struct udma_hugepage_priv *priv;
 
 	list_for_each_entry(priv, &ctx->hugepage_list, list) {
-		if (va >= priv->va_base && va < priv->va_base + priv->va_len)
+		if (va >= (uintptr_t)priv->va_base &&
+		    va < (uintptr_t)(priv->va_base + priv->va_len))
 			return priv;
 	}
 
@@ -548,7 +549,7 @@ err_remap_pfn_range:
 err_alloc_pages:
 	udma_unremap_hugepage(vma, priv, i);
 
-	return ret;
+	return -ENOMEM;
 }
 
 static struct udma_hugepage_priv *

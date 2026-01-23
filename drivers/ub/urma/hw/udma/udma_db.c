@@ -50,41 +50,43 @@ int udma_pin_sw_db(struct udma_context *ctx, struct udma_sw_db *db)
 
 	list_add(&page->list, &ctx->pgdir_list);
 	db->page = page;
-	db->virt_addr = (char *)sg_virt(page->umem->sg_head.sgl) + offset;
+	db->virt_addr = (char *)sg_virt(page->umem->append.sgt.sgl) + offset;
 	mutex_unlock(&ctx->pgdir_mutex);
+
 	return 0;
 found:
 	db->page = page;
-	db->virt_addr = (char *)sg_virt(page->umem->sg_head.sgl) + offset;
+	db->virt_addr = (char *)sg_virt(page->umem->append.sgt.sgl) + offset;
 	refcount_inc(&page->refcount);
 out:
 	mutex_unlock(&ctx->pgdir_mutex);
+
 	return ret;
 }
 
-void udma_unpin_sw_db(struct udma_context *ctx, struct udma_sw_db *db)
+void udma_unpin_sw_db(struct udma_context *ctx, struct udma_sw_db *db, bool dirty)
 {
 	mutex_lock(&ctx->pgdir_mutex);
 
 	if (refcount_dec_and_test(&db->page->refcount)) {
 		list_del(&db->page->list);
-		udma_umem_release(db->page->umem, false);
+		udma_umem_release(db->page->umem, false, dirty);
 		kfree(db->page);
 		db->page = NULL;
 	}
 
 	mutex_unlock(&ctx->pgdir_mutex);
 }
+
 struct udma_page_priv *udma_get_sw_db(struct udma_context *ctx, uint64_t db_addr)
 {
 	uint64_t page_addr = db_addr & PAGE_MASK;
 	struct udma_page_priv *priv = NULL;
 	struct udma_page_priv *tmp;
-	int ret;
 
 	mutex_lock(&ctx->page_lock);
 	list_for_each_entry_safe(priv, tmp, &ctx->page_list, list) {
-		if (page_addr == priv->va_base)
+		if (page_addr == (uintptr_t)priv->va_base)
 			goto found;
 	}
 
@@ -116,7 +118,7 @@ void udma_put_sw_db(struct udma_context *ctx, uint64_t db_addr)
 
 	mutex_lock(&ctx->page_lock);
 	list_for_each_entry_safe(priv, tmp, &ctx->page_list, list) {
-		if (page_addr == priv->va_base)
+		if (page_addr == (uintptr_t)priv->va_base)
 			goto found;
 	}
 	mutex_unlock(&ctx->page_lock);
@@ -184,6 +186,7 @@ err_kva:
 	bitmap_free(page->bitmap);
 err_bitmap:
 	kfree(page);
+
 	return NULL;
 }
 
