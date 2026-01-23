@@ -33,4 +33,8 @@ int realm_ccal_map_ram(struct kvm *kvm,
 void realm_ccal_destroy_data_range(struct kvm *kvm, unsigned long start,
 				   unsigned long end);
 
+int realm_ccal_set_ipa_state(struct kvm_vcpu *vcpu, unsigned long start,
+			     unsigned long end, unsigned long ripas,
+			     unsigned long *top_ipa);
+
 #endif

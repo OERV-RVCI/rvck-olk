@@ -22,6 +22,38 @@
 
 #define CCAL_RTT_ENTRY_NUM	512U
 
+static int get_start_level(struct realm *realm)
+{
+	return 4 - ((realm->ia_bits - 8) / (RMM_PAGE_SHIFT - 3));
+}
+
+static inline unsigned long rme_rtt_level_mapsize(int level)
+{
+	if (WARN_ON(level > RMM_RTT_MAX_LEVEL))
+		return RMM_PAGE_SIZE;
+
+	return (1UL << RMM_RTT_LEVEL_SHIFT(level));
+}
+
+static int find_map_level(struct realm *realm,
+			  unsigned long start,
+			  unsigned long end)
+{
+	int level = RMM_RTT_MAX_LEVEL;
+
+	while (level > get_start_level(realm)) {
+		unsigned long map_size = rme_rtt_level_mapsize(level - 1);
+
+		if (!IS_ALIGNED(start, map_size) ||
+		    (start + map_size) > end)
+			break;
+
+		level--;
+	}
+
+	return level;
+}
+
 static bool pages_are_consecutive(struct page **pages, int num)
 {
 	for (int i = 1; i < num; i++) {
@@ -505,6 +537,47 @@ static int ccal_rtt_complement(struct realm *realm, unsigned long ipa,
 	if (unprotected_level < level)
 		ret = realm_create_rtt_levels(realm, ipa, unprotected_level,
 					      level, NULL);
+
+	return ret;
+}
+
+int realm_ccal_set_ipa_state(struct kvm_vcpu *vcpu, unsigned long start,
+			     unsigned long end, unsigned long ripas,
+			     unsigned long *top_ipa)
+{
+	struct kvm *kvm = vcpu->kvm;
+	struct realm *realm = &kvm->arch.realm;
+	struct realm_rec *rec = vcpu->arch.rec;
+	phys_addr_t rd_phys = virt_to_phys(realm->rd);
+	phys_addr_t rec_phys = virt_to_phys(rec->rec_page);
+	unsigned long ipa = start;
+	int ret = 0;
+
+	while (ipa < end) {
+		unsigned long next;
+
+		ret = rmi_rtt_set_ripas(rd_phys, rec_phys, ipa, end, &next);
+
+		if (RMI_RETURN_STATUS(ret) == RMI_SUCCESS) {
+			ipa = next;
+		} else if (RMI_RETURN_STATUS(ret) == RMI_ERROR_RTT) {
+			int walk_level = RMI_RETURN_INDEX(ret);
+			int level = find_map_level(realm, ipa, end);
+
+			ret = ccal_rtt_complement(realm, ipa, walk_level, level);
+
+			if (ret)
+				break;
+			/* Retry with RTTs created */
+		} else {
+			WARN(1, "Unexpected error in %s: %#x\n", __func__,
+			     ret);
+			ret = -ENXIO;
+			break;
+		}
+	}
+
+	*top_ipa = ipa;
 
 	return ret;
 }

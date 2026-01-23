@@ -1489,7 +1489,12 @@ static void kvm_complete_ripas_change(struct kvm_vcpu *vcpu)
 		kvm_mmu_topup_memory_cache(&vcpu->arch.mmu_page_cache,
 					   kvm_mmu_cache_min_pages(kvm));
 		write_lock(&kvm->mmu_lock);
-		ret = realm_set_ipa_state(vcpu, base, top, ripas, &top_ipa);
+		if (is_ccal_rvm(&kvm->arch.realm))
+			ret = realm_ccal_set_ipa_state(vcpu, base, top, ripas,
+						       &top_ipa);
+		else
+			ret = realm_set_ipa_state(vcpu, base, top, ripas,
+						  &top_ipa);
 		write_unlock(&kvm->mmu_lock);
 
 		if (WARN_RATELIMIT(ret && ret != -ENOMEM,
