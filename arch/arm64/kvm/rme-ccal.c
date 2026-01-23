@@ -105,6 +105,53 @@ err_undelegate:
 	return -ENXIO;
 }
 
+static int ccal_create_data_block(struct realm *realm, unsigned long ipa,
+				  struct page **dst_pages,
+				  struct page *tmp_block, unsigned long flags)
+{
+	phys_addr_t dst_phys, tmp_phys;
+	int ret;
+
+	memcpy(page_address(tmp_block), page_address(dst_pages[0]),
+	       RMM_L2_BLOCK_SIZE);
+
+	dst_phys = page_to_phys(dst_pages[0]);
+	tmp_phys = page_to_phys(tmp_block);
+
+	if (rmi_ccal_delegate_range(dst_phys, RMM_L2_BLOCK_SIZE) != RMI_SUCCESS)
+		return -ENXIO;
+
+	ret = rmi_ccal_block_create(virt_to_phys(realm->rd), dst_phys, ipa,
+				    tmp_phys, flags);
+	if (RMI_RETURN_STATUS(ret) == RMI_ERROR_RTT) {
+		/* Create missing RTTs and retry. */
+		int err_level = RMI_RETURN_INDEX(ret);
+
+		ret = realm_create_rtt_levels(realm, ipa, err_level,
+					      RMM_RTT_BLOCK_LEVEL, NULL);
+		if (ret)
+			goto err_undelegate;
+
+		ret = rmi_ccal_block_create(virt_to_phys(realm->rd), dst_phys,
+					    ipa, tmp_phys, flags);
+	}
+
+	if (ret)
+		goto err_undelegate;
+
+	return 0;
+
+err_undelegate:
+	if (WARN_ON(rmi_ccal_undelegate_range(dst_phys, RMM_L2_BLOCK_SIZE))) {
+		for (int i = 0, offset = 0; offset < RMM_L2_BLOCK_SIZE;
+		     i++, offset += PAGE_SIZE) {
+			/* Pages can't be returned to NS world so are lost. */
+			get_page(dst_pages[i]);
+		}
+	}
+	return -ENXIO;
+}
+
 static int ccal_create_data_block_unknown(struct realm *realm,
 					  struct page **dst_pages,
 					  unsigned long ipa)
@@ -148,6 +195,123 @@ err_undelegate:
 	}
 
 	return -ENXIO;
+}
+
+int realm_ccal_populate_region(struct kvm *kvm, phys_addr_t ipa_base,
+			       phys_addr_t ipa_end, phys_addr_t *ipa_top,
+			       u32 flags)
+{
+	struct realm *realm = &kvm->arch.realm;
+	struct kvm_memory_slot *memslot;
+	struct page *tmp_pages = NULL;
+	unsigned long data_flags = 0;
+	gfn_t base_gfn, top_gfn;
+	int nr_pages, nr_pinned;
+	struct page **pages;
+	unsigned int order;
+	unsigned long hva;
+	bool block_map;
+	int idx;
+	int ret;
+
+	if (ipa_base == ipa_end)
+		return 0;
+
+	if (flags & KVM_ARM_RME_POPULATE_FLAGS_MEASURE)
+		data_flags = RMI_MEASURE_CONTENT;
+
+	if (ipa_base == ALIGN_DOWN(ipa_base, RMM_L2_BLOCK_SIZE) &&
+	    ipa_end - ipa_base >= RMM_L2_BLOCK_SIZE) {
+		*ipa_top = ipa_base + RMM_L2_BLOCK_SIZE;
+		block_map = true;
+	} else {
+		*ipa_top = min(ipa_end, ALIGN_DOWN(ipa_base + RMM_L2_BLOCK_SIZE,
+						   RMM_L2_BLOCK_SIZE));
+		block_map = false;
+	}
+
+	base_gfn = gpa_to_gfn(ipa_base);
+	top_gfn = gpa_to_gfn(*ipa_top);
+	nr_pages = top_gfn - base_gfn;
+
+	idx = srcu_read_lock(&kvm->srcu);
+	memslot = gfn_to_memslot(kvm, base_gfn);
+	if (!memslot) {
+		ret = -EFAULT;
+		goto out_srcu;
+	}
+
+	/* We require the region to be contained within a single memslot. */
+	if (memslot->base_gfn + memslot->npages < top_gfn) {
+		ret = -EINVAL;
+		goto out_srcu;
+	}
+
+	hva = gfn_to_hva_memslot(memslot, gpa_to_gfn(ipa_base));
+	if (kvm_is_error_hva(hva)) {
+		ret = -EINVAL;
+		goto out_srcu;
+	}
+
+	pages = kmalloc(CCAL_RTT_ENTRY_NUM * sizeof(*pages), GFP_KERNEL);
+	if (!pages) {
+		ret = -ENOMEM;
+		goto out_srcu;
+	}
+
+	nr_pinned = pin_user_pages_fast(hva, nr_pages, FOLL_WRITE, pages);
+	if (nr_pinned != nr_pages) {
+		ret = -EFAULT;
+		goto out_pin;
+	}
+
+	if (block_map && !IS_ALIGNED(page_to_phys(pages[0]), RMM_L2_BLOCK_SIZE))
+		block_map = false;
+
+	if (block_map && !pages_are_consecutive(pages, nr_pinned))
+		block_map = false;
+
+	if (block_map)
+		order = get_order(RMM_L2_BLOCK_SIZE);
+	else
+		order = get_order(RMM_PAGE_SIZE);
+
+	tmp_pages = alloc_pages(GFP_KERNEL, order);
+	if (!tmp_pages) {
+		ret = -ENOMEM;
+		goto out_pin;
+	}
+
+	if (block_map) {
+		ret = ccal_create_data_block(realm, ipa_base, pages, tmp_pages,
+					     data_flags);
+		if (ALIGN(ipa_base, RMM_L1_BLOCK_SIZE) ==
+		    (ipa_base + RMM_L2_BLOCK_SIZE))
+			fold_rtt(realm, ALIGN_DOWN(ipa_base, RMM_L1_BLOCK_SIZE),
+				 RMM_RTT_BLOCK_LEVEL);
+	} else {
+		for (int i = 0; i < nr_pinned; i++) {
+			ret = realm_create_protected_data_page(realm, ipa_base,
+							       pages[i],
+							       tmp_pages,
+							       data_flags);
+			if (ret)
+				break;
+			ipa_base += RMM_PAGE_SIZE;
+		}
+	}
+
+	if (ret == 0)
+		goto out_free;
+out_pin:
+	unpin_user_pages(pages, nr_pinned);
+out_free:
+	kfree(pages);
+	if (tmp_pages)
+		__free_pages(tmp_pages, order);
+out_srcu:
+	srcu_read_unlock(&kvm->srcu, idx);
+	return ret;
 }
 
 static int ccal_map_range(struct kvm *kvm, unsigned long ipa_base,

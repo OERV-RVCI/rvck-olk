@@ -764,11 +764,11 @@ static int realm_create_protected_data_granule(struct realm *realm,
 	return 0;
 }
 
-static int realm_create_protected_data_page(struct realm *realm,
-					    unsigned long ipa,
-					    struct page *dst_page,
-					    struct page *src_page,
-					    unsigned long flags)
+int realm_create_protected_data_page(struct realm *realm,
+				     unsigned long ipa,
+				     struct page *dst_page,
+				     struct page *src_page,
+				     unsigned long flags)
 {
 	unsigned long rd = virt_to_phys(realm->rd);
 	phys_addr_t dst_phys, src_phys;
@@ -1110,9 +1110,13 @@ static int kvm_populate_realm(struct kvm *kvm,
 	 */
 	while (ipa_base < ipa_end) {
 		phys_addr_t end = min(ipa_end, ipa_base + SZ_2M);
+		int ret;
 
-		int ret = populate_region(kvm, ipa_base, end,
-					  args->flags);
+		if (is_ccal_rvm(&kvm->arch.realm))
+			ret = realm_ccal_populate_region(kvm, ipa_base, ipa_end,
+							 &end, args->flags);
+		else
+			ret = populate_region(kvm, ipa_base, end, args->flags);
 
 		if (ret)
 			return ret;
