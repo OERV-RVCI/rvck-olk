@@ -214,6 +214,12 @@ static int sdei_api_event_get_info(u32 event, u32 info, u64 *result)
 			      0, 0, result);
 }
 
+int sdei_api_event_status(u32 event, u64 *result)
+{
+	return invoke_sdei_fn(SDEI_1_0_FN_SDEI_EVENT_STATUS, event, 0, 0,
+			      0, 0, result);
+}
+
 static struct sdei_event *sdei_event_create(u32 event_num,
 					    sdei_event_callback *cb,
 					    void *cb_arg)

@@ -39,6 +39,7 @@ int sdei_event_disable(u32 event_num);
 int sdei_api_event_interrupt_bind(int hwirq);
 int sdei_api_event_disable(u32 event_num);
 int sdei_api_event_enable(u32 event_num);
+int sdei_api_event_status(u32 event_num, u64 *result);
 int sdei_api_clear_eoi(int hwirq);
 int sdei_api_set_secure_timer_period(int sec);
 
