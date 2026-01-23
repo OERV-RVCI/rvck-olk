@@ -561,11 +561,9 @@ static int realm_rtt_destroy(struct realm *realm, unsigned long addr,
 	return ret;
 }
 
-static int realm_create_rtt_levels(struct realm *realm,
-				   unsigned long ipa,
-				   int level,
-				   int max_level,
-				   struct kvm_mmu_memory_cache *mc)
+int realm_create_rtt_levels(struct realm *realm, unsigned long ipa,
+			    int level, int max_level,
+			    struct kvm_mmu_memory_cache *mc)
 {
 	if (level == max_level)
 		return 0;
@@ -826,7 +824,7 @@ err:
 	return -ENXIO;
 }
 
-static int fold_rtt(struct realm *realm, unsigned long addr, int level)
+int fold_rtt(struct realm *realm, unsigned long addr, int level)
 {
 	phys_addr_t rtt_addr;
 	int ret;
@@ -1407,6 +1405,18 @@ int _kvm_realm_enable_cap(struct kvm *kvm, struct kvm_enable_cap *cap)
 	case KVM_CAP_ARM_RME_ACTIVATE_REALM:
 		r = kvm_activate_realm(kvm);
 		break;
+	case KVM_CAP_ARM_RME_MAP_RAM_CCAL: {
+		struct arm_rme_populate_realm args;
+		void __user *argp = u64_to_user_ptr(cap->args[1]);
+
+		if (copy_from_user(&args, argp, sizeof(args))) {
+			r = -EFAULT;
+			break;
+		}
+
+		r = realm_ccal_map_ram(kvm, &args);
+		break;
+	}
 	default:
 		r = -EINVAL;
 		break;

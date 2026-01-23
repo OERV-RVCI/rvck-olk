@@ -16,4 +16,7 @@ static inline bool is_ccal_rvm(struct realm *realm)
 
 void config_realm_ccal(struct realm *realm);
 
+int realm_ccal_map_ram(struct kvm *kvm,
+		       struct arm_rme_populate_realm *args);
+
 #endif

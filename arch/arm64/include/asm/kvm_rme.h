@@ -133,6 +133,10 @@ int _realm_psci_complete(struct kvm_vcpu *source,
 			struct kvm_vcpu *target,
 			unsigned long status);
 
+int realm_create_rtt_levels(struct realm *realm, unsigned long ipa, int level,
+			    int max_level, struct kvm_mmu_memory_cache *mc);
+int fold_rtt(struct realm *realm, unsigned long addr, int level);
+
 static inline bool kvm_realm_is_private_address(struct realm *realm,
 						unsigned long addr)
 {
