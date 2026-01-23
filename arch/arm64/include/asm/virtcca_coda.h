@@ -54,6 +54,7 @@ size_t virtcca_unmap_pages(void *ops, unsigned long iova,
 
 void virtcca_pci_read_msi_msg(struct pci_dev *dev, struct msi_msg *msg,
 	void __iomem *base);
+bool virtcca_pci_write_msg_msix(struct msi_desc *desc, struct msi_msg *msg);
 bool virtcca_pci_write_msg_msi(struct msi_desc *desc, struct msi_msg *msg);
 void virtcca_msix_prepare_msi_desc(struct pci_dev *dev,
 	struct msi_desc *desc, void __iomem *addr);

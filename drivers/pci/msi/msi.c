@@ -194,6 +194,11 @@ static inline void pci_write_msg_msi(struct pci_dev *dev, struct msi_desc *desc,
 	int pos = dev->msi_cap;
 	u16 msgctl;
 
+#ifdef CONFIG_HISI_VIRTCCA_CODA
+	if (virtcca_pci_write_msg_msi(desc, msg))
+		return;
+#endif
+
 	pci_read_config_word(dev, pos + PCI_MSI_FLAGS, &msgctl);
 	msgctl &= ~PCI_MSI_FLAGS_QSIZE;
 	msgctl |= desc->pci.msi_attrib.multiple << 4;
@@ -230,7 +235,7 @@ static inline void pci_write_msg_msix(struct msi_desc *desc, struct msi_msg *msg
 		pci_msix_write_vector_ctrl(desc, ctrl | PCI_MSIX_ENTRY_CTRL_MASKBIT);
 
 #ifdef CONFIG_HISI_VIRTCCA_CODA
-	if (is_virtcca_cvm_enable() && virtcca_pci_write_msg_msi(desc, msg))
+	if (virtcca_pci_write_msg_msix(desc, msg))
 		return;
 #endif
 	writel(msg->address_lo, base + PCI_MSIX_ENTRY_LOWER_ADDR);
