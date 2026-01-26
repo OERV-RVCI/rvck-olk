@@ -60,7 +60,7 @@ static void add_sk_rule(int devid, u32 dip4, u16 dport, void *sk, int action, in
 	hlist_add_head(&entry->node, sk_hlist);
 	return;
 out:
-	oecls_debug("alloc failed rule:%p entry:%p\n", rule, entry);
+	oecls_debug("alloc rule failed\n");
 	kfree(entry);
 	kfree(rule);
 }
@@ -372,10 +372,12 @@ static int do_srxntuple(struct cmd_context *ctx, struct ethtool_rx_flow_spec *fs
 
 	flow_spec_to_ntuple(fsp, &ntuplecmd.fs);
 
-	eval.cmd = ETHTOOL_GFLAGS;
-	ret = send_ethtool_ioctl(ctx, &eval);
-	if (ret || !(eval.data & ETH_FLAG_NTUPLE))
-		return -1;
+	if (check_nic_feature) {
+		eval.cmd = ETHTOOL_GFLAGS;
+		ret = send_ethtool_ioctl(ctx, &eval);
+		if (ret || !(eval.data & ETH_FLAG_NTUPLE))
+			return -1;
+	}
 
 	ntuplecmd.cmd = ETHTOOL_SRXNTUPLE;
 	ret = send_ethtool_ioctl(ctx, &ntuplecmd);
