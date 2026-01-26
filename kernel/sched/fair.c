@@ -9467,10 +9467,19 @@ static void task_dead_fair(struct task_struct *p)
 static int
 balance_fair(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
 {
+	int new_tasks;
+
 	if (rq->nr_running)
 		return 1;
 
-	return newidle_balance(rq, rf) != 0;
+	rq_idle_stamp_update(rq);
+
+	new_tasks = newidle_balance(rq, rf);
+
+	if (new_tasks)
+		rq_idle_stamp_clear(rq);
+
+	return new_tasks != 0;
 }
 #endif /* CONFIG_SMP */
 
