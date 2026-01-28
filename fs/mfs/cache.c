@@ -306,6 +306,8 @@ void mfs_post_event_read(struct mfs_cache_object *object,
 	do {
 		xas_lock(&xas);
 
+		/* Ensure flags changed after lock */
+		smp_mb__before_atomic();
 		if (!test_bit(MFS_CACHE_READY, &caches->flags)) {
 			xas_unlock(&xas);
 			goto out;
