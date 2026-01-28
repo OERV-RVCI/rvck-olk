@@ -8803,12 +8803,7 @@ void mem_cgroup_replace_folio(struct folio *old, struct folio *new)
 		return;
 
 	memcg = folio_memcg(old);
-	/*
-	 * Note that it is normal to see !memcg for a hugetlb folio.
-	 * For e.g, itt could have been allocated when memory_hugetlb_accounting
-	 * was not selected.
-	 */
-	VM_WARN_ON_ONCE_FOLIO(!folio_test_hugetlb(old) && !memcg, old);
+	VM_WARN_ON_ONCE_FOLIO(!memcg, old);
 	if (!memcg)
 		return;
 
@@ -8852,7 +8847,12 @@ void mem_cgroup_migrate(struct folio *old, struct folio *new)
 		return;
 
 	memcg = folio_memcg(old);
-	VM_WARN_ON_ONCE_FOLIO(!memcg, old);
+	/*
+	 * Note that it is normal to see !memcg for a hugetlb folio.
+	 * For e.g, itt could have been allocated when memory_hugetlb_accounting
+	 * was not selected.
+	 */
+	VM_WARN_ON_ONCE_FOLIO(!folio_test_hugetlb(old) && !memcg, old);
 	if (!memcg)
 		return;
 
