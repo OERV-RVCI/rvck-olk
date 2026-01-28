@@ -65,8 +65,9 @@ static ssize_t mfs_dev_read(struct file *file, char __user *buf,
 	XA_STATE(xas, &caches->events, caches->next_ev);
 	struct mfs_event *event;
 	struct mfs_msg *msg;
+	bool sync;
 	size_t n;
-	int ret = 0;
+	int ret;
 
 	xas_lock(&xas);
 	event = mfs_pick_event(&xas, ULONG_MAX);
@@ -78,7 +79,8 @@ static ssize_t mfs_dev_read(struct file *file, char __user *buf,
 		xas_unlock(&xas);
 		return 0;
 	}
-	if (event->syncer)
+	sync = event->syncer ? true : false;
+	if (sync)
 		get_mfs_event(event);
 	xas_unlock(&xas);
 
@@ -102,12 +104,14 @@ static ssize_t mfs_dev_read(struct file *file, char __user *buf,
 	xas_lock(&xas);
 	xas_clear_mark(&xas, MFS_EVENT_NEW);
 	caches->next_ev = xas.xa_index + 1;
-	if (!event->syncer)
+	if (!sync)
 		xas_store(&xas, NULL);
 	xas_unlock(&xas);
 out:
 	trace_mfs_dev_read(file, msg->opcode, msg->id, msg->fd);
-	put_mfs_event(event);
+	/* unread async event don't need to released immediately */
+	if (ret == 0 || sync)
+		put_mfs_event(event);
 	return ret ? ret : n;
 }
 
