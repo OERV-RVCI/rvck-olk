@@ -399,6 +399,8 @@ static void mfs_kill_sb(struct super_block *sb)
 
 	clear_bit(MFS_MOUNTED, &sbi->flags);
 	if (support_event(sbi)) {
+		/* The barrier pair to make sure flags is new */
+		smp_mb__before_atomic();
 		while (test_bit(MFS_CACHE_OPENED, &caches->flags)) {
 			static DEFINE_RATELIMIT_STATE(busy_open, 30 * HZ, 1);
 
@@ -407,10 +409,12 @@ static void mfs_kill_sb(struct super_block *sb)
 				continue;
 			pr_warn("Pending until close the /dev/mfs%u...\n", sbi->minor);
 		}
+		/* Ensure flags status is updated */
+		smp_mb__after_atomic();
 		mfs_fs_dev_exit(sb);
 	}
-	kill_anon_super(sb);
 	mfs_destroy_events(sb);
+	kill_anon_super(sb);
 	if (sbi->mtree) {
 		path_put(&sbi->lower);
 		kfree(sbi->mtree);
