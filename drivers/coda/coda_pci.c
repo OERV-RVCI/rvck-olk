@@ -28,29 +28,29 @@ void virtcca_pci_read_msi_msg(struct pci_dev *dev, struct msi_msg *msg,
 }
 
 /**
- * virtcca_pci_write_msi_msg - The secure device triggers an interrupt by writing
+ * virtcca_pci_write_msg_msix - The secure device triggers an interrupt by writing
  * to a specific memory address via TMM
  * @desc: MSI-X description
  * @msg: Msg information
  *
  **/
-bool virtcca_pci_write_msg_msi(struct msi_desc *desc, struct msi_msg *msg)
+bool virtcca_pci_write_msg_msix(struct msi_desc *desc, struct msi_msg *msg)
 {
-	if (!is_virtcca_cvm_enable())
+	struct pci_dev *pdev;
+	void __iomem *base;
+	u32 ctrl;
+	u64 pbase;
+	bool unmasked;
+	u64 addr;
+
+	if (!is_virtcca_cvm_enable() || !desc->dev || !dev_is_pci(desc->dev))
 		return false;
 
-	void __iomem *base = pci_msix_desc_addr(desc);
-	u32 ctrl = desc->pci.msix_ctrl;
-	bool unmasked = !(ctrl & PCI_MSIX_ENTRY_CTRL_MASKBIT);
-	u64 pbase = mmio_va_to_pa(base);
-	struct pci_dev *pdev = (desc->dev != NULL &&
-		dev_is_pci(desc->dev)) ? to_pci_dev(desc->dev) : NULL;
-
+	pdev = to_pci_dev(desc->dev);
 	if (!is_cc_dev(pci_dev_id(pdev)))
 		return false;
 
-	u64 addr = (u64)msg->address_lo | ((u64)msg->address_hi << 32);
-
+	addr = (u64)msg->address_lo | ((u64)msg->address_hi << 32);
 	/*
 	 * In the SR-IOV scenario, secure devices can be used on the host driver side. Therefore,
 	 * only the secure devices assigned to the CVM need to have their MSI addresses modified
@@ -64,6 +64,12 @@ bool virtcca_pci_write_msg_msi(struct msi_desc *desc, struct msi_msg *msg)
 		if (!addr)
 			return true;
 	}
+
+	base = pci_msix_desc_addr(desc);
+	ctrl = desc->pci.msix_ctrl;
+	unmasked = !(ctrl & PCI_MSIX_ENTRY_CTRL_MASKBIT);
+	pbase = mmio_va_to_pa(base);
+
 	tmi_mmio_write(pbase + PCI_MSIX_ENTRY_LOWER_ADDR,
 		lower_32_bits(addr), CVM_RW_32_BIT, pci_dev_id(pdev));
 	tmi_mmio_write(pbase + PCI_MSIX_ENTRY_UPPER_ADDR,
@@ -76,6 +82,49 @@ bool virtcca_pci_write_msg_msi(struct msi_desc *desc, struct msi_msg *msg)
 	tmi_mmio_read(pbase + PCI_MSIX_ENTRY_DATA,
 		CVM_RW_32_BIT, pci_dev_id(pdev));
 
+	return true;
+}
+
+bool virtcca_pci_write_msg_msi(struct msi_desc *desc, struct msi_msg *msg)
+{
+	int pos;
+	u16 msgctl;
+	struct pci_dev *dev;
+	u64 addr;
+
+	if (!is_virtcca_cvm_enable() || !desc->dev || !dev_is_pci(desc->dev))
+		return false;
+
+	dev = to_pci_dev(desc->dev);
+	if (!is_cc_dev(pci_dev_id(dev)))
+		return false;
+
+	pos = dev->msi_cap;
+	pci_read_config_word(dev, pos + PCI_MSI_FLAGS, &msgctl);
+	msgctl &= ~PCI_MSI_FLAGS_QSIZE;
+	msgctl |= desc->pci.msi_attrib.multiple << 4;
+	pci_write_config_word(dev, pos + PCI_MSI_FLAGS, msgctl);
+
+	addr = (u64)msg->address_lo | ((u64)msg->address_hi << 32);
+	if (addr && get_g_coda_dev_vm_type(pci_dev_id(dev)) == CC_DEV_CVM_TYPE) {
+		/* Get the offset of the its register of a specific device */
+		u64 offset = addr - CVM_MSI_ORIG_IOVA;
+
+		addr = get_g_cc_dev_msi_addr(pci_dev_id(dev));
+		addr += offset;
+		if (!addr)
+			return true;
+	}
+
+	pci_write_config_dword(dev, pos + PCI_MSI_ADDRESS_LO, lower_32_bits(addr));
+	if (desc->pci.msi_attrib.is_64) {
+		pci_write_config_dword(dev, pos + PCI_MSI_ADDRESS_HI, upper_32_bits(addr));
+		pci_write_config_word(dev, pos + PCI_MSI_DATA_64, msg->data);
+	} else {
+		pci_write_config_word(dev, pos + PCI_MSI_DATA_32, msg->data);
+	}
+	/* Ensure that the writes are visible in the device */
+	pci_read_config_word(dev, pos + PCI_MSI_FLAGS, &msgctl);
 	return true;
 }
 
