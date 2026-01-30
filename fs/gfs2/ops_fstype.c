@@ -116,7 +116,7 @@ static struct gfs2_sbd *init_sbd(struct super_block *sb)
 	mapping->a_ops = &gfs2_rgrp_aops;
 	mapping->host = sb->s_bdev->bd_inode;
 	mapping->flags = 0;
-	mapping_set_gfp_mask(mapping, GFP_NOFS);
+	gfs2_setup_inode(mapping->host);
 	mapping->private_data = NULL;
 	mapping->writeback_index = 0;
 
