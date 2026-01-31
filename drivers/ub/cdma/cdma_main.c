@@ -110,7 +110,7 @@ static void cdma_free_cfile_uobj(struct cdma_dev *cdev)
 		cdma_cleanup_context_uobj(cfile, CDMA_REMOVE_DRIVER_REMOVE);
 		cfile->cdev = NULL;
 		if (cfile->uctx) {
-			jfae = (struct cdma_jfae *)cfile->uctx->jfae;
+			jfae = cfile->uctx->jfae;
 			if (jfae)
 				wake_up_interruptible(&jfae->jfe.poll_wait);
 			cdma_cleanup_context_res(cfile->uctx);
@@ -165,6 +165,7 @@ static void cdma_reset_uninit(struct auxiliary_device *adev)
 	cdma_client_callback(cdev, CDMA_CLIENT_REMOVE);
 	cdma_destroy_chardev(cdev);
 	cdma_free_cfile_uobj(cdev);
+	cdma_kcmd_flush(cdev);
 	cdma_destroy_dev(cdev);
 
 unlock:
@@ -260,12 +261,13 @@ static void cdma_remove(struct auxiliary_device *auxdev)
 
 	cdev->status = CDMA_SUSPEND;
 	cdma_cmd_flush(cdev);
+	cdma_reset_unmap_vma_pages(cdev, false);
 	cdma_client_callback(cdev, CDMA_CLIENT_STOP);
 	cdma_client_callback(cdev, CDMA_CLIENT_REMOVE);
-	cdma_reset_unmap_vma_pages(cdev, false);
 	ret = is_rmmod ? 0 : ubase_deactivate_dev(auxdev);
 	cdma_destroy_chardev(cdev);
 	cdma_free_cfile_uobj(cdev);
+	cdma_kcmd_flush(cdev);
 	cdma_destroy_dev(cdev);
 	mutex_unlock(&g_cdma_reset_mutex);
 

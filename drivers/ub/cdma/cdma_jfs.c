@@ -314,8 +314,9 @@ struct cdma_base_jfs *cdma_create_jfs(struct cdma_dev *cdev,
 	jfs->base_jfs.jfae_handler = cdma_jfs_async_event_cb;
 	jfs->base_jfs.dev = cdev;
 
-	dev_dbg(cdev->dev,
-		"create jfs id = %u, queue id = %u, depth = %u, priority = %u, jfc id = %u.\n",
+	dev_info(
+		cdev->dev,
+		"create jfs, id = %u, queue id = %u, depth = %u, priority = %u, jfc id = %u.\n",
 		jfs->id, jfs->queue_id, cfg->depth, cfg->priority, cfg->jfc_id);
 
 	return &jfs->base_jfs;
@@ -411,9 +412,9 @@ static bool cdma_query_jfs_fd(struct cdma_dev *cdev,
 		if (ctx.flush_cqe_done)
 			return true;
 
-		if (cdma_wait_timeout(&sum_times, times, sq->ta_tmo)) {
+		if (cdma_wait_timeout(&sum_times, times, CDMA_TA_TIMEOUT_64000MS)) {
 			dev_warn(cdev->dev,
-				 "ta timeout, id = %u. PI = %u, CI = %u, next_send_ssn = %u next_rcv_ssn = %u state = %u.\n",
+				 "flush cqe timeout, id = %u. PI = %u, CI = %u, next_send_ssn = %u next_rcv_ssn = %u state = %u.\n",
 				 sq->id, ctx.pi, ctx.ci, ctx.next_send_ssn,
 				 ctx.next_rcv_ssn, ctx.state);
 			break;
@@ -432,8 +433,8 @@ static bool cdma_query_jfs_fd(struct cdma_dev *cdev,
 	return false;
 }
 
-int cdma_modify_jfs_precondition(struct cdma_dev *cdev,
-				 struct cdma_jetty_queue *sq)
+static int cdma_modify_jfs_precondition(struct cdma_dev *cdev,
+					struct cdma_jetty_queue *sq)
 {
 	struct cdma_jfs_ctx ctx = { 0 };
 	u16 rcv_send_diff = 0;
@@ -458,7 +459,7 @@ int cdma_modify_jfs_precondition(struct cdma_dev *cdev,
 
 		if (cdma_wait_timeout(&sum_times, times, sq->ta_tmo)) {
 			dev_warn(cdev->dev,
-				 "ta timeout, id = %u. PI = %u, CI = %u, next_send_ssn = %u next_rcv_ssn = %u state = %u.\n",
+				 "modify jfs precondition timeout, id = %u. PI = %u, CI = %u, next_send_ssn = %u next_rcv_ssn = %u state = %u.\n",
 				 sq->id, ctx.pi, ctx.ci, ctx.next_send_ssn,
 				 ctx.next_rcv_ssn, ctx.state);
 			break;
@@ -558,7 +559,7 @@ int cdma_delete_jfs(struct cdma_dev *cdev, u32 jfs_id)
 
 	cdma_free_jfs_id(cdev, jfs_id);
 
-	pr_debug("Leave %s, jfsn: %u.\n", __func__, jfs_id);
+	dev_info(cdev->dev, "delete jfs, id = %u.\n", jfs_id);
 
 	cdma_release_jfs_event(jfs);
 
