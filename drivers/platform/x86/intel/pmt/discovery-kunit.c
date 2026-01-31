@@ -110,7 +110,7 @@ static struct kunit_suite intel_pmt_discovery_test_suite = {
 
 kunit_test_suite(intel_pmt_discovery_test_suite);
 
-MODULE_IMPORT_NS("INTEL_PMT_DISCOVERY");
+MODULE_IMPORT_NS(INTEL_PMT_DISCOVERY);
 MODULE_AUTHOR("David E. Box <david.e.box@linux.intel.com>");
 MODULE_DESCRIPTION("Intel PMT Discovery KUNIT test driver");
 MODULE_LICENSE("GPL");
