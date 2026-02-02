@@ -573,7 +573,7 @@ __mutex_lock_common(struct mutex *lock, unsigned int state, unsigned int subclas
 {
 	struct mutex_waiter waiter;
 	struct ww_mutex *ww;
-	u64 ifs_clock;
+	u64 ifs_clock = 0;
 	int ret;
 
 	if (!use_ww_ctx)
