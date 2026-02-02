@@ -1240,6 +1240,7 @@ CONFIG_DAMON_LRU_SORT=y
 # end of Data Access Monitoring
 
 # CONFIG_THP_CONTROL is not set
+CONFIG_MM_COUNTER_ATOMIC=y
 # end of Memory Management options
 
 CONFIG_NET=y

@@ -1343,6 +1343,18 @@ static void mm_init_uprobes_state(struct mm_struct *mm)
 #endif
 }
 
+#ifdef CONFIG_MM_COUNTER_ATOMIC
+bool mm_counter_atomic __ro_after_init = true;
+
+static int __init disable_rss_atomic_mode(char *str)
+{
+	mm_counter_atomic = false;
+
+	return 0;
+}
+__setup("rss_atomic_disable", disable_rss_atomic_mode);
+#endif /* CONFIG_MM_COUNTER_ATOMIC */
+
 static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p,
 	struct user_namespace *user_ns)
 {
@@ -1398,11 +1410,16 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p,
 	if (mm_alloc_cid(mm))
 		goto fail_cid;
 
+	if (mm_counter_init(mm))
+		goto fail_pcpu;
+
 	sp_init_mm(mm);
 	mm->user_ns = get_user_ns(user_ns);
 	lru_gen_init_mm(mm);
 	return mm;
 
+fail_pcpu:
+	mm_destroy_cid(mm);
 fail_cid:
 	destroy_context(mm);
 fail_nocontext:
@@ -1824,14 +1841,13 @@ static int copy_mm(unsigned long clone_flags, struct task_struct *tsk)
 		return 0;
 
 	/*
-	 * For single-thread processes, rss_stat is in atomic mode, which
+	 * For single-thread processes, mm counter is using atomic mode, which
 	 * reduces the memory consumption and performance regression caused by
-	 * using percpu. For multiple-thread processes, rss_stat is switched to
-	 * the percpu mode to reduce the error margin.
+	 * using percpu mode. For multiple-thread processes, will try to switch
+	 * to the percpu mode, but still using atomic mode once some error occurs.
 	 */
 	if (clone_flags & CLONE_THREAD)
-		if (mm_counter_switch_to_pcpu(oldmm))
-			return -ENOMEM;
+		mm_counter_try_switch_to_pcpu(oldmm);
 
 	if (clone_flags & CLONE_VM) {
 		mmget(oldmm);
