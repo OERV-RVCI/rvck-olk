@@ -381,7 +381,7 @@ static u8 io_die_index_next;
 static DEFINE_MUTEX(domain_lock);
 
 static void set_domain_id(int id,  int num_resources,
-			  struct intel_tpmi_plat_info *plat_info,
+			  struct oobmsm_plat_info *plat_info,
 			  struct tpmi_uncore_cluster_info *cluster_info)
 {
 	u8 part_io_index, cdie_range, pkg_io_index, max_dies;
@@ -520,7 +520,7 @@ static void remove_cluster_entries(struct tpmi_uncore_struct *tpmi_uncore)
 }
 
 static void set_cdie_id(int domain_id, struct tpmi_uncore_cluster_info *cluster_info,
-		       struct intel_tpmi_plat_info *plat_info)
+		       struct oobmsm_plat_info *plat_info)
 {
 
 	cluster_info->cdie_id = domain_id;
