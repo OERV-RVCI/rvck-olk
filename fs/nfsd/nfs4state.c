@@ -5936,16 +5936,29 @@ nfsd4_end_grace(struct nfsd_net *nn)
 	 */
 }
 
-bool
-nfsd4_force_end_grace(struct nfsd_net *nn)
+/**
+ * nfsd4_force_end_grace - forcibly end the NFSv4 grace period
+ * @nn: network namespace for the server instance to be updated
+ *
+ * Forces bypass of normal grace period completion, then schedules
+ * the laundromat to end the grace period immediately. Does not wait
+ * for the grace period to fully terminate before returning.
+ *
+ * Return values:
+ *   %true: Grace termination schedule
+ *   %false: No action was taken
+ */
+bool nfsd4_force_end_grace(struct nfsd_net *nn)
 {
 	if (!nn->client_tracking_ops)
 		return false;
 	spin_lock(&nn->client_lock);
-	if (nn->client_tracking_active) {
-		nn->grace_end_forced = true;
-		mod_delayed_work(laundry_wq, &nn->laundromat_work, 0);
+	if (nn->grace_ended || !nn->client_tracking_active) {
+		spin_unlock(&nn->client_lock);
+		return false;
 	}
+	WRITE_ONCE(nn->grace_end_forced, true);
+	mod_delayed_work(laundry_wq, &nn->laundromat_work, 0);
 	spin_unlock(&nn->client_lock);
 	return true;
 }
@@ -5959,7 +5972,7 @@ static bool clients_still_reclaiming(struct nfsd_net *nn)
 	time64_t double_grace_period_end = nn->boot_time +
 					   2 * nn->nfsd4_lease;
 
-	if (nn->grace_end_forced)
+	if (READ_ONCE(nn->grace_end_forced))
 		return false;
 	if (nn->track_reclaim_completes &&
 			atomic_read(&nn->nr_reclaim_complete) ==
