@@ -2711,7 +2711,7 @@ static inline s64 mm_counter_sum(struct mm_struct *mm, int member)
 	return percpu_counter_atomic_read(fbc);
 }
 
-static inline s64 mm_counter_sum_positive(struct mm_struct *mm, int member)
+static inline s64 get_mm_counter_sum(struct mm_struct *mm, int member)
 {
 	struct percpu_counter *fbc = &mm->rss_stat[member];
 
