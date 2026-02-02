@@ -84,7 +84,7 @@ mkdir <new_driver_dir>
 ./Ascend-hdk-910b-npu-driver_xx.x.x_linux-aarch64.run --tar -xvf -C <new_driver_dir>
 ```
 
-下载驱动补丁 [XSched driver patch](https://gitee.com/openeuler/kernel/commit/8d50448f11b697a177b63d3ccb19ecb2d1ff7d44) 适配 NPU 驱动
+下载驱动补丁 [XSched driver patch](https://gitcode.com/openeuler/kernel/commit/58e645cf8fd8d96573b7015385bf52522ebfee67?ref=refs/pull/18872/head&prId=18872) 适配 NPU 驱动
 
 ```shell
 cp 0001-Adapt-910b-npu-driver-for-xsched.patch <new_driver_dir>/driver/kernel/
@@ -94,8 +94,10 @@ cd <new_driver_dir>/driver/kernel/
 git init
 git add .
 git commit -m "npu init"
+# 使用下载的 patch 文件
+git am 58e645cf8fd8d96573b7015385bf52522ebfee67.patch --reject
 # 如果有冲突则根据 .rej 文件适配冲突代码
-git am 0001-Adapt-910b-npu-driver-for-xsched.patch --reject
+git am drivers/xcu/0001-Adapt-910_93-npu-driver-for-xsched.txt --reject
 ```
 
 #### 1.3.2 替换驱动
