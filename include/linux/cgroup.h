@@ -1000,6 +1000,9 @@ static inline void cgroup_ifs_leave_lock(u64 clock, enum ifs_types t)
 	if (!cgroup_ifs_enabled())
 		return;
 
+	if (unlikely(!clock))
+		return;
+
 	ifs = current_ifs();
 	if (ifs) {
 		ifsc = this_cpu_ptr(ifs->pcpu);
