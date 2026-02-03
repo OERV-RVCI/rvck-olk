@@ -2643,19 +2643,38 @@ static inline bool get_user_page_fast_only(unsigned long addr,
 /*
  * per-process(per-mm_struct) statistics.
  */
+#ifdef CONFIG_MM_COUNTER_ATOMIC
+extern bool mm_counter_atomic;
+
+static inline bool mm_counter_is_atomic(void)
+{
+	return mm_counter_atomic;
+}
+
+static inline bool mm_counter_is_pcpu(struct percpu_counter *fbc)
+{
+	return !mm_counter_is_atomic() || percpu_counter_initialized(fbc);
+}
+#else
+static inline bool mm_counter_is_atomic(void)
+{
+	return false;
+}
+
+static inline bool mm_counter_is_pcpu(struct percpu_counter *fbc)
+{
+	return true;
+}
+#endif
+
 static inline unsigned long get_mm_counter(struct mm_struct *mm, int member)
 {
 	struct percpu_counter *fbc = &mm->rss_stat[member];
 
-	if (percpu_counter_initialized(fbc))
+	if (mm_counter_is_pcpu(fbc))
 		return percpu_counter_read_positive(fbc);
 
 	return percpu_counter_atomic_read(fbc);
-}
-
-static inline unsigned long get_mm_counter_sum(struct mm_struct *mm, int member)
-{
-	return percpu_counter_sum_positive(&mm->rss_stat[member]);
 }
 
 void mm_trace_rss_stat(struct mm_struct *mm, int member);
@@ -2664,7 +2683,7 @@ static inline void add_mm_counter(struct mm_struct *mm, int member, long value)
 {
 	struct percpu_counter *fbc = &mm->rss_stat[member];
 
-	if (percpu_counter_initialized(fbc))
+	if (mm_counter_is_pcpu(fbc))
 		percpu_counter_add(fbc, value);
 	else
 		percpu_counter_atomic_add(fbc, value);
@@ -2686,25 +2705,37 @@ static inline s64 mm_counter_sum(struct mm_struct *mm, int member)
 {
 	struct percpu_counter *fbc = &mm->rss_stat[member];
 
-	if (percpu_counter_initialized(fbc))
+	if (mm_counter_is_pcpu(fbc))
 		return percpu_counter_sum(fbc);
 
 	return percpu_counter_atomic_read(fbc);
 }
 
-static inline s64 mm_counter_sum_positive(struct mm_struct *mm, int member)
+static inline s64 get_mm_counter_sum(struct mm_struct *mm, int member)
 {
 	struct percpu_counter *fbc = &mm->rss_stat[member];
 
-	if (percpu_counter_initialized(fbc))
+	if (mm_counter_is_pcpu(fbc))
 		return percpu_counter_sum_positive(fbc);
 
 	return percpu_counter_atomic_read(fbc);
 }
 
-static inline int mm_counter_switch_to_pcpu(struct mm_struct *mm)
+static inline int mm_counter_try_switch_to_pcpu(struct mm_struct *mm)
 {
+	if (!mm_counter_is_atomic())
+		return 0;
+
 	return percpu_counter_switch_to_pcpu_many(mm->rss_stat, NR_MM_COUNTERS);
+}
+
+static inline int mm_counter_init(struct mm_struct *mm)
+{
+	if (mm_counter_is_atomic())
+		return 0;
+
+	return percpu_counter_init_many(mm->rss_stat, 0, GFP_KERNEL_ACCOUNT,
+					NR_MM_COUNTERS);
 }
 
 static inline void mm_counter_destroy(struct mm_struct *mm)

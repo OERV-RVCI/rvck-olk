@@ -1537,4 +1537,16 @@ config THP_CONTROL
 	help
 	  This provides interface to control thp policy.
 
+config MM_COUNTER_ATOMIC
+	bool "use atomic for mm counters when single-thread process"
+	depends on PREEMPT_NONE && !PREEMPT_DYNAMIC
+	depends on SMP
+	default n
+	help
+	  For single-thread processes, mm counter uses atomic counter
+	  operations, which reduces the memory consumption and performance
+	  regression caused by using percpu counter. For multiple-thread
+	  processes, atomic counter is switched to percpu counter mode to
+	  reduce the error margin.
+
 endmenu

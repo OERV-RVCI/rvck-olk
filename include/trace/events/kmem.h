@@ -402,7 +402,7 @@ TRACE_EVENT(rss_stat,
 		__entry->mm_id = mm_ptr_to_hash(mm);
 		__entry->curr = !!(current->mm == mm);
 		__entry->member = member;
-		__entry->size = (mm_counter_sum_positive(mm, member)
+		__entry->size = (get_mm_counter_sum(mm, member)
 							<< PAGE_SHIFT);
 	),
 
