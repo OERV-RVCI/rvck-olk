@@ -15,7 +15,7 @@
 #include <ub/ubase/ubase_comm_debugfs.h>
 #include <ub/ubase/ubase_comm_dev.h>
 #include <ub/ubase/ubase_comm_eq.h>
-#include <ub/ubase/ubase_comm_hw.h>
+#include <ub/ubase/ubase_comm_mbx.h>
 #include <ub/ubase/ubase_comm_stats.h>
 
 #include "ubase.h"
@@ -43,28 +43,75 @@
 		 current->pid, ##__VA_ARGS__)
 
 #define ubase_err_rl(_udev, log_cnt, fmt, ...) do {                           \
-	if (__ratelimit(&(_udev->log_rs.rs)))                                   \
-		dev_err(_udev->dev, "(pid %d) " fmt,                          \
-			 current->pid, ##__VA_ARGS__);                        \
-	else                                                                  \
+	if (__ratelimit(&(_udev->log_rs.rs))) {                               \
+		ubase_err(_udev, fmt, ##__VA_ARGS__);                         \
+	} else {                                                              \
 		(log_cnt)++;                                                  \
+		ubase_dbg(_udev, fmt, ##__VA_ARGS__);                         \
+	}                                                                     \
 } while (0)
 
 #define ubase_info_rl(_udev, log_cnt, fmt, ...) do {                          \
-	if (__ratelimit(&(_udev->log_rs.rs)))                                   \
-		dev_info(_udev->dev, "(pid %d) " fmt,                         \
-			 current->pid, ##__VA_ARGS__);                        \
-	else                                                                  \
+	if (__ratelimit(&(_udev->log_rs.rs))) {                               \
+		ubase_info(_udev, fmt, ##__VA_ARGS__);                        \
+	} else {                                                              \
 		(log_cnt)++;                                                  \
+		ubase_dbg(_udev, fmt, ##__VA_ARGS__);                         \
+	}                                                                     \
 } while (0)
 
 #define ubase_warn_rl(_udev, log_cnt, fmt, ...) do {                          \
-	if (__ratelimit(&(_udev->log_rs.rs)))                                   \
-		dev_warn(_udev->dev, "(pid %d) " fmt,                         \
-			 current->pid, ##__VA_ARGS__);                        \
-	else                                                                  \
+	if (__ratelimit(&(_udev->log_rs.rs))) {                               \
+		ubase_warn(_udev, fmt, ##__VA_ARGS__);                        \
+	} else {                                                              \
 		(log_cnt)++;                                                  \
+		ubase_dbg(_udev, fmt, ##__VA_ARGS__);                         \
+	}                                                                     \
 } while (0)
+
+struct ubase_ctx_buf {
+	struct ubase_ctx_buf_cap jfs;
+	struct ubase_ctx_buf_cap jfr;
+	struct ubase_ctx_buf_cap jfc;
+	struct ubase_ctx_buf_cap jtg;
+	struct ubase_ctx_buf_cap rc;
+};
+
+struct ubase_ue_node {
+	struct list_head	list;
+	u16			bus_ue_id;
+};
+
+struct ubase_cmdq_desc;
+struct ubase_cmdq_ring {
+	u32 ci;
+	u32 pi;
+	u32 desc_num;
+	u32 tx_timeout;
+	dma_addr_t desc_dma_addr;
+	struct ubase_cmdq_desc *desc;
+	spinlock_t lock;
+};
+
+struct ubase_cmdq {
+	struct ubase_cmdq_ring csq;
+	struct ubase_cmdq_ring crq;
+};
+
+struct ubase_hw {
+	struct ubase_resource_space rs0_base;
+	struct ubase_resource_space io_base;
+	struct ubase_resource_space mem_base;
+	struct ubase_cmdq cmdq;
+	unsigned long state;
+};
+
+struct ubase_mbx_event_context {
+	struct completion	done;
+	int			result;
+	u64			out_param;
+	u16			seq_num;
+};
 
 struct ubase_adev {
 	struct auxiliary_device adev;
@@ -211,6 +258,26 @@ struct ubase_ctrlq_crq_table {
 	struct ubase_ctrlq_event_nb	*crq_nbs;
 };
 
+struct ubase_ctrlq_ue_req_event_nbs {
+	struct list_head			list;
+	struct ubase_ctrlq_ue_msg_nb		msg_nb;
+};
+
+struct ubase_ctrlq_ue_resp_event_nbs {
+	struct list_head			list;
+	struct ubase_ctrlq_ue_msg_nb		msg_nb;
+};
+
+struct ubase_ctrlq_ue_req_table {
+	struct mutex				lock;
+	struct ubase_ctrlq_ue_req_event_nbs	ue_req_nbs;
+};
+
+struct ubase_ctrlq_ue_resp_table {
+	struct mutex				lock;
+	struct ubase_ctrlq_ue_resp_event_nbs	ue_resp_nbs;
+};
+
 struct ubase_ctrlq {
 	u16				csq_next_seq;
 	unsigned long			state;
@@ -219,6 +286,8 @@ struct ubase_ctrlq {
 	struct ubase_ctrlq_ring		crq;
 	struct ubase_ctrlq_msg_ctx	*msg_queue;
 	struct ubase_ctrlq_crq_table	crq_table;
+	struct ubase_ctrlq_ue_req_table		ue_req_table;
+	struct ubase_ctrlq_ue_resp_table	ue_resp_table;
 };
 
 #define UBASE_ACT_STAT_MAX_NUM 10U
@@ -281,7 +350,6 @@ struct ubase_prealloc_mem_info {
 
 struct ubase_log_rs {
 	struct ratelimit_state rs;
-	u16 ctrlq_self_seq_invalid_log_cnt;
 	u16 ctrlq_other_seq_invalid_log_cnt;
 };
 
@@ -376,6 +444,11 @@ static inline bool ubase_ip_over_urma_supported(struct ubase_dev *udev)
 static inline bool ubase_ip_over_urma_utp_supported(struct ubase_dev *udev)
 {
 	return ubase_get_cap_bit(udev, UBASE_SUPPORT_IP_OVER_URMA_UTP_B);
+}
+
+static inline bool ubase_pmu_irq_supported(struct ubase_dev *udev)
+{
+	return ubase_get_cap_bit(udev, UBASE_SUPPORT_PMU_IRQ_B);
 }
 
 static inline
@@ -504,6 +577,8 @@ void ubase_suspend_aux_devices(struct ubase_dev *udev);
 void ubase_resume_aux_devices(struct ubase_dev *udev);
 
 void ubase_virt_handler(struct ubase_dev *udev, u16 bus_ue_id, bool is_en);
+
+void __ubase_deactivate_dev(struct ubase_dev *udev);
 
 int ubase_activate_handler(struct ubase_dev *udev, u32 bus_ue_id);
 int ubase_deactivate_handler(struct ubase_dev *udev, u32 bus_ue_id);

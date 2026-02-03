@@ -6,7 +6,6 @@
 
 #include <linux/delay.h>
 #include <linux/ummu_core.h>
-#include <ub/ubase/ubase_comm_hw.h>
 #include <ub/ubase/ubase_comm_mbx.h>
 
 #include "ubase_cmd.h"
@@ -902,6 +901,7 @@ void ubase_hw_uninit(struct ubase_dev *udev)
 
 	if (!test_bit(UBASE_STATE_RST_HANDLING_B, &udev->state_bits)) {
 		ubase_ctrlq_disable_remote(udev);
+		__ubase_deactivate_dev(udev);
 		ubase_destroy_ctx_res(udev);
 	}
 
