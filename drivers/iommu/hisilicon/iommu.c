@@ -29,6 +29,7 @@
 #include "regs.h"
 #include "sva.h"
 #include "nested.h"
+#include "iommu.h"
 
 static bool ummu_capable(struct device *dev, enum iommu_cap cap)
 {
@@ -717,6 +718,8 @@ static void ummu_cfg_sync(struct ummu_base_domain *base_domain)
 	ummu = core_to_ummu_device(base_domain->core_dev);
 	tag = u_domain->cfgs.tecte_tag;
 	tid = u_domain->base_domain.tid;
+	if (tid == UMMU_INVALID_TID)
+		return;
 
 	ummu_sync_tct(ummu, tag, tid, true);
 }
