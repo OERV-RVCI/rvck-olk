@@ -209,8 +209,12 @@ struct msi_desc {
 	struct msi_msg			msg;
 	struct irq_affinity_desc	*affinity;
 #ifdef CONFIG_IRQ_MSI_IOMMU
+#ifdef __GENKSYMS__
+	const void			*iommu_cookie;
+#else
 	u64				iommu_msi_iova : 58;
 	u64				iommu_msi_shift : 6;
+#endif
 #endif
 #ifdef CONFIG_SYSFS
 	struct device_attribute		*sysfs_attrs;
