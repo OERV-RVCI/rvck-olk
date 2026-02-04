@@ -10,8 +10,6 @@
 #ifndef __ASM_X86_CSV_H__
 #define __ASM_X86_CSV_H__
 
-#include <linux/numa.h>
-
 #ifndef __ASSEMBLY__
 
 #ifdef CONFIG_HYGON_CSV
@@ -25,12 +23,6 @@ struct csv_mem {
 
 extern struct csv_mem *csv_smr;
 extern unsigned int csv_smr_num;
-#ifdef CONFIG_SYSFS
-extern atomic_long_t csv3_npt_size;
-extern atomic_long_t csv3_pri_mem;
-extern unsigned long csv3_meta;
-extern atomic_long_t csv3_shared_mem[MAX_NUMNODES];
-#endif	/* CONFIG_SYSFS */
 
 void __init early_csv_reserve_mem(void);
 
