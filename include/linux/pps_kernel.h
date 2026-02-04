@@ -55,6 +55,7 @@ struct pps_device {
 	wait_queue_head_t queue;		/* PPS event queue */
 
 	unsigned int id;			/* PPS source unique ID */
+	KABI_FILL_HOLE(unsigned int last_fetched_ev)    /* last fetched PPS event id */
 	void const *lookup_cookie;		/* For pps_lookup_dev() only */
 	struct cdev cdev;
 	struct device *dev;

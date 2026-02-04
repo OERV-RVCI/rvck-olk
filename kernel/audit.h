@@ -201,7 +201,7 @@ struct audit_context {
 			KABI_FILL_HOLE(bool is_check)
 		} execve;
 		struct {
-			char			*name;
+			const char		*name;
 		} module;
 		struct {
 			struct audit_ntp_data	ntp_data;

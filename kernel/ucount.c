@@ -273,7 +273,7 @@ void put_ucounts(struct ucounts *ucounts)
 }
 #endif // CONFIG_UCOUNTS_PERCPU_COUNTER
 
-static inline bool atomic_long_inc_below(atomic_long_t *v, int u)
+static inline bool atomic_long_inc_below(atomic_long_t *v, long u)
 {
 	long c, old;
 	c = atomic_long_read(v);
