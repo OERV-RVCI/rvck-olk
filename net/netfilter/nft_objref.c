@@ -44,8 +44,7 @@ static int nft_objref_validate_obj_type(const struct nft_ctx *ctx, u32 type)
 }
 
 static int nft_objref_validate(const struct nft_ctx *ctx,
-			       const struct nft_expr *expr,
-			       const struct nft_data **data)
+			       const struct nft_expr *expr)
 {
 	struct nft_object *obj = nft_objref_priv(expr);
 
@@ -230,8 +229,7 @@ static void nft_objref_map_destroy(const struct nft_ctx *ctx,
 }
 
 static int nft_objref_map_validate(const struct nft_ctx *ctx,
-				   const struct nft_expr *expr,
-				   const struct nft_data **data)
+				   const struct nft_expr *expr)
 {
 	const struct nft_objref_map *priv = nft_expr_priv(expr);
 
