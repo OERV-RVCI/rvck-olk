@@ -800,6 +800,10 @@ static const struct ubase_init_function ubase_init_func_map[] = {
 		ubase_hw_init, ubase_hw_uninit
 	},
 	{
+		"init rc buf", UBASE_SUP_UDMA, 1,
+		ubase_rc_buf_init, ubase_rc_buf_uninit
+	},
+	{
 		"init debugfs", UBASE_SUP_ALL, 0,
 		ubase_dbg_init, ubase_dbg_uninit
 	},

@@ -39,9 +39,9 @@ static u16 ubase_calc_udma_page_cnt(struct ubase_dev *udev)
 	struct ubase_adev_caps *udma_caps = &udev->caps.udma_caps;
 	u32 rcq_size;
 
-	rcq_size = ALIGN(udma_caps->rc_que_depth * RCE_SIZE, PAGE_SIZE);
+	rcq_size = ALIGN(udma_caps->rc.depth * UBASE_RCE_SIZE, PAGE_SIZE);
 
-	return ubase_calc_que_page_cnt(udma_caps->rc_max_cnt, rcq_size);
+	return ubase_calc_que_page_cnt(udma_caps->rc.max_cnt, rcq_size);
 }
 
 static int ubase_init_pmem_ctx(struct ubase_dev *udev, const char *type,
@@ -80,8 +80,24 @@ static int ubase_init_comm_pmem_ctx(struct ubase_dev *udev)
 
 static int ubase_init_udma_pmem_ctx(struct ubase_dev *udev)
 {
-	return ubase_init_pmem_ctx(udev, "udma", &udev->pmem_info.udma,
-				   ubase_calc_udma_page_cnt(udev));
+	u32 max_cnt = udev->caps.udma_caps.rc.max_cnt;
+	struct ubase_rc_que_addr *addrs;
+	int ret;
+
+	addrs = kcalloc(max_cnt, sizeof(struct ubase_rc_que_addr), GFP_KERNEL);
+	if (!addrs)
+		return -ENOMEM;
+
+	udev->caps.udma_caps.rc.addrs = addrs;
+
+	ret = ubase_init_pmem_ctx(udev, "udma", &udev->pmem_info.udma,
+				  ubase_calc_udma_page_cnt(udev));
+	if (ret) {
+		kfree(addrs);
+		udev->caps.udma_caps.rc.addrs = NULL;
+	}
+
+	return ret;
 }
 
 static void ubase_uninit_pmem_ctx(struct ubase_pmem_ctx *ctx)
@@ -106,6 +122,9 @@ static void ubase_uninit_comm_pmem_ctx(struct ubase_dev *udev)
 static void ubase_uninit_udma_pmem_ctx(struct ubase_dev *udev)
 {
 	ubase_uninit_pmem_ctx(&udev->pmem_info.udma);
+
+	kfree(udev->caps.udma_caps.rc.addrs);
+	udev->caps.udma_caps.rc.addrs = NULL;
 }
 
 static int ubase_alloc_pmem(struct ubase_dev *udev, const char *type,
@@ -200,6 +219,10 @@ static int ubase_map_comm_pmem(struct ubase_dev *udev)
 static int ubase_map_udma_pmem(struct ubase_dev *udev)
 {
 	struct ubase_pmem_caps *pmem = &udev->caps.udma_caps.pmem;
+	struct ubase_rct_caps *rc = &udev->caps.udma_caps.rc;
+	u32 buf_num_per_hugepage;
+	u32 rcq_size;
+	u32 idx;
 	int ret;
 
 	ret = ubase_map_pmem(udev, "udma", &udev->pmem_info.udma);
@@ -208,6 +231,19 @@ static int ubase_map_udma_pmem(struct ubase_dev *udev)
 
 	pmem->dma_addr = udev->pmem_info.udma.dma_addr;
 	pmem->dma_len = udev->pmem_info.udma.page_cnt * UBASE_PMEM_PAGE_SIZE;
+	rcq_size = ALIGN(rc->depth * UBASE_RCE_SIZE, PAGE_SIZE);
+	for (idx = 0; idx < rc->max_cnt; idx++) {
+		if (rcq_size > UBASE_PMEM_PAGE_SIZE) {
+			rc->addrs[idx].iova = udev->pmem_info.udma.dma_addr +
+					      idx * rcq_size;
+		} else {
+			buf_num_per_hugepage = UBASE_PMEM_PAGE_SIZE / rcq_size;
+			rc->addrs[idx].iova =
+				udev->pmem_info.udma.dma_addr +
+				idx / buf_num_per_hugepage * UBASE_PMEM_PAGE_SIZE +
+				idx % buf_num_per_hugepage * rcq_size;
+		}
+	}
 
 	return 0;
 }
@@ -230,8 +266,13 @@ static void ubase_unmap_comm_pmem(struct ubase_dev *udev)
 static void ubase_unmap_udma_pmem(struct ubase_dev *udev)
 {
 	struct ubase_pmem_caps *pmem = &udev->caps.udma_caps.pmem;
+	struct ubase_rct_caps *rc = &udev->caps.udma_caps.rc;
+	u32 idx;
 
 	ubase_unmap_pmem(udev, &udev->pmem_info.udma);
+
+	for (idx = 0; idx < rc->max_cnt; idx++)
+		rc->addrs[idx].iova = 0;
 
 	pmem->dma_addr = 0;
 	pmem->dma_len = 0;
