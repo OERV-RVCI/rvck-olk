@@ -140,8 +140,8 @@ static void ubase_dbg_dump_adev_caps(struct seq_file *s,
 		{"\ttpg_max_cnt: %u\n", caps->tpg.max_cnt},
 		{"\tcqe_size: %hu\n", caps->cqe_size},
 		{"\tjtg_max_cnt: %u\n", caps->jtg_max_cnt},
-		{"\trc_max_cnt: %u\n", caps->rc.max_cnt},
-		{"\trc_depth: %u\n", caps->rc.depth},
+		{"\trc_max_cnt: %u\n", caps->rc_max_cnt},
+		{"\trc_depth: %u\n", caps->rc_que_depth},
 		{"\tprealloc_mem_dma_len: %llu\n", caps->pmem.dma_len},
 	};
 	int i;
