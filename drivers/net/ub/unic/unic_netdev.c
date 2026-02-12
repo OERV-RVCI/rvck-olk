@@ -548,8 +548,8 @@ static int unic_set_mac_address(struct net_device *netdev, void *addr)
 		return -EADDRNOTAVAIL;
 	}
 
-	unic_comm_format_mac_addr(format_mac, mac_addr->sa_data);
 	if (ether_addr_equal(netdev->dev_addr, mac_addr->sa_data)) {
+		unic_comm_format_mac_addr(format_mac, mac_addr->sa_data);
 		unic_info(unic_dev, "already using mac(%s).\n", format_mac);
 		return 0;
 	}
@@ -724,6 +724,7 @@ static bool unic_port_dev_check(const struct net_device *dev)
 static struct unic_dev *unic_get_bond_slave(struct net_device *ndev)
 {
 	struct slave *first_slave;
+	struct unic_dev *unic_dev;
 	struct bonding *bond;
 
 	if (!netif_is_bond_master(ndev))
@@ -732,11 +733,15 @@ static struct unic_dev *unic_get_bond_slave(struct net_device *ndev)
 	rcu_read_lock();
 	bond = netdev_priv(ndev);
 	first_slave = bond_first_slave_rcu(bond);
-	rcu_read_unlock();
-	if (!first_slave || !unic_port_dev_check(first_slave->dev))
+	if (!first_slave || !unic_port_dev_check(first_slave->dev)) {
+		rcu_read_unlock();
 		return NULL;
+	}
 
-	return netdev_priv(first_slave->dev);
+	unic_dev = netdev_priv(first_slave->dev);
+	rcu_read_unlock();
+
+	return unic_dev;
 }
 
 static int unic_eth_ip_event(struct sockaddr *sa, struct net_device *ndev,
@@ -870,6 +875,40 @@ void unic_unregister_ipaddr_notifier(void)
 {
 	unregister_inetaddr_notifier(&unic_inetaddr_notifier);
 	unregister_inet6addr_notifier(&unic_inet6addr_notifier);
+}
+
+static int unic_netdev_event(struct notifier_block *nb,
+			     unsigned long event, void *ptr)
+{
+	struct net_device *netdev;
+	struct unic_dev *unic_dev;
+
+	netdev = netdev_notifier_info_to_dev(ptr);
+	if (!netdev || !unic_port_dev_check(netdev))
+		return NOTIFY_DONE;
+
+	unic_dev = netdev_priv(netdev);
+
+	if (!unic_dev_eth_mac_supported(unic_dev) || event != NETDEV_CHANGEUPPER)
+		return NOTIFY_DONE;
+
+	set_bit(UNIC_STATE_SYNC_BOND_PORT, &unic_dev->state);
+
+	return NOTIFY_OK;
+}
+
+static struct notifier_block unic_netdev_notifier = {
+	.notifier_call = unic_netdev_event,
+};
+
+int unic_register_netdevice_notifier(void)
+{
+	return register_netdevice_notifier(&unic_netdev_notifier);
+}
+
+void unic_unregister_netdevice_notifier(void)
+{
+	unregister_netdevice_notifier(&unic_netdev_notifier);
 }
 
 int unic_query_link_status(struct unic_dev *unic_dev, u8 *link_status)

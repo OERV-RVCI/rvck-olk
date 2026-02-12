@@ -34,6 +34,7 @@ enum ubase_ctrlq_ser_type {
 	UBASE_CTRLQ_SER_TYPE_DEV_REGISTER	= 0x02,
 	UBASE_CTRLQ_SER_TYPE_IP_ACL		= 0x03,
 	UBASE_CTRLQ_SER_TYPE_QOS		= 0x04,
+	UBASE_CTRLQ_SER_TYPE_PORT		= 0x06,
 };
 
 enum ubase_ctrlq_opc_type_tp {
@@ -62,6 +63,10 @@ enum ubase_ctrlq_opc_type_dev_register {
 	UBASE_CTRLQ_OPC_UE_RESET_CTRL		= 0x15,
 };
 
+enum ubase_ctrlq_opc_type_port {
+	UBASE_CTRLQ_OPC_BOND_PORT	= 0x01,
+};
+
 /**
  * struct ubase_ctrlq_msg - ubase ctrlq msg structure
  * @service_ver: ctrlq service version
@@ -69,6 +74,7 @@ enum ubase_ctrlq_opc_type_dev_register {
  * @opcode: ctrlq opcode
  * @need_resp: whether the message need a response
  * @is_resp: whether the message is a response
+ * @is_async: whether the message is an asynchronous request
  * @resv: reserved bits
  * @resp_ret: the return value of response message
  * @resp_seq: response message sequence
@@ -105,7 +111,9 @@ struct ubase_ctrlq_msg {
  * @service_type: ctrlq service type
  * @opcode: ctrlq crq opcode
  * @back: arbitrary registered pointer
- * @crq_handler: ctrlq crq handle function
+ * @crq_handler: ctrlq crq handle function. adev: the struct member variable 'back',
+ * service_ver: ctrlq service version, data: ctrlq crq msg data, len: ctrlq crq msg
+ * length, seq: ctrlq crq msg sequence number.
  */
 struct ubase_ctrlq_event_nb {
 	u8	service_type;
@@ -124,7 +132,8 @@ struct ubase_ctrlq_event_nb {
  * @service_type: ctrlq ue msg service type
  * @opcode: ctrlq ue msg opcode
  * @back: arbitrary registered pointer
- * @msg_handler: ctrlq ue msg handle function
+ * @msg_handler: ctrlq ue msg handle function. adev: the struct member variable
+ * 'back', data: ctrlq ue msg data, len: ctrlq ue msg data length.
  */
 struct ubase_ctrlq_ue_msg_nb {
 	u8	service_type;

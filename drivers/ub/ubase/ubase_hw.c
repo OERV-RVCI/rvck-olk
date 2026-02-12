@@ -12,6 +12,7 @@
 #include "ubase_ctrlq.h"
 #include "ubase_dev.h"
 #include "ubase_mailbox.h"
+#include "ubase_pmem.h"
 #include "ubase_tp.h"
 #include "ubase_hw.h"
 
@@ -104,6 +105,21 @@ static void ubase_check_dev_caps_comm(struct ubase_dev *udev)
 	}
 }
 
+static int ubase_check_dev_caps_rct(struct ubase_dev *udev)
+{
+	if (!ubase_dev_udma_supported(udev))
+		return 0;
+
+	if (!udev->caps.udma_caps.rc.depth) {
+		ubase_err(udev,
+			  "failed to check rct caps: depth = %u.\n",
+			  udev->caps.udma_caps.rc.depth);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
 static int ubase_check_dev_caps_extdb(struct ubase_dev *udev)
 {
 	UBASE_DEFINE_TA_DMA_BUFS(udev);
@@ -122,7 +138,13 @@ static int ubase_check_dev_caps_extdb(struct ubase_dev *udev)
 
 static int ubase_check_dev_caps(struct ubase_dev *udev)
 {
+	int ret;
+
 	ubase_check_dev_caps_comm(udev);
+
+	ret = ubase_check_dev_caps_rct(udev);
+	if (ret)
+		return ret;
 
 	return ubase_check_dev_caps_extdb(udev);
 }
@@ -179,6 +201,8 @@ static void ubase_parse_dev_caps_udma(struct ubase_dev *udev,
 	udma_caps->jtg_max_cnt = le32_to_cpu(resp->jtg_max_cnt);
 	udma_caps->rc_max_cnt = le32_to_cpu(resp->rc_max_cnt_per_vl);
 	udma_caps->rc_que_depth = le32_to_cpu(resp->udma_rc_depth);
+	udma_caps->rc.max_cnt = le32_to_cpu(resp->rc_max_cnt_per_vl);
+	udma_caps->rc.depth = le32_to_cpu(resp->udma_rc_depth);
 }
 
 static void ubase_parse_dev_caps(struct ubase_dev *udev,
@@ -186,8 +210,11 @@ static void ubase_parse_dev_caps(struct ubase_dev *udev,
 {
 	int i;
 
-	for (i = 0; i < UBASE_CAP_LEN; i++)
+	for (i = 0; i < UBASE_CAP_LEN; i++) {
 		udev->cap_bits[i] = le32_to_cpu(resp->cap_bits[i]);
+		ubase_info(udev, "udev cap_bits[%d] = 0x%x\n", i,
+			   udev->cap_bits[i]);
+	}
 
 	ubase_parse_dev_caps_comm(udev, resp);
 	ubase_parse_dev_caps_unic(udev, resp);
@@ -496,7 +523,7 @@ static void ubase_get_ctx_entry_cnt(struct ubase_dev *udev)
 	ubase_ctx_buf->jfr.entry_cnt = unic_caps->jfr.max_cnt;
 	ubase_ctx_buf->jfc.entry_cnt = unic_caps->jfc.max_cnt;
 	ubase_ctx_buf->jtg.entry_cnt = udma_caps->jtg_max_cnt;
-	ubase_ctx_buf->rc.entry_cnt = udma_caps->rc_max_cnt;
+	ubase_ctx_buf->rc.entry_cnt = udma_caps->rc.max_cnt;
 
 	ubase_ctx_buf->jfr.entry_cnt += udma_caps->jfr.max_cnt;
 	ubase_ctx_buf->jfc.entry_cnt += udma_caps->jfc.max_cnt;
@@ -736,8 +763,11 @@ int ubase_query_chip_info(struct ubase_dev *udev)
 
 static void ubase_destroy_ctx_res(struct ubase_dev *udev)
 {
-#define UBASE_DESTROY_RES_WAIT_TIME	20
-#define UBASE_DESTROY_RES_WAIT_COUNT	5
+#define DESTROY_RETRY_MIN_TIME	50000
+#define DESTROY_RETRY_MAX_TIME	150000
+#define DESTROY_RETRY_COUNT	5
+#define QUERY_WAIT_TIME		20
+#define QUERY_RETRY_COUNT	10
 
 	struct ubase_destroy_res_cmd resp;
 	struct ubase_cmd_buf in, out;
@@ -745,29 +775,39 @@ static void ubase_destroy_ctx_res(struct ubase_dev *udev)
 	int ret;
 
 	__ubase_fill_inout_buf(&in, UBASE_OPC_DESTROY_CTX_RESOURCE, false, 0, NULL);
-	ret = __ubase_cmd_send_in(udev, &in);
+
+	do {
+		ret = __ubase_cmd_send_in(udev, &in);
+		if (ret) {
+			ubase_err(udev, "failed to send destroy resource, ret = %d.\n",
+				  ret);
+			usleep_range(DESTROY_RETRY_MIN_TIME,
+				     DESTROY_RETRY_MAX_TIME);
+		}
+		try_cnt++;
+	} while (ret && try_cnt < DESTROY_RETRY_COUNT);
+
 	if (ret) {
-		ubase_err(udev, "failed to send destroy resource, ret = %d.\n",
-			  ret);
+		ubase_warn(udev, "retry destroy resource failed, ret = %d.\n",
+			   ret);
 		return;
 	}
 
+	try_cnt = 0;
 	__ubase_fill_inout_buf(&in, UBASE_OPC_DESTROY_CTX_RESOURCE, true, 0, NULL);
 	__ubase_fill_inout_buf(&out, UBASE_OPC_DESTROY_CTX_RESOURCE, false,
 			       sizeof(resp), &resp);
 	do {
 		memset(&resp, 0, sizeof(resp));
-		msleep(UBASE_DESTROY_RES_WAIT_TIME);
+		msleep(QUERY_WAIT_TIME);
 		ret = __ubase_cmd_send_inout(udev, &in, &out);
-		if (ret) {
+		if (ret)
 			ubase_err(udev,
 				  "failed to query destroy resource, ret = %d.\n",
 				  ret);
-			return;
-		}
 
 		try_cnt++;
-	} while (!resp.destroy_done && try_cnt < UBASE_DESTROY_RES_WAIT_COUNT);
+	} while (!resp.destroy_done && try_cnt < QUERY_RETRY_COUNT);
 
 	if (!resp.destroy_done)
 		ubase_warn(udev, "wait ue destroy res timeout!\n");
@@ -892,22 +932,6 @@ err_init_ta_ext_buf:
 	return ret;
 }
 
-void ubase_hw_uninit(struct ubase_dev *udev)
-{
-	clear_bit(UBASE_STATE_CTX_READY_B, &udev->state_bits);
-
-	ubase_dev_uninit_tp_tpg(udev);
-	ubase_uninit_ta_ext_buf(udev);
-
-	if (!test_bit(UBASE_STATE_RST_HANDLING_B, &udev->state_bits)) {
-		ubase_ctrlq_disable_remote(udev);
-		__ubase_deactivate_dev(udev);
-		ubase_destroy_ctx_res(udev);
-	}
-
-	ubase_uninit_ctx_buf(udev);
-}
-
 static int ubase_start_perf_stats(struct ubase_dev *udev, u32 period,
 				  u64 port_bitmap)
 {
@@ -1001,6 +1025,8 @@ int __ubase_perf_stats(struct ubase_dev *udev, u64 port_bitmap, u32 period,
 
 		data[k].tx_port_bw = le32_to_cpu(resp.tx_port_bw);
 		data[k].rx_port_bw = le32_to_cpu(resp.rx_port_bw);
+		data[k].tx_max_port_bw = le32_to_cpu(resp.tx_max_port_bw);
+		data[k].rx_max_port_bw = le32_to_cpu(resp.rx_max_port_bw);
 		data[k].port_id = i;
 		data[k].valid = 1;
 
@@ -1049,3 +1075,112 @@ int ubase_perf_stats(struct auxiliary_device *adev, u64 port_bitmap, u32 period,
 	return __ubase_perf_stats(udev, port_bitmap, period, data, data_size);
 }
 EXPORT_SYMBOL(ubase_perf_stats);
+
+void ubase_hw_uninit(struct ubase_dev *udev)
+{
+	clear_bit(UBASE_STATE_CTX_READY_B, &udev->state_bits);
+
+	ubase_dev_uninit_tp_tpg(udev);
+	ubase_uninit_ta_ext_buf(udev);
+
+	if (!test_bit(UBASE_STATE_RST_HANDLING_B, &udev->state_bits)) {
+		ubase_ctrlq_disable_remote(udev);
+		__ubase_deactivate_dev(udev);
+		ubase_destroy_ctx_res(udev);
+	}
+
+	ubase_uninit_ctx_buf(udev);
+}
+
+static int ubase_alloc_rc_buf(struct ubase_dev *udev, int rc_que_idx)
+{
+	struct ubase_rc_que_addr *rc_que_addr =
+				 &udev->caps.udma_caps.rc.addrs[rc_que_idx];
+	size_t size = udev->caps.udma_caps.rc.depth * UBASE_RCE_SIZE;
+
+	rc_que_addr->va = dma_alloc_coherent(udev->dev, size,
+					     &rc_que_addr->iova, GFP_KERNEL);
+	if (!rc_que_addr->va)
+		return -ENOMEM;
+
+	return 0;
+}
+
+static void ubase_free_rc_buf(struct ubase_dev *udev, int rc_que_idx)
+{
+	size_t size = udev->caps.udma_caps.rc.depth * UBASE_RCE_SIZE;
+	struct ubase_rc_que_addr *rc_que_addr;
+
+	if (!udev->caps.udma_caps.rc.addrs)
+		return;
+
+	rc_que_addr = &udev->caps.udma_caps.rc.addrs[rc_que_idx];
+
+	if (!rc_que_addr->va)
+		return;
+
+	dma_free_coherent(udev->dev, size, rc_que_addr->va, rc_que_addr->iova);
+
+	rc_que_addr->va = NULL;
+}
+
+int ubase_rc_buf_init(struct ubase_dev *udev)
+{
+	u32 max_cnt = udev->caps.udma_caps.rc.max_cnt;
+	u32 idx;
+	int ret;
+
+	if (test_bit(UBASE_STATE_PREALLOC_OK_B, &udev->state_bits))
+		return 0;
+
+	if (!test_bit(UBASE_STATE_PREALLOC_OK_B, &udev->state_bits)) {
+		udev->caps.udma_caps.rc.addrs = kcalloc(max_cnt,
+							sizeof(struct ubase_rc_que_addr),
+							GFP_KERNEL);
+		if (!udev->caps.udma_caps.rc.addrs) {
+			ret = -ENOMEM;
+			goto err_alloc_rc_addrs;
+		}
+	}
+
+	for (idx = 0; idx < max_cnt; idx++) {
+		ret = ubase_alloc_rc_buf(udev, idx);
+		if (ret) {
+			ubase_err(udev, "failed to init rc buf[%u], ret = %d.\n",
+				  idx, ret);
+			goto err_alloc_rc_buf;
+		}
+	}
+
+	return 0;
+
+err_alloc_rc_buf:
+	for (; idx > 0; idx--)
+		ubase_free_rc_buf(udev, idx - 1);
+
+	if (!test_bit(UBASE_STATE_PREALLOC_OK_B, &udev->state_bits)) {
+		kfree(udev->caps.udma_caps.rc.addrs);
+		udev->caps.udma_caps.rc.addrs = NULL;
+	}
+err_alloc_rc_addrs:
+
+	return ret;
+}
+
+void ubase_rc_buf_uninit(struct ubase_dev *udev)
+{
+	struct ubase_rc_que_addr *addrs = udev->caps.udma_caps.rc.addrs;
+	u32 max_cnt = udev->caps.udma_caps.rc.max_cnt;
+	u32 idx;
+
+	if (test_bit(UBASE_STATE_PREALLOC_OK_B, &udev->state_bits))
+		return;
+
+	for (idx = max_cnt; idx > 0; idx--)
+		ubase_free_rc_buf(udev, idx - 1);
+
+	if (!test_bit(UBASE_STATE_PREALLOC_OK_B, &udev->state_bits)) {
+		kfree(addrs);
+		udev->caps.udma_caps.rc.addrs = NULL;
+	}
+}

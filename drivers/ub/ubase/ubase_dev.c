@@ -320,6 +320,16 @@ static void ubase_update_stats_for_all(struct ubase_dev *udev)
 	}
 }
 
+static void ubase_report_rate_limited_log_cnt(struct ubase_dev *udev)
+{
+	if (udev->log_rs.aeq_event_type_exceed_max_cnt) {
+		ubase_warn(udev,
+			   "rate limited log: aeq_event_type_exceed_max_cnt = %llu.\n",
+			   udev->log_rs.aeq_event_type_exceed_max_cnt);
+		udev->log_rs.aeq_event_type_exceed_max_cnt = 0;
+	}
+}
+
 static void ubase_cancel_period_service_task(struct ubase_dev *udev)
 {
 	if (udev->period_service_task.service_task.work.func)
@@ -342,6 +352,7 @@ static int ubase_enable_period_service_task(struct ubase_dev *udev)
 static void ubase_period_service_task(struct work_struct *work)
 {
 #define UBASE_STATS_TIMER_INTERVAL		(300000 / (UBASE_PERIOD_100MS))
+#define UBASE_RL_LOG_TIMER_INTERVAL		(180000 / (UBASE_PERIOD_100MS))
 #define UBASE_CTRLQ_TIMER_INTERVAL		(3000 / (UBASE_PERIOD_100MS))
 
 	struct ubase_delay_work *ubase_work =
@@ -361,6 +372,10 @@ static void ubase_period_service_task(struct work_struct *work)
 	if (test_bit(UBASE_STATE_INITED_B, &udev->state_bits) &&
 	    !(udev->serv_proc_cnt % UBASE_CTRLQ_TIMER_INTERVAL))
 		ubase_ctrlq_clean_service_task(udev);
+
+	if (test_bit(UBASE_STATE_INITED_B, &udev->state_bits) &&
+	    !(udev->serv_proc_cnt % UBASE_RL_LOG_TIMER_INTERVAL))
+		ubase_report_rate_limited_log_cnt(udev);
 
 	udev->serv_proc_cnt++;
 	ubase_enable_period_service_task(udev);
@@ -769,8 +784,8 @@ static const struct ubase_init_function ubase_init_func_map[] = {
 		NULL, NULL
 	},
 	{
-		"init qos", UBASE_SUP_ALL, 0,
-		ubase_qos_init, NULL
+		"init qos", UBASE_SUP_NO_PMU, 0,
+		ubase_qos_init, ubase_qos_uninit
 	},
 	{
 		"prealloc memory", UBASE_SUP_UDMA, 1,
@@ -783,6 +798,10 @@ static const struct ubase_init_function ubase_init_func_map[] = {
 	{
 		"init hw", UBASE_SUP_NO_PMU, 1,
 		ubase_hw_init, ubase_hw_uninit
+	},
+	{
+		"init rc buf", UBASE_SUP_UDMA, 1,
+		ubase_rc_buf_init, ubase_rc_buf_uninit
 	},
 	{
 		"init debugfs", UBASE_SUP_ALL, 0,
@@ -1424,7 +1443,7 @@ struct ubase_adev_qos *ubase_get_adev_qos(struct auxiliary_device *adev)
 		return NULL;
 
 	udev = __ubase_get_udev_by_adev(adev);
-	return &udev->qos;
+	return &udev->qos.adev_qos;
 }
 EXPORT_SYMBOL(ubase_get_adev_qos);
 

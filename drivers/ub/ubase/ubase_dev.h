@@ -7,6 +7,7 @@
 #ifndef __UBASE_DEV_H__
 #define __UBASE_DEV_H__
 
+#include <linux/atomic.h>
 #include <linux/auxiliary_bus.h>
 #include <linux/dma-mapping.h>
 #include <linux/if_ether.h>
@@ -16,6 +17,7 @@
 #include <ub/ubase/ubase_comm_dev.h>
 #include <ub/ubase/ubase_comm_eq.h>
 #include <ub/ubase/ubase_comm_mbx.h>
+#include <ub/ubase/ubase_comm_qos.h>
 #include <ub/ubase/ubase_comm_stats.h>
 
 #include "ubase.h"
@@ -96,6 +98,7 @@ struct ubase_cmdq_ring {
 struct ubase_cmdq {
 	struct ubase_cmdq_ring csq;
 	struct ubase_cmdq_ring crq;
+	atomic_t csq_cnt;
 };
 
 struct ubase_hw {
@@ -147,6 +150,7 @@ struct ubase_mbox_cmd {
 	struct dma_pool *pool;
 	struct semaphore sem;
 	struct ubase_mbx_event_context ctx;
+	atomic_t mbx_cnt;
 };
 
 struct ubase_destroy_res_cmd {
@@ -351,6 +355,7 @@ struct ubase_prealloc_mem_info {
 struct ubase_log_rs {
 	struct ratelimit_state rs;
 	u16 ctrlq_other_seq_invalid_log_cnt;
+	u64 aeq_event_type_exceed_max_cnt;
 };
 
 enum ubase_node_type {
@@ -359,6 +364,11 @@ enum ubase_node_type {
 	UBASE_NODE_TYPE_INBAND_CTRLED,
 	UBASE_NODE_TYPE_OUTBAND_CTRL,
 	UBASE_NODE_TYPE_OUTBAND_CTRLED,
+};
+
+struct ubase_dev_qos {
+	struct ubase_adev_qos		adev_qos;
+	struct ubase_initial_qset_qos	initial_qos;
 };
 
 struct ubase_dev {
@@ -370,7 +380,7 @@ struct ubase_dev {
 	bool			use_fixed_rc_num;
 	enum ubase_node_type	node_type;
 	struct ubase_dev_caps	caps;
-	struct ubase_adev_qos	qos;
+	struct ubase_dev_qos	qos;
 	struct ubase_dbgfs	dbgfs;
 	struct ubase_ctx_buf	ctx_buf;
 	struct ubase_ta_layer_ctx	ta_ctx;

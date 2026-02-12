@@ -139,8 +139,7 @@ static void udma_set_dev_caps(struct ubcore_device_attr *attr, struct udma_dev *
 	attr->port_cnt = udma_dev->caps.port_num;
 	attr->dev_cap.ceq_cnt = udma_dev->caps.comp_vector_cnt;
 	attr->dev_cap.max_ue_cnt = udma_dev->caps.ue_cnt;
-	attr->dev_cap.max_rc = udma_dev->caps.rc_queue_num;
-	attr->dev_cap.max_rc_depth = udma_dev->caps.rc_queue_depth;
+	attr->dev_cap.max_rc = udma_dev->caps.rct.max_cnt;
 	attr->dev_cap.max_eid_cnt = udma_dev->caps.seid.max_cnt;
 	attr->dev_cap.feature.bs.jfc_inline = (udma_dev->caps.feature &
 					       UDMA_CAP_FEATURE_JFC_INLINE) ? 1 : 0;
@@ -587,7 +586,6 @@ static int udma_construct_qos_param(struct udma_dev *dev)
 static int udma_set_hw_caps(struct udma_dev *udma_dev)
 {
 #define MAX_MSG_LEN 0x10000
-#define RC_QUEUE_ENTRY_SIZE 64
 	struct ubase_adev_caps *a_caps;
 	uint32_t jetty_grp_cnt;
 	int ret;
@@ -613,11 +611,6 @@ static int udma_set_hw_caps(struct udma_dev *udma_dev)
 	udma_dev->caps.jetty.start_idx = a_caps->jfs.start_idx;
 	udma_dev->caps.jetty.next_idx = udma_dev->caps.jetty.start_idx;
 	udma_dev->caps.cqe_size = UDMA_CQE_SIZE;
-	udma_dev->caps.rc_queue_num = a_caps->rc_max_cnt;
-	udma_dev->caps.rc_queue_depth = a_caps->rc_que_depth;
-	udma_dev->caps.rc_entry_size = RC_QUEUE_ENTRY_SIZE;
-	udma_dev->caps.rc_dma_len = a_caps->pmem.dma_len;
-	udma_dev->caps.rc_dma_addr = a_caps->pmem.dma_addr;
 
 	ret = udma_construct_qos_param(udma_dev);
 	if (ret)
@@ -632,6 +625,17 @@ static int udma_set_hw_caps(struct udma_dev *udma_dev)
 			jetty_grp_cnt < udma_dev->caps.jetty_grp.max_cnt ?
 			jetty_grp_cnt : udma_dev->caps.jetty_grp.max_cnt;
 	}
+
+	udma_dev->caps.rct.max_cnt = a_caps->rc.max_cnt;
+	udma_dev->caps.rct.depth = a_caps->rc.depth;
+
+	udma_dev->caps.rct.iova = kzalloc(sizeof(dma_addr_t) * (udma_dev->caps.rct.max_cnt),
+					  GFP_KERNEL);
+	if (!udma_dev->caps.rct.iova)
+		return -ENOMEM;
+
+	for (int i = 0; i < a_caps->rc.max_cnt; i++)
+		udma_dev->caps.rct.iova[i] = a_caps->rc.addrs[i].iova;
 
 	return 0;
 }
@@ -668,6 +672,7 @@ static int udma_init_dev_param(struct udma_dev *udma_dev)
 	if (ret) {
 		dev_err(udma_dev->dev,
 			"Failed to init tables, ret = %d\n", ret);
+		kfree(udma_dev->caps.rct.iova);
 		return ret;
 	}
 
@@ -688,6 +693,7 @@ static void udma_uninit_dev_param(struct udma_dev *udma_dev)
 	mutex_destroy(&udma_dev->db_mutex);
 	dev_set_drvdata(&udma_dev->comdev.adev->dev, NULL);
 	udma_destroy_tables(udma_dev);
+	kfree(udma_dev->caps.rct.iova);
 }
 
 static void udma_disable_usva(struct udma_dev *udma_dev)

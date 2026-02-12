@@ -97,6 +97,27 @@ out:
 	return ret;
 }
 
+static void unic_restore_bond_addr_list(struct list_head *list,
+					spinlock_t *addr_list_lock,
+					struct unic_comm_addr_node *ip_node)
+{
+	struct unic_comm_addr_node *addr_node;
+
+	spin_lock_bh(addr_list_lock);
+	addr_node = unic_comm_find_addr_node(list, (u8 *)&ip_node->ip_addr,
+					     ip_node->node_mask);
+	if (addr_node) {
+		list_del(&ip_node->node);
+		kfree(ip_node);
+		goto out;
+	}
+
+	list_move_tail(&ip_node->node, list);
+
+out:
+	spin_unlock_bh(addr_list_lock);
+}
+
 static void unic_notify_bond_ip_list(struct unic_vport *vport,
 				     struct list_head *list,
 				     struct list_head *bond_list,
@@ -105,26 +126,16 @@ static void unic_notify_bond_ip_list(struct unic_vport *vport,
 {
 	struct unic_comm_addr_node *ip_node, *tmp;
 	bool bond_service_task_flag = false;
-	int ret;
 
 	list_for_each_entry_safe(ip_node, tmp, list, node) {
 		if (unic_sync_bond_ip(vport, ip_node, state)) {
-			ret = unic_update_bond_addr_list(bond_list,
-							 addr_list_lock,
-							 ip_node->state,
-							 (u8 *)&ip_node->ip_addr,
-							 ip_node->node_mask);
-			if (!ret) {
-				bond_service_task_flag = true;
-			} else if (ret == -ENOMEM) {
-				list_move_tail(&ip_node->node, bond_list);
-				bond_service_task_flag = true;
-				continue;
-			}
+			unic_restore_bond_addr_list(bond_list, addr_list_lock,
+						    ip_node);
+			bond_service_task_flag = true;
+		} else {
+			list_del(&ip_node->node);
+			kfree(ip_node);
 		}
-
-		list_del(&ip_node->node);
-		kfree(ip_node);
 	}
 
 	if (bond_service_task_flag)
@@ -202,4 +213,51 @@ void unic_uninit_bond_ip_table(struct unic_dev *unic_dev)
 	}
 
 	spin_unlock_bh(&vport->addr_tbl.bond_ip_list_lock);
+}
+
+static int unic_send_bond_status_change_notify(struct auxiliary_device *adev,
+					       enum unic_bond_port_change_cmd bonding_cmd)
+{
+	struct unic_dev *unic_dev = dev_get_drvdata(&adev->dev);
+	struct unic_ctrlq_bond_status_notify_req req = {0};
+	struct ubase_caps *caps = ubase_get_dev_caps(adev);
+	struct ubase_ctrlq_msg msg = {0};
+	int ret, tmp_resp;
+
+	req.bonding_cmd = bonding_cmd;
+	req.port_id = caps->io_port_id;
+	msg.service_ver = UBASE_CTRLQ_SER_VER_01;
+	msg.service_type = UBASE_CTRLQ_SER_TYPE_PORT;
+	msg.opcode = UBASE_CTRLQ_OPC_BOND_PORT;
+	msg.need_resp = 1;
+	msg.is_resp = 0;
+	msg.in_size = sizeof(req);
+	msg.in = &req;
+	msg.out_size = sizeof(tmp_resp);
+	msg.out = &tmp_resp;
+
+	ret = ubase_ctrlq_send_msg(adev, &msg);
+	if (ret)
+		unic_err(unic_dev, "failed to notify bond status change, port id = %u, bonding_cmd = %s, ret = %d.\n",
+			 req.port_id, req.bonding_cmd == UNIC_CTRLQ_BOND_ADD_PORT ?
+			 "ADD" : "DEL", ret);
+
+	return ret;
+}
+
+int unic_sync_bond_status(struct net_device *netdev)
+{
+	struct unic_dev *unic_dev = netdev_priv(netdev);
+	enum unic_bond_port_change_cmd bonding_cmd;
+	struct net_device *master;
+
+	rcu_read_lock();
+	master = netdev_master_upper_dev_get_rcu(netdev);
+	rcu_read_unlock();
+
+	bonding_cmd = master && netif_is_bond_master(master) ?
+		      UNIC_CTRLQ_BOND_ADD_PORT : UNIC_CTRLQ_BOND_DEL_PORT;
+
+	return unic_send_bond_status_change_notify(unic_dev->comdev.adev,
+						   bonding_cmd);
 }

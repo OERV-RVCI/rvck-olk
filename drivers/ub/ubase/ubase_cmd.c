@@ -266,6 +266,7 @@ int ubase_send_cmd(struct ubase_dev *udev,
 	int ret;
 
 	spin_lock_bh(&csq->lock);
+	atomic_inc(&udev->hw.cmdq.csq_cnt);
 	if (test_bit(UBASE_STATE_CMD_DISABLE, &udev->hw.state)) {
 		ret = -EBUSY;
 		goto err_unlock;
@@ -301,6 +302,7 @@ err_clr_cmdq:
 		ubase_warn(udev,
 			   "cleaned %dBD, need to clean %dBD.\n", cleaned, num);
 err_unlock:
+	atomic_dec(&udev->hw.cmdq.csq_cnt);
 	spin_unlock_bh(&csq->lock);
 
 	return ret;
@@ -366,6 +368,8 @@ int ubase_cmd_init(struct ubase_dev *udev)
 
 	ubase_cmd_init_regs(udev);
 
+	atomic_set(&udev->hw.cmdq.csq_cnt, 0);
+
 	clear_bit(UBASE_STATE_CMD_DISABLE, &udev->hw.state);
 
 	ret = ubase_cmd_query_version(udev);
@@ -388,9 +392,12 @@ err_queue_init:
 
 void ubase_cmd_disable(struct ubase_dev *udev)
 {
+#define UBASE_CMDQ_CLEAN_WAIT_TIME	4
+
 	__ubase_cmd_disable(udev);
 	/* wait to ensure the firmware completes csq commands. */
-	msleep(UBASE_CMDQ_CLEAR_WAIT_TIME);
+	while (atomic_read(&udev->hw.cmdq.csq_cnt))
+		msleep(UBASE_CMDQ_CLEAN_WAIT_TIME);
 
 	ubase_cmd_uninit_regs(udev);
 }
@@ -670,13 +677,18 @@ static int ubase_cmd_wait_mbx_completed(struct ubase_dev *udev,
 					union ubase_mbox *mbx)
 {
 	struct ubase_mbx_event_context *ctx = &udev->mb_cmd.ctx;
+	struct ubase_irq_table *irq_table = &udev->irq_table;
+	struct ubase_aeq *aeq = &irq_table->aeq;
 	int ret;
 
+	atomic_inc(&udev->mb_cmd.mbx_cnt);
+	complete(&aeq->poll);
 	if (!wait_for_completion_timeout(&ctx->done,
 					 msecs_to_jiffies(UBASE_CMDQ_MBX_TX_TIMEOUT))) {
 		ubase_err(udev,
 			  "cmd seq_num 0x%x mailbox cmd code 0x%x timeout.\n",
 			  ctx->seq_num, mbx->cmd);
+		atomic_dec(&udev->mb_cmd.mbx_cnt);
 		return -EBUSY;
 	}
 
@@ -685,6 +697,8 @@ static int ubase_cmd_wait_mbx_completed(struct ubase_dev *udev,
 		ubase_err(udev,
 			  "cmd seq_num(0x%x) mailbox cmd code(0x%x) error, ret = %d.\n",
 			  ctx->seq_num, mbx->cmd, ret);
+
+	atomic_dec(&udev->mb_cmd.mbx_cnt);
 
 	return ret;
 }
