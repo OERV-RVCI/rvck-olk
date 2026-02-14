@@ -35,12 +35,6 @@ struct udma_tbl {
 	uint32_t size;
 };
 
-struct udma_rct {
-	dma_addr_t *iova;
-	uint32_t max_cnt;
-	uint32_t depth;
-};
-
 struct udma_caps {
 	unsigned long init_flag;
 	struct udma_res jfs;
@@ -70,11 +64,17 @@ struct udma_caps {
 	struct udma_res stars_jetty;
 	struct udma_res public_jetty;
 	struct udma_res user_ctrl_normal_jetty;
+	uint16_t rc_queue_num;
+	uint16_t rc_queue_depth;
+	uint8_t rc_entry_size;
+	uint64_t rc_dma_len;
+	dma_addr_t rc_dma_addr;
 	uint8_t ack_queue_num;
 	uint8_t port_num;
 	uint8_t cqe_size;
 	struct udma_tbl seid;
-	struct udma_rct rct;
+	bool ctp_en;
+	bool ipourma_en;
 	bool sva_sep_mode_en;
 };
 

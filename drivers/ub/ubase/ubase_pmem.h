@@ -9,8 +9,6 @@
 
 #include "ubase_dev.h"
 
-#define UBASE_RCE_SIZE 64
-
 int ubase_prealloc_mem_init(struct ubase_dev *udev);
 void ubase_prealloc_mem_uninit(struct ubase_dev *udev);
 
