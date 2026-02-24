@@ -8,3 +8,6 @@ obj-$(CONFIG_VFIO_PLATFORM) += vfio-platform.o
 
 vfio-amba-y := vfio_amba.o
 obj-$(CONFIG_VFIO_AMBA) += vfio-amba.o
+
+vfio-hisi05a1-y := vfio_hisi05a1.o
+obj-$(CONFIG_VFIO_HISI05A1) += vfio_hisi05a1.o
