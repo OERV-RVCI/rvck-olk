@@ -58,6 +58,16 @@ config HISI_VIRTCCA_HOST
 
 	  If unsure, say N.
 
+config HISI_CCA
+	bool "Enable hisi cca page mapping for Realm VMs"
+	depends on KVM
+	help
+	  Say Y here to enable hisi cca (level-1 or level-2) page mapping
+	  support for Realm VMs. It allows the use of mapping hugepages
+	  to accelerate Realm VM startup.
+
+	  If unsure, say N.
+
 config NVHE_EL2_DEBUG
 	bool "Debug mode for non-VHE EL2 object"
 	depends on KVM

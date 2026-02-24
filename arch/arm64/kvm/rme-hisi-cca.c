@@ -4,7 +4,7 @@
  */
 
 #include <asm/kvm_emulate.h>
-#include <asm/kvm_rme_ccal.h>
+#include <asm/kvm_rme_hisi_cca.h>
 #include <asm/rmi_cmds.h>
 #include <asm/stage2_pgtable.h>
 
@@ -20,7 +20,14 @@
 #define RMM_L2_BLOCK_SIZE	BIT(RMM_RTT_LEVEL_SHIFT(2))
 #define RMM_L1_BLOCK_SIZE	BIT(RMM_RTT_LEVEL_SHIFT(1))
 
-#define CCAL_RTT_ENTRY_NUM	512U
+#define RTT_ENTRY_NUM	512U
+
+enum HISI_CCA_GRANULE_TYPES {
+	HISI_CCA_GRANULE_NORMAL,
+	HISI_CCA_GRANULE_DEV,
+	HISI_CCA_GRANULE_NS,
+	HISI_CCA_GRANULE_TYPES_NUM
+};
 
 static int get_start_level(struct realm *realm)
 {
@@ -65,14 +72,9 @@ static bool pages_are_consecutive(struct page **pages, int num)
 	return true;
 }
 
-void config_realm_ccal(struct realm *realm)
-{
-	realm->params->flags |= RMI_REALM_PARAM_FLAG_CCAL;
-	realm->is_ccal = true;
-}
-
-static int ccal_create_data_page_unknown(struct realm *realm, unsigned long ipa,
-					 struct page *page)
+static int hisi_cca_create_data_page_unknown(struct realm *realm,
+					     unsigned long ipa,
+					     struct page *page)
 {
 	phys_addr_t rd = virt_to_phys(realm->rd);
 	phys_addr_t phys = page_to_phys(page);
@@ -137,9 +139,10 @@ err_undelegate:
 	return -ENXIO;
 }
 
-static int ccal_create_data_block(struct realm *realm, unsigned long ipa,
-				  struct page **dst_pages,
-				  struct page *tmp_block, unsigned long flags)
+static int hisi_cca_create_data_block(struct realm *realm, unsigned long ipa,
+				      struct page **dst_pages,
+				      struct page *tmp_block,
+				      unsigned long flags)
 {
 	phys_addr_t dst_phys, tmp_phys;
 	int ret;
@@ -150,11 +153,11 @@ static int ccal_create_data_block(struct realm *realm, unsigned long ipa,
 	dst_phys = page_to_phys(dst_pages[0]);
 	tmp_phys = page_to_phys(tmp_block);
 
-	if (rmi_ccal_delegate_range(dst_phys, RMM_L2_BLOCK_SIZE) != RMI_SUCCESS)
+	if (rmi_cca_hisi_delegate_range(dst_phys, RMM_L2_BLOCK_SIZE) != RMI_SUCCESS)
 		return -ENXIO;
 
-	ret = rmi_ccal_block_create(virt_to_phys(realm->rd), dst_phys, ipa,
-				    tmp_phys, flags);
+	ret = rmi_cca_hisi_block_create(virt_to_phys(realm->rd), dst_phys, ipa,
+					tmp_phys, flags);
 	if (RMI_RETURN_STATUS(ret) == RMI_ERROR_RTT) {
 		/* Create missing RTTs and retry. */
 		int err_level = RMI_RETURN_INDEX(ret);
@@ -164,8 +167,8 @@ static int ccal_create_data_block(struct realm *realm, unsigned long ipa,
 		if (ret)
 			goto err_undelegate;
 
-		ret = rmi_ccal_block_create(virt_to_phys(realm->rd), dst_phys,
-					    ipa, tmp_phys, flags);
+		ret = rmi_cca_hisi_block_create(virt_to_phys(realm->rd), dst_phys,
+						ipa, tmp_phys, flags);
 	}
 
 	if (ret)
@@ -174,7 +177,7 @@ static int ccal_create_data_block(struct realm *realm, unsigned long ipa,
 	return 0;
 
 err_undelegate:
-	if (WARN_ON(rmi_ccal_undelegate_range(dst_phys, RMM_L2_BLOCK_SIZE))) {
+	if (WARN_ON(rmi_cca_hisi_undelegate_range(dst_phys, RMM_L2_BLOCK_SIZE))) {
 		for (int i = 0, offset = 0; offset < RMM_L2_BLOCK_SIZE;
 		     i++, offset += PAGE_SIZE) {
 			/* Pages can't be returned to NS world so are lost. */
@@ -184,22 +187,22 @@ err_undelegate:
 	return -ENXIO;
 }
 
-static int ccal_create_data_block_unknown(struct realm *realm,
-					  struct page **dst_pages,
-					  unsigned long ipa)
+static int hisi_cca_create_data_block_unknown(struct realm *realm,
+					      struct page **dst_pages,
+					      unsigned long ipa)
 {
 	phys_addr_t dst_phys;
 	int ret;
 
 	dst_phys = page_to_phys(dst_pages[0]);
 
-	if (rmi_ccal_delegate_range(dst_phys, RMM_L2_BLOCK_SIZE)) {
+	if (rmi_cca_hisi_delegate_range(dst_phys, RMM_L2_BLOCK_SIZE)) {
 		/* Race with another thread. */
 		return 0;
 	}
 
-	ret = rmi_ccal_block_create_unknown(virt_to_phys(realm->rd), dst_phys,
-					    ipa);
+	ret = rmi_cca_hisi_block_create_unknown(virt_to_phys(realm->rd),
+						dst_phys, ipa);
 	if (RMI_RETURN_STATUS(ret) == RMI_ERROR_RTT) {
 		/* Create missing RTTs and retry. */
 		int err_level = RMI_RETURN_INDEX(ret);
@@ -209,8 +212,8 @@ static int ccal_create_data_block_unknown(struct realm *realm,
 		if (ret)
 			goto err_undelegate;
 
-		ret = rmi_ccal_block_create_unknown(virt_to_phys(realm->rd),
-						    dst_phys, ipa);
+		ret = rmi_cca_hisi_block_create_unknown(virt_to_phys(realm->rd),
+							dst_phys, ipa);
 	}
 	if (ret)
 		goto err_undelegate;
@@ -218,7 +221,7 @@ static int ccal_create_data_block_unknown(struct realm *realm,
 	return 0;
 
 err_undelegate:
-	if (WARN_ON(rmi_ccal_undelegate_range(dst_phys, RMM_L2_BLOCK_SIZE))) {
+	if (WARN_ON(rmi_cca_hisi_undelegate_range(dst_phys, RMM_L2_BLOCK_SIZE))) {
 		for (int i = 0, offset = 0; offset < RMM_L2_BLOCK_SIZE;
 		     i++, offset += PAGE_SIZE) {
 			/* Pages can't be returned to NS world so are lost. */
@@ -229,9 +232,9 @@ err_undelegate:
 	return -ENXIO;
 }
 
-int realm_ccal_populate_region(struct kvm *kvm, phys_addr_t ipa_base,
-			       phys_addr_t ipa_end, phys_addr_t *ipa_top,
-			       u32 flags)
+int realm_hisi_cca_populate_region(struct kvm *kvm, phys_addr_t ipa_base,
+				   phys_addr_t ipa_end, phys_addr_t *ipa_top,
+				   u32 flags)
 {
 	struct realm *realm = &kvm->arch.realm;
 	struct kvm_memory_slot *memslot;
@@ -285,7 +288,7 @@ int realm_ccal_populate_region(struct kvm *kvm, phys_addr_t ipa_base,
 		goto out_srcu;
 	}
 
-	pages = kmalloc(CCAL_RTT_ENTRY_NUM * sizeof(*pages), GFP_KERNEL);
+	pages = kmalloc(RTT_ENTRY_NUM * sizeof(*pages), GFP_KERNEL);
 	if (!pages) {
 		ret = -ENOMEM;
 		goto out_srcu;
@@ -315,8 +318,8 @@ int realm_ccal_populate_region(struct kvm *kvm, phys_addr_t ipa_base,
 	}
 
 	if (block_map) {
-		ret = ccal_create_data_block(realm, ipa_base, pages, tmp_pages,
-					     data_flags);
+		ret = hisi_cca_create_data_block(realm, ipa_base, pages,
+						 tmp_pages, data_flags);
 		if (ALIGN(ipa_base, RMM_L1_BLOCK_SIZE) ==
 		    (ipa_base + RMM_L2_BLOCK_SIZE))
 			fold_rtt(realm, ALIGN_DOWN(ipa_base, RMM_L1_BLOCK_SIZE),
@@ -346,8 +349,8 @@ out_srcu:
 	return ret;
 }
 
-static int ccal_map_range(struct kvm *kvm, unsigned long ipa_base,
-			  unsigned long ipa_top)
+static int hisi_cca_map_range(struct kvm *kvm, unsigned long ipa_base,
+			      unsigned long ipa_top)
 {
 	struct realm *realm = &kvm->arch.realm;
 	struct kvm_memory_slot *memslot;
@@ -383,7 +386,7 @@ static int ccal_map_range(struct kvm *kvm, unsigned long ipa_base,
 		goto out_srcu;
 	}
 
-	pages = kmalloc(CCAL_RTT_ENTRY_NUM * sizeof(*pages), GFP_KERNEL);
+	pages = kmalloc(RTT_ENTRY_NUM * sizeof(*pages), GFP_KERNEL);
 	if (!pages) {
 		ret = -ENOMEM;
 		goto out_srcu;
@@ -403,15 +406,15 @@ static int ccal_map_range(struct kvm *kvm, unsigned long ipa_base,
 		block_map = false;
 
 	if (block_map) {
-		ret = ccal_create_data_block_unknown(realm, pages, ipa_base);
+		ret = hisi_cca_create_data_block_unknown(realm, pages, ipa_base);
 		if (ALIGN(ipa_base, RMM_L1_BLOCK_SIZE) ==
 		    (ipa_base + RMM_L2_BLOCK_SIZE))
 			fold_rtt(realm, ALIGN_DOWN(ipa_base, RMM_L1_BLOCK_SIZE),
 				 RMM_RTT_BLOCK_LEVEL);
 	} else {
 		for (int i = 0; i < nr_pinned; i++) {
-			ret = ccal_create_data_page_unknown(realm, ipa_base,
-							    pages[i]);
+			ret = hisi_cca_create_data_page_unknown(realm, ipa_base,
+								pages[i]);
 			if (ret)
 				break;
 
@@ -430,8 +433,8 @@ out_srcu:
 	return ret;
 }
 
-int realm_ccal_map_ram(struct kvm *kvm,
-		       struct arm_rme_populate_realm *args)
+int realm_hisi_cca_map_ram(struct kvm *kvm,
+			   struct arm_rme_map_ram_args *args)
 {
 	phys_addr_t ipa_base, ipa_end, next_ipa;
 	int ret;
@@ -439,8 +442,8 @@ int realm_ccal_map_ram(struct kvm *kvm,
 	if (kvm_realm_state(kvm) != REALM_STATE_NEW)
 		return -EINVAL;
 
-	ipa_base = args->base;
-	ipa_end = ipa_base + args->size;
+	ipa_base = args->ram_base;
+	ipa_end = ipa_base + args->ram_size;
 
 	if (!IS_ALIGNED(ipa_base, PAGE_SIZE) ||
 	    !IS_ALIGNED(ipa_end, PAGE_SIZE) ||
@@ -453,7 +456,7 @@ int realm_ccal_map_ram(struct kvm *kvm,
 	while (ipa_base < ipa_end) {
 		next_ipa = min(ipa_end, ALIGN_DOWN(ipa_base + RMM_L2_BLOCK_SIZE,
 						   RMM_L2_BLOCK_SIZE));
-		ret = ccal_map_range(kvm, ipa_base, next_ipa);
+		ret = hisi_cca_map_range(kvm, ipa_base, next_ipa);
 		if (ret)
 			break;
 
@@ -464,21 +467,21 @@ int realm_ccal_map_ram(struct kvm *kvm,
 	return ret;
 }
 
-static int ccal_destroy_data(struct realm *realm, unsigned long ipa,
-			     unsigned long *next_addr)
+static int hisi_cca_destroy_data(struct realm *realm, unsigned long ipa,
+				 unsigned long *next_addr)
 {
 	unsigned long pa, size, granule_type, offset;
 	unsigned long rd = virt_to_phys(realm->rd);
 	int ret;
 
-	ret = rmi_ccal_data_destroy(rd, ipa, &pa, &size, &granule_type,
-				    next_addr);
+	ret = rmi_cca_hisi_data_destroy(rd, ipa, &pa, &size, &granule_type,
+					next_addr);
 
 	if (WARN_ON(ret))
 		return -ENXIO;
 
-	if (granule_type == CCAL_GRANULE_NORMAL)
-		ret = rmi_ccal_undelegate_range(pa, size);
+	if (granule_type == HISI_CCA_GRANULE_NORMAL)
+		ret = rmi_cca_hisi_undelegate_range(pa, size);
 	else
 		goto out_unpin;
 
@@ -498,23 +501,23 @@ out_unpin:
 	return 0;
 }
 
-void realm_ccal_destroy_data_range(struct kvm *kvm, unsigned long start,
-				   unsigned long end)
+void realm_hisi_cca_destroy_data_range(struct kvm *kvm, unsigned long start,
+				       unsigned long end)
 {
 	struct realm *realm = &kvm->arch.realm;
 	unsigned long next_addr, addr;
 	int ret;
 
 	for (addr = start; addr < end; addr = next_addr) {
-		ret = ccal_destroy_data(realm, addr, &next_addr);
+		ret = hisi_cca_destroy_data(realm, addr, &next_addr);
 		if (ret)
 			break;
 		cond_resched_rwlock_write(&kvm->mmu_lock);
 	}
 }
 
-static int ccal_rtt_complement(struct realm *realm, unsigned long ipa,
-			       int walk_level, int level)
+static int rtt_complement(struct realm *realm, unsigned long ipa,
+			  int walk_level, int level)
 {
 	/*
 	 * Walk level could be -1 if the LPA2 feature is enabled.
@@ -541,9 +544,9 @@ static int ccal_rtt_complement(struct realm *realm, unsigned long ipa,
 	return ret;
 }
 
-int realm_ccal_set_ipa_state(struct kvm_vcpu *vcpu, unsigned long start,
-			     unsigned long end, unsigned long ripas,
-			     unsigned long *top_ipa)
+int realm_hisi_cca_set_ipa_state(struct kvm_vcpu *vcpu, unsigned long start,
+				 unsigned long end, unsigned long ripas,
+				 unsigned long *top_ipa)
 {
 	struct kvm *kvm = vcpu->kvm;
 	struct realm *realm = &kvm->arch.realm;
@@ -564,7 +567,7 @@ int realm_ccal_set_ipa_state(struct kvm_vcpu *vcpu, unsigned long start,
 			int walk_level = RMI_RETURN_INDEX(ret);
 			int level = find_map_level(realm, ipa, end);
 
-			ret = ccal_rtt_complement(realm, ipa, walk_level, level);
+			ret = rtt_complement(realm, ipa, walk_level, level);
 
 			if (ret)
 				break;

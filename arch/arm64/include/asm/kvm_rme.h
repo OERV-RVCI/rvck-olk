@@ -65,7 +65,9 @@ struct realm {
 	unsigned int vmid;
 	unsigned int ia_bits;
 #ifndef __GENKSYMS__
-	bool is_ccal;
+#ifdef CONFIG_HISI_CCA
+	bool hisi_cca_enable;
+#endif
 #endif
 };
 
@@ -147,5 +149,12 @@ static inline bool kvm_realm_is_private_address(struct realm *realm,
 {
 	return !(addr & BIT(realm->ia_bits - 1));
 }
+
+#ifdef CONFIG_HISI_CCA
+static inline bool kvm_realm_supports_hisi_cca(struct realm *realm)
+{
+	return realm->hisi_cca_enable;
+}
+#endif
 
 #endif /* __ASM_KVM_RME_H */

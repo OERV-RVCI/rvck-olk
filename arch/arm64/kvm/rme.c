@@ -11,7 +11,7 @@
 #include <asm/virt.h>
 
 #include <asm/kvm_pgtable.h>
-#include <asm/kvm_rme_ccal.h>
+#include <asm/kvm_rme_hisi_cca.h>
 #include <asm/cca_base.h>
 
 static unsigned long rmm_feat_reg0;
@@ -726,12 +726,13 @@ void kvm_realm_unmap_range(struct kvm *kvm, unsigned long start,
 	if (realm->state == REALM_STATE_NONE)
 		return;
 
-	if (is_ccal_rvm(realm)) {
+#ifdef CONFIG_HISI_CCA
+	if (kvm_realm_supports_hisi_cca(&kvm->arch.realm)) {
 		if (unmap_private)
-			realm_ccal_destroy_data_range(kvm, start, end);
+			realm_hisi_cca_destroy_data_range(kvm, start, end);
 		return;
 	}
-
+#endif
 	realm_unmap_shared_range(kvm, find_map_level(realm, start, end),
 				 start, end, may_block);
 	if (unmap_private)
@@ -1118,10 +1119,13 @@ static int kvm_populate_realm(struct kvm *kvm,
 		phys_addr_t end = min(ipa_end, ipa_base + SZ_2M);
 		int ret;
 
-		if (is_ccal_rvm(&kvm->arch.realm))
-			ret = realm_ccal_populate_region(kvm, ipa_base, ipa_end,
-							 &end, args->flags);
+#ifdef CONFIG_HISI_CCA
+		if (kvm_realm_supports_hisi_cca(&kvm->arch.realm))
+			ret = realm_hisi_cca_populate_region(kvm, ipa_base,
+							     ipa_end, &end,
+							     args->flags);
 		else
+#endif
 			ret = populate_region(kvm, ipa_base, end, args->flags);
 
 		if (ret)
@@ -1364,9 +1368,12 @@ static int kvm_rme_config_realm(struct kvm *kvm, struct kvm_enable_cap *cap)
 	case ARM_RME_CONFIG_HASH_ALGO:
 		r = config_realm_hash_algo(realm, &cfg);
 		break;
-	case ARM_RME_CFG_CCAL:
-		config_realm_ccal(realm);
+#ifdef CONFIG_HISI_CCA
+	case ARM_RME_CONFIG_HISI_CCA:
+		realm->hisi_cca_enable = !!cfg.hisi_cca_enable;
+		realm->params->flags |= RMI_REALM_PARAM_FLAG_CCAL;
 		break;
+#endif
 	default:
 		r = -EINVAL;
 	}
@@ -1415,18 +1422,20 @@ int _kvm_realm_enable_cap(struct kvm *kvm, struct kvm_enable_cap *cap)
 	case KVM_CAP_ARM_RME_ACTIVATE_REALM:
 		r = kvm_activate_realm(kvm);
 		break;
-	case KVM_CAP_ARM_RME_MAP_RAM_CCAL: {
-		struct arm_rme_populate_realm args;
+#ifdef CONFIG_HISI_CCA
+	case KVM_CAP_ARM_RME_MAP_RAM_REALM: {
+		struct arm_rme_map_ram_args args;
 		void __user *argp = u64_to_user_ptr(cap->args[1]);
 
 		if (copy_from_user(&args, argp, sizeof(args))) {
 			r = -EFAULT;
 			break;
 		}
-
-		r = realm_ccal_map_ram(kvm, &args);
+		if (kvm_realm_supports_hisi_cca(&kvm->arch.realm))
+			r = realm_hisi_cca_map_ram(kvm, &args);
 		break;
 	}
+#endif
 	default:
 		r = -EINVAL;
 		break;
@@ -1489,10 +1498,12 @@ static void kvm_complete_ripas_change(struct kvm_vcpu *vcpu)
 		kvm_mmu_topup_memory_cache(&vcpu->arch.mmu_page_cache,
 					   kvm_mmu_cache_min_pages(kvm));
 		write_lock(&kvm->mmu_lock);
-		if (is_ccal_rvm(&kvm->arch.realm))
-			ret = realm_ccal_set_ipa_state(vcpu, base, top, ripas,
-						       &top_ipa);
+#ifdef CONFIG_HISI_CCA
+		if (kvm_realm_supports_hisi_cca(&kvm->arch.realm))
+			ret = realm_hisi_cca_set_ipa_state(vcpu, base, top,
+							   ripas, &top_ipa);
 		else
+#endif
 			ret = realm_set_ipa_state(vcpu, base, top, ripas,
 						  &top_ipa);
 		write_unlock(&kvm->mmu_lock);
