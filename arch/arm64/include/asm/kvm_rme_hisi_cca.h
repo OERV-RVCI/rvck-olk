@@ -54,11 +54,12 @@ static inline int rmi_cca_hisi_block_create(unsigned long rd,
 
 static inline int rmi_cca_hisi_block_create_unknown(unsigned long rd,
 						    unsigned long data,
-						    unsigned long ipa)
+						    unsigned long ipa,
+						    unsigned long level)
 {
 	struct arm_smccc_1_2_regs regs = {
 		SMC_RMI_HISI_EXT, CCA_HISI_BLOCK_DATA_CREATE_UNKNOWN,
-		rd, data, ipa
+		rd, data, ipa, level
 	};
 
 	arm_smccc_1_2_smc(&regs, &regs);

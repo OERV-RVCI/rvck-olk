@@ -42,6 +42,28 @@ static inline unsigned long rme_rtt_level_mapsize(int level)
 	return (1UL << RMM_RTT_LEVEL_SHIFT(level));
 }
 
+static int find_data_map_level(struct realm *realm,
+			  unsigned long start,
+			  unsigned long end)
+{
+	int level = RMM_RTT_MAX_LEVEL;
+	unsigned long hugetlb_pagesz = HPAGE_SIZE;
+
+	hugetlb_pagesz = huge_page_size(&default_hstate);
+	while (level > get_start_level(realm)) {
+		unsigned long map_size = rme_rtt_level_mapsize(level - 1);
+
+		if (!IS_ALIGNED(start, map_size) ||
+		    (start + map_size) > end)
+			break;
+		if (map_size > hugetlb_pagesz)
+			break;
+		level--;
+	}
+
+	return level;
+}
+
 static int find_map_level(struct realm *realm,
 			  unsigned long start,
 			  unsigned long end)
@@ -189,31 +211,33 @@ err_undelegate:
 
 static int hisi_cca_create_data_block_unknown(struct realm *realm,
 					      struct page **dst_pages,
-					      unsigned long ipa)
+					      unsigned long ipa,
+					      unsigned long level)
 {
+	unsigned long map_size = rme_rtt_level_mapsize(level);
 	phys_addr_t dst_phys;
 	int ret;
 
 	dst_phys = page_to_phys(dst_pages[0]);
 
-	if (rmi_cca_hisi_delegate_range(dst_phys, RMM_L2_BLOCK_SIZE)) {
+	if (rmi_cca_hisi_delegate_range(dst_phys, map_size)) {
 		/* Race with another thread. */
 		return 0;
 	}
 
 	ret = rmi_cca_hisi_block_create_unknown(virt_to_phys(realm->rd),
-						dst_phys, ipa);
+						dst_phys, ipa, level);
 	if (RMI_RETURN_STATUS(ret) == RMI_ERROR_RTT) {
 		/* Create missing RTTs and retry. */
 		int err_level = RMI_RETURN_INDEX(ret);
 
 		ret = realm_create_rtt_levels(realm, ipa, err_level,
-					      RMM_RTT_BLOCK_LEVEL, NULL);
+					      level, NULL);
 		if (ret)
 			goto err_undelegate;
 
 		ret = rmi_cca_hisi_block_create_unknown(virt_to_phys(realm->rd),
-							dst_phys, ipa);
+							dst_phys, ipa, level);
 	}
 	if (ret)
 		goto err_undelegate;
@@ -350,26 +374,21 @@ out_srcu:
 }
 
 static int hisi_cca_map_range(struct kvm *kvm, unsigned long ipa_base,
-			      unsigned long ipa_top)
+			      int map_level, phys_addr_t *ipa_top)
 {
 	struct realm *realm = &kvm->arch.realm;
 	struct kvm_memory_slot *memslot;
 	gfn_t base_gfn, top_gfn;
 	int nr_pages, nr_pinned;
 	struct page **pages;
-	unsigned long hva;
-	bool block_map;
-	int idx;
-	int ret;
+	unsigned long hva, map_size;
+	phys_addr_t base_pa;
+	int idx, ret;
 
-	if (IS_ALIGNED(ipa_base, RMM_L2_BLOCK_SIZE) &&
-	    (ipa_top - ipa_base == RMM_L2_BLOCK_SIZE))
-		block_map = true;
-	else
-		block_map = false;
+	map_size = rme_rtt_level_mapsize(map_level);
 
 	base_gfn = gpa_to_gfn(ipa_base);
-	top_gfn = gpa_to_gfn(ipa_top);
+	top_gfn = gpa_to_gfn(ipa_base + map_size);
 
 	nr_pages = top_gfn - base_gfn;
 
@@ -386,7 +405,7 @@ static int hisi_cca_map_range(struct kvm *kvm, unsigned long ipa_base,
 		goto out_srcu;
 	}
 
-	pages = kmalloc(RTT_ENTRY_NUM * sizeof(*pages), GFP_KERNEL);
+	pages = kmalloc(nr_pages * sizeof(*pages), GFP_KERNEL);
 	if (!pages) {
 		ret = -ENOMEM;
 		goto out_srcu;
@@ -399,28 +418,27 @@ static int hisi_cca_map_range(struct kvm *kvm, unsigned long ipa_base,
 		goto out_pin;
 	}
 
-	if (block_map && !IS_ALIGNED(page_to_phys(pages[0]), RMM_L2_BLOCK_SIZE))
-		block_map = false;
-
-	if (block_map && !pages_are_consecutive(pages, nr_pinned))
-		block_map = false;
-
-	if (block_map) {
-		ret = hisi_cca_create_data_block_unknown(realm, pages, ipa_base);
-		if (ALIGN(ipa_base, RMM_L1_BLOCK_SIZE) ==
-		    (ipa_base + RMM_L2_BLOCK_SIZE))
-			fold_rtt(realm, ALIGN_DOWN(ipa_base, RMM_L1_BLOCK_SIZE),
-				 RMM_RTT_BLOCK_LEVEL);
+	base_pa = page_to_phys(pages[0]);
+	if (IS_ALIGNED(base_pa, map_size) &&
+	    pages_are_consecutive(pages, nr_pinned)) {
+		ret = hisi_cca_create_data_block_unknown(realm, pages, ipa_base,
+							 map_level);
 	} else {
+		unsigned long tmp_ipa = ipa_base;
+
+		if (map_level + 1 < RMM_RTT_MAX_LEVEL) {
+			ret = -EAGAIN;
+			goto out_pin;
+		}
 		for (int i = 0; i < nr_pinned; i++) {
-			ret = hisi_cca_create_data_page_unknown(realm, ipa_base,
+			ret = hisi_cca_create_data_page_unknown(realm, tmp_ipa,
 								pages[i]);
 			if (ret)
 				break;
-
-			ipa_base += RMM_PAGE_SIZE;
+			tmp_ipa += RMM_PAGE_SIZE;
 		}
 	}
+	*ipa_top = ipa_base + map_size;
 
 	if (ret == 0)
 		goto out_free;
@@ -437,7 +455,7 @@ int realm_hisi_cca_map_ram(struct kvm *kvm,
 			   struct arm_rme_map_ram_args *args)
 {
 	phys_addr_t ipa_base, ipa_end, next_ipa;
-	int ret;
+	int ret, map_level;
 
 	if (kvm_realm_state(kvm) != REALM_STATE_NEW)
 		return -EINVAL;
@@ -454,11 +472,14 @@ int realm_hisi_cca_map_ram(struct kvm *kvm,
 		return 0;
 
 	while (ipa_base < ipa_end) {
-		next_ipa = min(ipa_end, ALIGN_DOWN(ipa_base + RMM_L2_BLOCK_SIZE,
-						   RMM_L2_BLOCK_SIZE));
-		ret = hisi_cca_map_range(kvm, ipa_base, next_ipa);
-		if (ret)
-			break;
+		map_level = find_data_map_level(&kvm->arch.realm, ipa_base, ipa_end);
+		ret = hisi_cca_map_range(kvm, ipa_base, map_level, &next_ipa);
+		if (ret) {
+			if (ret == -EAGAIN)
+				ret = hisi_cca_map_range(kvm, ipa_base, map_level + 1, &next_ipa);
+			if (ret)
+				break;
+		}
 
 		ipa_base = next_ipa;
 		cond_resched();
