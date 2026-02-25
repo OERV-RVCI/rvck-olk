@@ -780,3 +780,10 @@ config TCP_COMP
           payload compression handling of the TCP protocol to be done in-kernel.
 
 	  If unsure, say Y.
+
+config SCMTCP
+	tristate "TCP: SCM_RIGHTS support"
+	default m
+	help
+	  SCMTCP supports using SCM_RIGHTS like Unix socket, which can send or receive
+	  a set of open file descriptors from another process.
