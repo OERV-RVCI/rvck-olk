@@ -197,7 +197,6 @@ struct io_ring_ctx {
 	/* const or read-mostly hot data */
 	struct {
 		unsigned int		flags;
-		unsigned int		ext_flags;
 		unsigned int		drain_next: 1;
 		unsigned int		restricted: 1;
 		unsigned int		off_timeout_used: 1;
@@ -216,6 +215,10 @@ struct io_ring_ctx {
 		struct percpu_ref	refs;
 
 		enum task_work_notify_mode	notify_method;
+
+		/* 20 bytes hole */
+		KABI_FILL_HOLE(unsigned int	ext_flags)
+		KABI_FILL_HOLE(ktime_t		sq_thread_wakeup_period)
 	} ____cacheline_aligned_in_smp;
 
 	/* submission data */
@@ -368,7 +371,6 @@ struct io_ring_ctx {
 	struct callback_head		poll_wq_task_work;
 	struct list_head		defer_list;
 	unsigned			sq_thread_idle;
-	ktime_t				sq_thread_wakeup_period;
 	/* protected by ->completion_lock */
 	unsigned			evfd_last_cq_tail;
 
