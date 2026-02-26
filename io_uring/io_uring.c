@@ -3852,7 +3852,8 @@ static struct file *io_uring_get_file(struct io_ring_ctx *ctx)
 }
 
 static __cold int io_uring_create(unsigned entries, struct io_uring_params *p,
-				  struct io_uring_params __user *params)
+				  struct io_uring_params __user *params,
+				  struct io_uring_params_ext *p_ext)
 {
 	struct io_ring_ctx *ctx;
 	struct io_uring_task *tctx;
@@ -3929,6 +3930,7 @@ static __cold int io_uring_create(unsigned entries, struct io_uring_params *p,
 	    !(ctx->flags & IORING_SETUP_SQPOLL))
 		ctx->syscall_iopoll = 1;
 
+	ctx->ext_flags = p_ext->ext_flags;
 	ctx->compat = in_compat_syscall();
 	if (!ns_capable_noaudit(&init_user_ns, CAP_IPC_LOCK))
 		ctx->user = get_uid(current_user());
@@ -3977,7 +3979,7 @@ static __cold int io_uring_create(unsigned entries, struct io_uring_params *p,
 	if (ret)
 		goto err;
 
-	ret = io_sq_offload_create(ctx, p);
+	ret = io_sq_offload_create(ctx, p, p_ext);
 	if (ret)
 		goto err;
 
@@ -4065,6 +4067,7 @@ err_fput:
 static long io_uring_setup(u32 entries, struct io_uring_params __user *params)
 {
 	struct io_uring_params p;
+	struct io_uring_params_ext p_ext = {};
 	int i;
 
 	if (copy_from_user(&p, params, sizeof(p)))
@@ -4082,10 +4085,22 @@ static long io_uring_setup(u32 entries, struct io_uring_params __user *params)
 			IORING_SETUP_SQE128 | IORING_SETUP_CQE32 |
 			IORING_SETUP_SINGLE_ISSUER | IORING_SETUP_DEFER_TASKRUN |
 			IORING_SETUP_NO_MMAP | IORING_SETUP_REGISTERED_FD_ONLY |
-			IORING_SETUP_NO_SQARRAY))
+			IORING_SETUP_NO_SQARRAY | IORING_SETUP_EXT_PARAM))
 		return -EINVAL;
 
-	return io_uring_create(entries, &p, params);
+	if (p.flags & IORING_SETUP_EXT_PARAM) {
+		if (copy_from_user(&p_ext, params, sizeof(p_ext)))
+			return -EFAULT;
+		for (i = 0; i < ARRAY_SIZE(p_ext.resv); i++) {
+			if (p_ext.resv[i])
+				return -EINVAL;
+		}
+
+		if (p_ext.ext_flags & ~(IORING_SETUP_SQ_THREAD_FORCE_IDLE))
+			return -EINVAL;
+	}
+
+	return io_uring_create(entries, &p, params, &p_ext);
 }
 
 static inline bool io_uring_allowed(void)

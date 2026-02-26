@@ -215,6 +215,10 @@ struct io_ring_ctx {
 		struct percpu_ref	refs;
 
 		enum task_work_notify_mode	notify_method;
+
+		/* 20 bytes hole */
+		KABI_FILL_HOLE(unsigned int	ext_flags)
+		KABI_FILL_HOLE(ktime_t		sq_thread_wakeup_period)
 	} ____cacheline_aligned_in_smp;
 
 	/* submission data */
