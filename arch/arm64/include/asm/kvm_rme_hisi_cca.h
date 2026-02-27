@@ -10,18 +10,7 @@
 #include <asm/kvm_host.h>
 #include <linux/kvm_host.h>
 
-static inline int rmi_cca_hisi_delegate_range(unsigned long start_addr,
-					      unsigned long size)
-{
-	struct arm_smccc_1_2_regs regs = {
-		SMC_RMI_HISI_EXT, CCA_HISI_DELEGATE_RANGE,
-		start_addr, size
-	};
-
-	arm_smccc_1_2_smc(&regs, &regs);
-
-	return regs.a0;
-}
+int rmi_cca_hisi_delegate_range(unsigned long start_addr, unsigned long size);
 
 static inline int rmi_cca_hisi_undelegate_range(unsigned long start_addr,
 						unsigned long size)

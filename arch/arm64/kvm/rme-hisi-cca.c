@@ -29,6 +29,19 @@ enum HISI_CCA_GRANULE_TYPES {
 	HISI_CCA_GRANULE_TYPES_NUM
 };
 
+static inline int _rmi_cca_hisi_delegate_range(unsigned long start_addr,
+					      unsigned long size)
+{
+	struct arm_smccc_1_2_regs regs = {
+		SMC_RMI_HISI_EXT, CCA_HISI_DELEGATE_RANGE,
+		start_addr, size
+	};
+
+	arm_smccc_1_2_smc(&regs, &regs);
+
+	return regs.a0;
+}
+
 static int get_start_level(struct realm *realm)
 {
 	return 4 - ((realm->ia_bits - 8) / (RMM_PAGE_SHIFT - 3));
@@ -360,11 +373,8 @@ int realm_hisi_cca_populate_region(struct kvm *kvm, phys_addr_t ipa_base,
 		}
 	}
 
-	if (ret == 0)
-		goto out_free;
 out_pin:
 	unpin_user_pages(pages, nr_pinned);
-out_free:
 	kfree(pages);
 	if (tmp_pages)
 		__free_pages(tmp_pages, order);
@@ -440,11 +450,8 @@ static int hisi_cca_map_range(struct kvm *kvm, unsigned long ipa_base,
 	}
 	*ipa_top = ipa_base + map_size;
 
-	if (ret == 0)
-		goto out_free;
 out_pin:
 	unpin_user_pages(pages, nr_pinned);
-out_free:
 	kfree(pages);
 out_srcu:
 	srcu_read_unlock(&kvm->srcu, idx);
@@ -501,23 +508,17 @@ static int hisi_cca_destroy_data(struct realm *realm, unsigned long ipa,
 	if (WARN_ON(ret))
 		return -ENXIO;
 
-	if (granule_type == HISI_CCA_GRANULE_NORMAL)
+	if (granule_type == HISI_CCA_GRANULE_NORMAL) {
 		ret = rmi_cca_hisi_undelegate_range(pa, size);
-	else
-		goto out_unpin;
-
-	/*
-	 * If the undelegate fails then something has gone seriously
-	 * wrong: take an extra reference to just leak pages.
-	 */
-	if (WARN_ON(ret)) {
-		for (offset = 0; offset < size; offset += PAGE_SIZE)
-			get_page(phys_to_page(pa + offset));
+		/*
+		 * If the undelegate fails then something has gone seriously
+		 * wrong: take an extra reference to just leak pages.
+		 */
+		if (WARN_ON(ret)) {
+			for (offset = 0; offset < size; offset += PAGE_SIZE)
+				get_page(phys_to_page(pa + offset));
+		}
 	}
-
-out_unpin:
-	for (offset = 0; offset < size; offset += PAGE_SIZE)
-		unpin_user_page(phys_to_page(pa + offset));
 
 	return 0;
 }
@@ -604,4 +605,25 @@ int realm_hisi_cca_set_ipa_state(struct kvm_vcpu *vcpu, unsigned long start,
 	*top_ipa = ipa;
 
 	return ret;
+}
+
+int rmi_cca_hisi_delegate_range(unsigned long start_addr, unsigned long size)
+{
+	unsigned long end_page_off = size - PAGE_SIZE;
+	struct folio *folio = page_folio(phys_to_page(start_addr));
+	struct folio *end_folio = page_folio(phys_to_page(start_addr + end_page_off));
+
+	if (!folio_test_large(folio) || folio != end_folio) {
+		pr_err("delegate range addr check fail\n");
+		return -EINVAL;
+	}
+
+	if (folio_test_hugetlb(folio)) {
+		if (rme_isolate_hugetlb(folio))
+			folio_put(folio);
+	} else if (folio_test_lru(folio)) {
+		if (folio_isolate_lru(folio))
+			folio_put(folio);
+	}
+	return _rmi_cca_hisi_delegate_range(start_addr, size);
 }

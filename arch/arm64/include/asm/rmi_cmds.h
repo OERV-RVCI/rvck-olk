@@ -17,6 +17,12 @@ struct rtt_entry {
 	int ripas;
 };
 
+#ifdef CONFIG_HISI_CCA
+bool folio_isolate_lru(struct folio *folio);
+
+bool rme_isolate_hugetlb(struct folio *folio);
+#endif
+
 /**
  * rmi_data_create() - Create a data granule
  * @rd: PA of the RD
@@ -107,22 +113,7 @@ static inline int rmi_features(unsigned long index, unsigned long *out)
 	return res.a0;
 }
 
-/**
- * rmi_granule_delegate() - Delegate a granule
- * @phys: PA of the granule
- *
- * Delegate a granule for use by the realm world.
- *
- * Return: RMI return code
- */
-static inline int rmi_granule_delegate(unsigned long phys)
-{
-	struct arm_smccc_res res;
-
-	arm_smccc_1_1_invoke(SMC_RMI_GRANULE_DELEGATE, phys, &res);
-
-	return res.a0;
-}
+int rmi_granule_delegate(unsigned long phys);
 
 /**
  * rmi_granule_undelegate() - Undelegate a granule

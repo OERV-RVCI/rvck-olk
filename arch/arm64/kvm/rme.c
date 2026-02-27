@@ -40,6 +40,56 @@ static bool rme_has_feature(unsigned long feature)
 	return !!u64_get_bits(rmm_feat_reg0, feature);
 }
 
+/**
+ * rmi_granule_delegate() - Delegate a granule
+ * @phys: PA of the granule
+ *
+ * Delegate a granule for use by the realm world.
+ *
+ * Return: RMI return code
+ */
+static int _rmi_granule_delegate(unsigned long phys)
+{
+	struct arm_smccc_res res;
+
+	arm_smccc_1_1_invoke(SMC_RMI_GRANULE_DELEGATE, phys, &res);
+
+	return res.a0;
+}
+
+int rmi_granule_delegate(unsigned long phys)
+{
+	struct folio *folio = page_folio(phys_to_page(phys));
+
+	if (folio_test_hugetlb(folio)) {
+		if (rme_isolate_hugetlb(folio))
+			folio_put(folio);
+	} else if (folio_test_lru(folio)) {
+		if (folio_isolate_lru(folio))
+			folio_put(folio);
+	}
+	return _rmi_granule_delegate(phys);
+}
+
+#ifdef CONFIG_HISI_CCA
+bool rme_isolate_hugetlb(struct folio *folio)
+{
+	bool ret = true;
+
+	spin_lock_irq(&hugetlb_lock);
+	if (!folio_test_hugetlb(folio) ||
+		!folio_test_hugetlb_migratable(folio) ||
+		!folio_try_get(folio)) {
+		ret = false;
+		goto unlock;
+	}
+	folio_clear_hugetlb_migratable(folio);
+unlock:
+	spin_unlock_irq(&hugetlb_lock);
+	return ret;
+}
+#endif
+
 bool kvm_rme_supports_sve(void)
 {
 	return rme_has_feature(RMI_FEATURE_REGISTER_0_SVE_EN);
