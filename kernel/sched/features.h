@@ -63,6 +63,7 @@ SCHED_FEAT(SIS_UTIL, true)
  * Improves CPU utilization.
  */
 SCHED_FEAT(STEAL, false)
+SCHED_FEAT(STEAL_FAIL_NI, false)
 #endif
 
 #ifdef CONFIG_SCHED_PARAL
