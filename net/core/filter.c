@@ -8446,6 +8446,10 @@ sock_ops_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog)
 		return &bpf_sock_ops_reserve_hdr_opt_proto;
 	case BPF_FUNC_tcp_sock:
 		return &bpf_tcp_sock_proto;
+#ifdef CONFIG_HISOCK
+	case BPF_FUNC_sk_release:
+		return &bpf_sk_release_proto;
+#endif
 #endif /* CONFIG_INET */
 #if IS_ENABLED(CONFIG_NETACC_BPF)
 	case BPF_FUNC_get_current_comm:
