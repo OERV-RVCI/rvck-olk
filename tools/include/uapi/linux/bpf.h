@@ -1064,6 +1064,7 @@ enum bpf_attach_type {
 	BPF_SCHED,
 #ifndef __GENKSYMS__
 	BPF_HISOCK_EGRESS,
+	BPF_HISOCK_INGRESS,
 #endif
 	__MAX_BPF_ATTACH_TYPE
 };
