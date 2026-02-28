@@ -10815,6 +10815,7 @@ enum special_kfunc_type {
 	KF_bpf_set_ingress_dst,
 	KF_bpf_set_ingress_dev,
 	KF_bpf_set_egress_dev,
+	KF_bpf_get_skb_ethhdr,
 #endif
 };
 
@@ -10840,6 +10841,7 @@ BTF_ID(func, bpf_dynptr_clone)
 BTF_ID(func, bpf_set_ingress_dst)
 BTF_ID(func, bpf_set_ingress_dev)
 BTF_ID(func, bpf_set_egress_dev)
+BTF_ID(func, bpf_get_skb_ethhdr)
 #endif
 BTF_SET_END(special_kfunc_set)
 
@@ -10867,6 +10869,7 @@ BTF_ID(func, bpf_dynptr_clone)
 BTF_ID(func, bpf_set_ingress_dst)
 BTF_ID(func, bpf_set_ingress_dev)
 BTF_ID(func, bpf_set_egress_dev)
+BTF_ID(func, bpf_get_skb_ethhdr)
 #endif
 
 static bool is_kfunc_ret_null(struct bpf_kfunc_call_arg_meta *meta)
@@ -11848,7 +11851,8 @@ static int check_atype_kfunc_compatibility(struct bpf_verifier_env *env, u32 fun
 {
 #ifdef CONFIG_HISOCK
 	if ((func_id == special_kfunc_list[KF_bpf_set_ingress_dst] ||
-	     func_id == special_kfunc_list[KF_bpf_set_ingress_dev]) &&
+	     func_id == special_kfunc_list[KF_bpf_set_ingress_dev] ||
+	     func_id == special_kfunc_list[KF_bpf_get_skb_ethhdr]) &&
 	    env->prog->expected_attach_type != BPF_HISOCK_INGRESS)
 		return -EACCES;
 
