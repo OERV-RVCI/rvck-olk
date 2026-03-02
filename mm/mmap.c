@@ -1072,10 +1072,10 @@ struct vm_area_struct *vma_merge(struct vma_iterator *vmi, struct mm_struct *mm,
 				vma_start_write(curr);
 				remove = curr;
 				err = dup_anon_vma(next, curr, &anon_dup);
+				if (!err && vma_is_peer_shared(curr))
+					vm_object_merge(vma, next->vm_end);
 			}
 
-			if (!err && vma_is_peer_shared(curr))
-				vm_object_merge(vma, next->vm_end);
 		}
 	}
 
