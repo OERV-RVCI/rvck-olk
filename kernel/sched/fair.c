@@ -5236,6 +5236,11 @@ static inline bool steal_enabled(void)
 	return sched_feat(STEAL) && allow;
 }
 
+static inline bool steal_fail_ni_enabled(void)
+{
+	return sched_feat(STEAL_FAIL_NI);
+}
+
 static void overload_clear(struct rq *rq)
 {
 	struct sparsemask *overload_cpus;
@@ -5275,6 +5280,7 @@ static int try_steal(struct rq *this_rq, struct rq_flags *rf);
 static inline int try_steal(struct rq *this_rq, struct rq_flags *rf) { return 0; }
 static inline void overload_clear(struct rq *rq) {}
 static inline void overload_set(struct rq *rq) {}
+static inline bool steal_fail_ni_enabled(void) { return false; }
 #endif
 
 #else /* CONFIG_SMP */
@@ -10343,9 +10349,15 @@ idle:
 	 */
 	rq_idle_stamp_update(rq);
 
-	new_tasks = newidle_balance(rq, rf);
-	if (new_tasks == 0)
+	if (steal_fail_ni_enabled()) {
 		new_tasks = try_steal(rq, rf);
+		if (new_tasks == 0)
+			new_tasks = newidle_balance(rq, rf);
+	} else {
+		new_tasks = newidle_balance(rq, rf);
+		if (new_tasks == 0)
+			new_tasks = try_steal(rq, rf);
+	}
 	schedstat_end_time(rq, time);
 
 	if (new_tasks)
@@ -14312,6 +14324,11 @@ static int newidle_balance(struct rq *this_rq, struct rq_flags *rf)
 	for_each_domain(this_cpu, sd) {
 		int continue_balancing = 1;
 		u64 domain_cost;
+
+		if (steal_fail_ni_enabled()) {
+			if (sd->flags & SD_SHARE_PKG_RESOURCES)
+				continue;
+		}
 
 		update_next_balance(sd, &next_balance);
 
