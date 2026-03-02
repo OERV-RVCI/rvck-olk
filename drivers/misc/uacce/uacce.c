@@ -979,13 +979,10 @@ int uacce_register(struct uacce_device *uacce)
 	uacce->cdev->owner = THIS_MODULE;
 
 	ret = cdev_device_add(uacce->cdev, &uacce->dev);
-	if (ret) {
-		cdev_del(uacce->cdev);
+	if (ret)
 		uacce->cdev = NULL;
-		return ret;
-	}
 
-	return 0;
+	return ret;
 }
 EXPORT_SYMBOL_GPL(uacce_register);
 
