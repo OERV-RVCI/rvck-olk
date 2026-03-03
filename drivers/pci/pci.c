@@ -2013,6 +2013,10 @@ static int do_pci_enable_device(struct pci_dev *dev, int bars)
 	err = pcibios_enable_device(dev, bars);
 	if (err < 0)
 		return err;
+#ifdef CONFIG_HISI_CCADA_GUEST
+	if (is_realm_world())
+		rsi_rdev_start(pci_dev_id(dev));
+#endif
 	pci_fixup_device(pci_fixup_enable, dev);
 
 	if (dev->msi_enabled || dev->msix_enabled)

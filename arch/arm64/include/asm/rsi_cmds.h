@@ -179,6 +179,23 @@ static inline unsigned long rsi_validate_dev(unsigned long bdf, bool *is_realm_d
 		*is_realm_dev = !!regs.a1;
 	return regs.a0;
 }
+
+/**
+ * rsi_rdev_start - Set dev started, smmu set ste valid, enable dev dma ability.
+ *
+ * @bdf: The bdf of the pci dev.
+ */
+static inline void rsi_rdev_start(unsigned long bdf)
+{
+	struct arm_smccc_1_2_regs regs = {
+		SMC_RSI_RDEV_START,
+		bdf
+	};
+
+	arm_smccc_1_2_smc(&regs, &regs);
+
+	WARN_ON(regs.a0);
+}
 #endif
 
 #endif /* __ASM_RSI_CMDS_H */
