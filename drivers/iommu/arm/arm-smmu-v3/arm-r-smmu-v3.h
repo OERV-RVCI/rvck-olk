@@ -62,6 +62,8 @@
 	__ret ? __ret : ((cond) ? 0 : -ETIMEDOUT); \
 })
 
+int realm_smmu_cmdq_issue_cmdlist(struct arm_smmu_device *smmu, u64 *cmds,
+				  int n, bool sync);
 bool arm_smmu_support_rme(struct arm_smmu_device *smmu);
 void arm_r_smmu_device_init(struct arm_smmu_device *smmu, resource_size_t ioaddr);
 void arm_r_smmu_device_remove(struct arm_smmu_device *smmu);

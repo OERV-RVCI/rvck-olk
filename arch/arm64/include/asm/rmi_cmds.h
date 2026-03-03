@@ -981,6 +981,33 @@ static inline int rmi_smmu_read_event(unsigned long ioaddr, u64 *evt)
 
 	return regs.a0;
 }
+
+/**
+ * rmi_smmu_send_cmdlist() - Write realm smmu command
+ * @ioaddr: PA of the realm smmu
+ * @rcmds: PA of the realm command
+ * @n: Number of realm command
+ * @sync: Whether a synchronization command is issued at the end
+ *
+ * Write realm smmu command
+ *
+ * Return: RMI return code
+ */
+static inline int rmi_smmu_send_cmdlist(unsigned long ioaddr,
+					unsigned long rcmds,
+					unsigned long n,
+					unsigned long sync)
+{
+	struct arm_smccc_1_2_regs regs = {
+		SMC_RMI_HISI_EXT, CCADA_SMMU_SEND_CMDLIST,
+		ioaddr, rcmds, n, sync
+	};
+
+	arm_smccc_1_2_smc(&regs, &regs);
+
+	return regs.a0;
+}
+
 #endif
 
 #endif /* __ASM_RMI_CMDS_H */

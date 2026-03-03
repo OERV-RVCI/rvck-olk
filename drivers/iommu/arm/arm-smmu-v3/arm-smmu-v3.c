@@ -969,6 +969,14 @@ int arm_smmu_cmdq_issue_cmdlist(struct arm_smmu_device *smmu,
 	struct arm_smmu_ll_queue llq, head;
 	int ret = 0;
 
+#ifdef CONFIG_HISI_CCADA_HOST
+	if (smmu->realm.forward_cmd) {
+		ret = realm_smmu_cmdq_issue_cmdlist(smmu, cmds, n, sync);
+		if (ret)
+			return ret;
+	}
+#endif
+
 #ifdef CONFIG_ARM_SMMU_V3_ECMDQ
 	if (!cmdq->shared)
 		return arm_smmu_ecmdq_issue_cmdlist(smmu, cmdq, cmds, n, sync);

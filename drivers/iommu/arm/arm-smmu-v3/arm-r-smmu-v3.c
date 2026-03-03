@@ -68,6 +68,96 @@ static int realm_smmu_write_reg_sync(struct arm_smmu_device *smmu, u32 val,
 					    ARM_SMMU_POLL_TIMEOUT_US);
 }
 
+static bool is_realm_sid(struct arm_smmu_device *smmu, u32 sid)
+{
+	return false;
+}
+
+static bool is_realm_vmid(struct arm_smmu_device *smmu, u32 vmid)
+{
+	return false;
+}
+
+static bool realm_smmu_need_forward(struct arm_smmu_device *smmu, u64 cmd0, u64 cm1)
+{
+	u64 opcode = FIELD_GET(CMDQ_0_OP, cmd0);
+
+	switch (opcode) {
+	case CMDQ_OP_TLBI_EL2_ALL:
+	case CMDQ_OP_TLBI_NSNH_ALL:
+		return true;
+	case CMDQ_OP_PREFETCH_CFG:
+	case CMDQ_OP_CFGI_CD:
+	case CMDQ_OP_CFGI_STE:
+	case CMDQ_OP_CFGI_CD_ALL:
+		return is_realm_sid(smmu, FIELD_GET(CMDQ_CFGI_0_SID, cmd0));
+	case CMDQ_OP_CFGI_ALL:
+		return true;
+	case CMDQ_OP_TLBI_NH_VA:
+	case CMDQ_OP_TLBI_S2_IPA:
+	case CMDQ_OP_TLBI_NH_ASID:
+	case CMDQ_OP_TLBI_S12_VMALL:
+		return is_realm_vmid(smmu, FIELD_GET(CMDQ_TLBI_0_VMID, cmd0));
+	case CMDQ_OP_ATC_INV:
+		return is_realm_sid(smmu, FIELD_GET(CMDQ_ATC_0_SID, cmd0));
+	case CMDQ_OP_PRI_RESP:
+		return is_realm_sid(smmu, FIELD_GET(CMDQ_PRI_0_SID, cmd0));
+	case CMDQ_OP_RESUME:
+		return is_realm_sid(smmu, FIELD_GET(CMDQ_RESUME_0_SID, cmd0));
+	case CMDQ_OP_CMD_SYNC:
+		return false;
+	default:
+		break;
+	}
+
+	return false;
+}
+
+int realm_smmu_cmdq_issue_cmdlist(struct arm_smmu_device *smmu, u64 *cmds,
+				  int n, bool sync)
+{
+	int i, ret;
+	u64 *rcmds;
+	u64 cmd0, cmd1;
+	u32 forward_cnt = 0;
+
+	if (!arm_smmu_support_rme(smmu))
+		return 0;
+
+	if (n * CMDQ_ENT_DWORDS * sizeof(*cmds) > PAGE_SIZE) {
+		dev_err(smmu->dev, "cmdq batch too large\n");
+		return -EINVAL;
+	}
+
+	rcmds = (u64 *)get_zeroed_page(GFP_KERNEL);
+	if (!rcmds)
+		return -ENOMEM;
+
+	for (i = 0; i < n; i++) {
+		cmd0 = cmds[i * CMDQ_ENT_DWORDS];
+		cmd1 = cmds[i * CMDQ_ENT_DWORDS + 1];
+		if (realm_smmu_need_forward(smmu, cmd0, cmd1)) {
+			rcmds[forward_cnt * CMDQ_ENT_DWORDS] = cmd0;
+			rcmds[forward_cnt * CMDQ_ENT_DWORDS + 1] = cmd1;
+			forward_cnt++;
+		}
+	}
+
+	if (!forward_cnt) {
+		free_page((unsigned long)rcmds);
+		return 0;
+	}
+
+	ret = rmi_smmu_send_cmdlist(smmu->realm.ioaddr, virt_to_phys(rcmds),
+				    forward_cnt, sync);
+	if (ret)
+		dev_err(smmu->dev, "issue realm cmd failed\n");
+
+	free_page((unsigned long)rcmds);
+
+	return ret;
+}
+
 static int realm_smmu_init_queue(struct arm_smmu_device *smmu,
 				 struct realm_smmu_queue *q, int ent_dwords,
 				 int queue_type, const char *name)
