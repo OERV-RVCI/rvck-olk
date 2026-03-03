@@ -3098,8 +3098,11 @@ static int __vm_munmap(unsigned long start, size_t len, bool unlock)
 	if (sp_check_addr(start))
 		return -EINVAL;
 
-	if (gmem_is_enabled())
+	if (gmem_is_enabled()) {
+		mmap_read_lock(mm);
 		gmem_unmap_region(mm, start, len);
+		mmap_read_unlock(mm);
+	}
 
 	if (mmap_write_lock_killable(mm))
 		return -EINTR;
