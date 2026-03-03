@@ -6,15 +6,45 @@
 #include <linux/pci.h>
 #include <asm/rmi_cmds.h>
 #include <asm/hisi_cca_da.h>
+#include <linux/crash_dump.h>
 
 #include "arm-smmu-v3.h"
 #include "arm-r-smmu-v3.h"
 
 #define STRTAB_L1_DESC_DWORDS		1
 
+/*
+ * Add realm IRQs index based on arm_smmu_msi_index
+ * Struct arm_r_smmu_msi_index need keep same as struct arm_smmu_msi_index
+ */
+enum arm_r_smmu_msi_index {
+	EVTQ_MSI_INDEX,
+	GERROR_MSI_INDEX,
+	PRIQ_MSI_INDEX,
+	R_EVTQ_MSI_INDEX,
+	R_GERROR_MSI_INDEX,
+	ARM_R_SMMU_MAX_MSIS,
+};
+
+#define ARM_R_SMMU_MAX_CFGS 0x3
+
 #define realm_smmu_read_poll_timeout(addr, val, cond, delay_us, timeout_us) \
 	realm_read_poll_timeout(rmi_smmu_reg_read32, val, cond, delay_us, \
 				timeout_us, false, smmu->realm.ioaddr, addr)
+
+/* Add realm IRQs cfg based on arm_smmu_msi_cfg */
+static phys_addr_t arm_r_smmu_msi_cfg[ARM_R_SMMU_MAX_MSIS][ARM_R_SMMU_MAX_CFGS] = {
+	[R_EVTQ_MSI_INDEX] = {
+		SMMU_R_EVENTQ_IRQ_CFG0,
+		SMMU_R_EVENTQ_IRQ_CFG1,
+		SMMU_R_EVENTQ_IRQ_CFG2,
+	},
+	[R_GERROR_MSI_INDEX] = {
+		SMMU_R_GERROR_IRQ_CFG0,
+		SMMU_R_GERROR_IRQ_CFG1,
+		SMMU_R_GERROR_IRQ_CFG2,
+	},
+};
 
 bool arm_smmu_support_rme(struct arm_smmu_device *smmu)
 {
@@ -194,6 +224,205 @@ static int realm_smmu_init_strtab(struct arm_smmu_device *smmu)
 	return ret;
 }
 
+static irqreturn_t arm_r_smmu_revtq_thread(int irq, void *dev)
+{
+	int i, ret;
+	struct arm_smmu_device *smmu = dev;
+	static DEFINE_RATELIMIT_STATE(rs, DEFAULT_RATELIMIT_INTERVAL,
+				      DEFAULT_RATELIMIT_BURST);
+	u64 evt[EVTQ_ENT_DWORDS];
+	u8 id;
+
+	do {
+		ret = rmi_smmu_read_event(smmu->realm.ioaddr, evt);
+		if (ret)
+			break;
+
+		id = FIELD_GET(EVTQ_0_ID, evt[0]);
+		if (!__ratelimit(&rs))
+			continue;
+
+		dev_info(smmu->dev, "event 0x%02x received:\n", id);
+		for (i = 0; i < ARRAY_SIZE(evt); ++i)
+			dev_info(smmu->dev, "\t0x%016llx\n",
+					(unsigned long long)evt[i]);
+		cond_resched();
+	} while (true);
+
+	return IRQ_HANDLED;
+}
+
+static irqreturn_t arm_smmu_realm_gerror_handler(int irq, void *dev)
+{
+	u32 gerror, gerrorn, active;
+	struct arm_smmu_device *smmu = dev;
+	int ret;
+
+	ret = rmi_smmu_reg_read32(smmu->realm.ioaddr, SMMU_R_GERROR, &gerror);
+	if (ret) {
+		dev_err(smmu->dev, "R_SMMU: Cannot read gerror\n");
+		return IRQ_HANDLED;
+	}
+
+	ret = rmi_smmu_reg_read32(smmu->realm.ioaddr, SMMU_R_GERRORN, &gerrorn);
+	if (ret) {
+		dev_err(smmu->dev, "R_SMMU: Cannot read gerrorn\n");
+		return IRQ_HANDLED;
+	}
+
+	active = gerror ^ gerrorn;
+	if (!(active & GERROR_ERR_MASK))
+		return IRQ_NONE; /* No errors pending */
+
+	dev_warn(smmu->dev,
+		 "R_SMMU: unexpected global error reported (0x%08x), this could be serious\n",
+		 active);
+
+	if (active & GERROR_SFM_ERR)
+		dev_err(smmu->dev, "R_SMMU: device has entered Service Failure Mode!\n");
+
+	if (active & GERROR_MSI_GERROR_ABT_ERR)
+		dev_warn(smmu->dev, "R_SMMU: GERROR MSI write aborted\n");
+
+	if (active & GERROR_MSI_PRIQ_ABT_ERR)
+		dev_warn(smmu->dev, "R_SMMU: PRIQ MSI write aborted\n");
+
+	if (active & GERROR_MSI_EVTQ_ABT_ERR)
+		dev_warn(smmu->dev, "R_SMMU: EVTQ MSI write aborted\n");
+
+	if (active & GERROR_MSI_CMDQ_ABT_ERR)
+		dev_warn(smmu->dev, "R_SMMU: CMDQ MSI write aborted\n");
+
+	if (active & GERROR_PRIQ_ABT_ERR)
+		dev_err(smmu->dev, "R_SMMU: PRIQ write aborted -- events may have been lost\n");
+
+	if (active & GERROR_EVTQ_ABT_ERR)
+		dev_err(smmu->dev, "R_SMMU: EVTQ write aborted -- events may have been lost\n");
+
+	if (active & GERROR_CMDQ_ERR)
+		dev_err(smmu->dev, "R_SMMU: cmdq err\n");
+
+	ret = rmi_smmu_reg_write32(smmu->realm.ioaddr, SMMU_R_GERRORN, gerror);
+	if (ret)
+		dev_err(smmu->dev, "R_SMMU: Cannot write gerrorn\n");
+
+	return IRQ_HANDLED;
+}
+
+static void realm_smmu_write_msi_msg(struct msi_desc *desc, struct msi_msg *msg)
+{
+	struct device *dev = msi_desc_to_dev(desc);
+	struct arm_smmu_device *smmu = dev_get_drvdata(dev);
+	u32 mem_attr = ARM_SMMU_MEMATTR_DEVICE_nGnRE;
+	phys_addr_t doorbell;
+	phys_addr_t *cfg;
+	int ret;
+
+	doorbell = (((u64)msg->address_hi) << 32) | msg->address_lo;
+	doorbell &= MSI_CFG0_ADDR_MASK;
+	doorbell |= MSI_CFG0_NS;
+
+#ifdef CONFIG_ARM_SMMU_V3_PM
+	/* Saves the msg (base addr of msi irq) and restores it during resume */
+	desc->msg.address_lo = msg->address_lo;
+	desc->msg.address_hi = msg->address_hi;
+	desc->msg.data = msg->data;
+#endif
+
+	if (desc->msi_index != R_EVTQ_MSI_INDEX && desc->msi_index != R_GERROR_MSI_INDEX) {
+		dev_err(dev, "Unsupport msi_index : %u\n", desc->msi_index);
+		return;
+	}
+
+	cfg = arm_r_smmu_msi_cfg[desc->msi_index];
+
+	ret = rmi_smmu_reg_write64(smmu->realm.ioaddr, cfg[0], doorbell);
+	if (ret) {
+		dev_err(dev, "Unable to write msi doorbell to %#llx\n", cfg[0]);
+		return;
+	}
+
+	ret = rmi_smmu_reg_write32(smmu->realm.ioaddr, cfg[1], msg->data);
+	if (ret) {
+		dev_err(dev, "Unable to write msi data to %#llx\n", cfg[1]);
+		return;
+	}
+
+	ret = rmi_smmu_reg_write32(smmu->realm.ioaddr, cfg[2], mem_attr);
+	if (ret) {
+		dev_err(dev, "Unable to write msi attr to %#llx\n", cfg[2]);
+		return;
+	}
+}
+
+static void realm_smmu_setup_msis(struct arm_smmu_device *smmu)
+{
+	int ret;
+	struct device *dev = smmu->dev;
+
+	ret = platform_msi_domain_alloc_range_irqs(dev, R_EVTQ_MSI_INDEX,
+		R_GERROR_MSI_INDEX, realm_smmu_write_msi_msg);
+	if (ret) {
+		dev_warn(dev, "R_SMMU: failed to allocate msis\n");
+		return;
+	}
+
+	smmu->realm.revtq.irq = msi_get_virq(dev, R_EVTQ_MSI_INDEX);
+	smmu->realm.rgerr_irq = msi_get_virq(dev, R_GERROR_MSI_INDEX);
+}
+
+static int realm_smmu_setup_unique_irqs(struct arm_smmu_device *smmu)
+{
+	int irq, ret;
+	struct realm_smmu_device *realm = &smmu->realm;
+	u32 irqen_flags = IRQ_CTRL_EVTQ_IRQEN | IRQ_CTRL_GERROR_IRQEN;
+
+	if (!realm->support_msi)
+		return -EINVAL;
+
+	/* Disable IRQs first */
+	ret = realm_smmu_write_reg_sync(smmu, 0, SMMU_R_IRQ_CTRL,
+					SMMU_R_IRQ_CTRLACK);
+	if (ret) {
+		dev_err(smmu->dev, "failed to disable realm irqs\n");
+		return ret;
+	}
+
+	realm_smmu_setup_msis(smmu);
+
+	irq = realm->revtq.irq;
+	if (irq) {
+		ret = devm_request_threaded_irq(smmu->dev, irq, NULL,
+						arm_r_smmu_revtq_thread,
+						IRQF_ONESHOT,
+						"arm-smmu-v3-revtq", smmu);
+		if (ret < 0)
+			dev_warn(smmu->dev, "failed to enable evtq irq\n");
+	} else {
+		dev_warn(smmu->dev, "no revtq irq - events will not be reported!\n");
+	}
+
+	irq = realm->rgerr_irq;
+	if (irq) {
+		ret = devm_request_threaded_irq(smmu->dev, irq, NULL,
+						arm_smmu_realm_gerror_handler,
+						IRQF_ONESHOT,
+						"arm-smmu-v3-rgerror", smmu);
+		if (ret < 0)
+			dev_warn(smmu->dev, "failed to enable gerror irq\n");
+	} else {
+		dev_warn(smmu->dev, "no rgerr irq - errors will not be reported!\n");
+	}
+
+	/* Enable interrupt generation on the realm smmu */
+	ret = realm_smmu_write_reg_sync(smmu, irqen_flags, SMMU_R_IRQ_CTRL,
+					SMMU_R_IRQ_CTRLACK);
+	if (ret)
+		dev_warn(smmu->dev, "failed to enable realm irqs\n");
+
+	return 0;
+}
+
 void arm_r_smmu_device_init(struct arm_smmu_device *smmu, resource_size_t ioaddr)
 {
 	int ret;
@@ -254,6 +483,24 @@ void arm_r_smmu_device_init(struct arm_smmu_device *smmu, resource_size_t ioaddr
 	ret = realm_smmu_init_strtab(smmu);
 	if (ret)
 		goto err_remove_device;
+
+	ret = realm_smmu_setup_unique_irqs(smmu);
+	if (ret) {
+		dev_err(smmu->dev, "RME failed to setup irqs\n");
+		goto err_remove_device;
+	}
+
+	if (is_kdump_kernel())
+		enables &= ~CR0_EVTQEN;
+
+	/* Enable the SMMU interface */
+	enables |= CR0_SMMUEN;
+
+	ret = realm_smmu_write_reg_sync(smmu, enables, SMMU_R_CR0, SMMU_R_CR0ACK);
+	if (ret) {
+		dev_err(smmu->dev, "failed to enable realm smmu interface\n");
+		goto err_remove_device;
+	}
 
 	realm->enabled = true;
 	return;

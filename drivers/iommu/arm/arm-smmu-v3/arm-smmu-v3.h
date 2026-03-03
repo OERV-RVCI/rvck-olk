@@ -786,6 +786,7 @@ struct realm_smmu_device {
 	struct realm_smmu_queue	rcmdq;
 	struct realm_smmu_queue	revtq;
 	struct realm_smmu_strtab_cfg strtab_cfg;
+	int rgerr_irq;
 
 	bool				support_msi;
 	bool				forward_cmd;

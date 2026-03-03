@@ -955,6 +955,32 @@ static inline int realm_config_strtab_l2(enum smmu_config config,
 
 	return realm_smmu_config(config, ioaddr, (void *)&params, sizeof(params));
 }
+
+/**
+ * rmi_smmu_read_event() - Read realm smmu event
+ * @ioaddr: PA of the realm smmu
+ * @evt: Realm event message
+ *
+ * Read realm smmu event
+ *
+ * Return: RMI return code
+ */
+static inline int rmi_smmu_read_event(unsigned long ioaddr, u64 *evt)
+{
+	struct arm_smccc_1_2_regs regs = {
+		SMC_RMI_HISI_EXT, CCADA_SMMU_READ_EVENT,
+		ioaddr
+	};
+
+	arm_smccc_1_2_smc(&regs, &regs);
+
+	evt[0] = regs.a1;
+	evt[1] = regs.a2;
+	evt[2] = regs.a3;
+	evt[3] = regs.a4;
+
+	return regs.a0;
+}
 #endif
 
 #endif /* __ASM_RMI_CMDS_H */
