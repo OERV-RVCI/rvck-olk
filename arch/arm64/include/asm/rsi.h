@@ -77,5 +77,11 @@ static inline bool rsi_is_realm_dev(u16 bdf)
 
 	return is_realm_dev;
 }
+
+static inline int rsi_set_mmio_range_protected(phys_addr_t addr, size_t len)
+{
+	return rsi_set_memory_range(addr, addr + len, RSI_RIPAS_DEV,
+				    RSI_CHANGE_DESTROYED);
+}
 #endif /* CONFIG_HISI_CCADA_GUEST */
 #endif /* __ASM_RSI_H_ */

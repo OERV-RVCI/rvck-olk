@@ -13,4 +13,8 @@ struct page *realm_alloc_swiotlb_shared_pages(gfp_t gfp, unsigned int order);
 
 bool realm_free_swiotlb_shared_pages(void *addr, unsigned int order);
 
+#ifdef CONFIG_HISI_CCADA_GUEST
+int ccada_init_mem_region(struct pci_dev *pdev, int bar);
+#endif
+
 #endif /* __REALM_GUEST_H */
