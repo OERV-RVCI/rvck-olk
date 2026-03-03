@@ -752,9 +752,19 @@ struct arm_smmu_strtab_cfg {
 };
 
 #ifdef CONFIG_HISI_CCADA_HOST
+struct realm_smmu_queue {
+	__le64				*base;
+	dma_addr_t			base_dma;
+	u32				max_n_shift;
+	int				irq; /* Wired interrupt */
+};
+
 /* An SMMUv3 realm instance */
 struct realm_smmu_device {
 	resource_size_t ioaddr;
+	struct realm_smmu_queue	rcmdq;
+	struct realm_smmu_queue	revtq;
+
 	bool				support_msi;
 	bool				forward_cmd;
 	bool				enabled;

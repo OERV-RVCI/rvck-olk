@@ -133,6 +133,42 @@ static inline int rmi_granule_undelegate(unsigned long phys)
 	return res.a0;
 }
 
+#define GRANULE_DELEGATE_SIZE 4096
+
+static inline int granule_undelegate_range(unsigned long phys, size_t size)
+{
+	size_t off;
+	int ret;
+
+	if (!phys)
+		return -EINVAL;
+
+	for (off = 0; off < size; off += GRANULE_DELEGATE_SIZE) {
+		ret = rmi_granule_undelegate(phys + off);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+
+static inline int granule_delegate_range(unsigned long phys, size_t size)
+{
+	size_t off;
+	int ret = 0;
+
+	for (off = 0; off < size; off += GRANULE_DELEGATE_SIZE) {
+		ret = rmi_granule_delegate(phys + off);
+		if (ret)
+			break;
+	}
+
+	if (ret)
+		granule_undelegate_range(phys, off - GRANULE_DELEGATE_SIZE);
+
+	return ret;
+}
+
 /**
  * rmi_psci_complete() - Complete pending PSCI command
  * @calling_rec: PA of the calling REC
@@ -764,6 +800,94 @@ static inline int rmi_smmu_reg_write64(unsigned long ioaddr, unsigned long reg,
 				       unsigned long value)
 {
 	return rmi_smmu_reg_write(ioaddr, reg, SMMU_R_REG_64_BIT, value);
+}
+
+/**
+ * rmi_smmu_config() - Config realm smmu
+ * @config: Config type
+ * @ioaddr: PA of the realm smmu
+ * @ns_params: PA of the non-secure params
+ *
+ * Config realm smmu strtab and realm smmu queue
+ *
+ * Return: RMI return code
+ */
+static inline int rmi_smmu_config(unsigned long config, unsigned long ioaddr,
+				  unsigned long ns_params)
+{
+	struct arm_smccc_1_2_regs regs = {
+		SMC_RMI_HISI_EXT, CCADA_SMMU_CONFIG,
+		config, ioaddr, ns_params
+	};
+
+	arm_smccc_1_2_smc(&regs, &regs);
+
+	return regs.a0;
+}
+
+enum smmu_config {
+	SMMU_STRTAB_INIT,
+	SMMU_STRTAB_DEINIT,
+	SMMU_STRTAB_L2_INIT,
+	SMMU_STRTAB_L2_DEINIT,
+	SMMU_QUEUE_INIT,
+	SMMU_QUEUE_DEINIT,
+};
+
+struct queue_params {
+	unsigned long queue_type;
+	unsigned long q_base;
+	unsigned long q_log2;
+};
+
+static inline int realm_smmu_config(unsigned long config, unsigned long ioaddr,
+				    void *params, unsigned long size)
+{
+	void *ns_params;
+	int ret;
+
+	ns_params = (void *)get_zeroed_page(GFP_KERNEL);
+	if (!ns_params)
+		return -ENOMEM;
+
+	if (size > PAGE_SIZE) {
+		free_page((unsigned long)ns_params);
+		return -EINVAL;
+	}
+
+	memcpy(ns_params, params, size);
+	ret = rmi_smmu_config(config, ioaddr, virt_to_phys(ns_params));
+
+	free_page((unsigned long)ns_params);
+
+	return ret;
+}
+
+/**
+ * realm_config_queue() - Config realm smmu queue
+ * @config: Config type
+ * @ioaddr: PA of the realm smmu
+ * @queue_type: Smmu command queue or event queue
+ * @q_base: PA of smmu queue
+ * @q_log2: Number of smmu queue entity
+ *
+ * Config realm smmu queue
+ *
+ * Return: RMI return code
+ */
+static inline int realm_config_queue(enum smmu_config config,
+				     unsigned long ioaddr,
+				     unsigned long queue_type,
+				     unsigned long q_base,
+				     unsigned long q_log2)
+{
+	struct queue_params params = {
+		.queue_type = queue_type,
+		.q_base = q_base,
+		.q_log2 = q_log2,
+	};
+
+	return realm_smmu_config(config, ioaddr, (void *)&params, sizeof(params));
 }
 #endif
 
