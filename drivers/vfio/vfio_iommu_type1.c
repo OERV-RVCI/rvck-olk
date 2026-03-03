@@ -85,6 +85,9 @@ struct vfio_iommu {
 #ifdef CONFIG_HISI_VIRTCCA_CODA
 	bool            secure;	/* Whether the vfio iommu is secure or not */
 #endif
+#ifdef CONFIG_HISI_CCADA_HOST
+	bool			realm; /* Whether the vfio iommu is realm or not */
+#endif
 };
 
 struct vfio_domain {
@@ -2644,6 +2647,13 @@ static int vfio_iommu_type1_attach_group(void *iommu_data,
 	if (is_virtcca_cvm_enable() && iommu->secure)
 		domain->domain->secure = true;
 #endif
+#ifdef CONFIG_HISI_CCADA_HOST
+	if (iommu->realm) {
+		ret = iommu_enable_rme(domain->domain);
+		if (ret)
+			goto out_free_domain;
+	}
+#endif
 
 	ret = iommu_attach_group(domain->domain, group->iommu_group);
 	if (ret)
@@ -3020,6 +3030,12 @@ static void *vfio_iommu_type1_open(unsigned long arg)
 		iommu->secure = true;
 		break;
 #endif
+#ifdef CONFIG_HISI_CCADA_HOST
+	case VFIO_TYPE1_IOMMU_RME:
+		iommu->v2 = true;
+		iommu->realm = true;
+		break;
+#endif
 	default:
 		kfree(iommu);
 		return ERR_PTR(-EINVAL);
@@ -3113,6 +3129,9 @@ static int vfio_iommu_type1_check_extension(struct vfio_iommu *iommu,
 	case VFIO_TYPE1v2_IOMMU:
 #ifdef CONFIG_HISI_VIRTCCA_CODA
 	case VFIO_TYPE1v2_S_IOMMU:
+#endif
+#ifdef CONFIG_HISI_CCADA_HOST
+	case VFIO_TYPE1_IOMMU_RME:
 #endif
 	case VFIO_UNMAP_ALL:
 		return 1;

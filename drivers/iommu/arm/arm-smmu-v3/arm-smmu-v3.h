@@ -899,6 +899,9 @@ struct arm_smmu_domain {
 	struct list_head		node;
 	struct kvm			*kvm;
 #endif
+#ifdef CONFIG_HISI_CCADA_HOST
+	bool				realm;
+#endif
 };
 
 struct arm_smmu_nested_domain {

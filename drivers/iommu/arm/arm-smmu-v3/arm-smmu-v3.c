@@ -3924,6 +3924,19 @@ static int arm_smmu_clear_dirty_log(struct iommu_domain *domain,
 }
 #endif
 
+#ifdef CONFIG_HISI_CCADA_HOST
+static int arm_smmu_enable_rme(struct iommu_domain *domain)
+{
+	struct arm_smmu_domain *smmu_domain = to_smmu_domain(domain);
+
+	mutex_lock(&smmu_domain->init_mutex);
+	smmu_domain->realm = true;
+	mutex_unlock(&smmu_domain->init_mutex);
+
+	return 0;
+}
+#endif
+
 static int arm_smmu_of_xlate(struct device *dev, struct of_phandle_args *args)
 {
 	return iommu_fwspec_add_ids(dev, args->args, 1);
@@ -4170,6 +4183,9 @@ static struct iommu_ops arm_smmu_ops = {
 		.iotlb_sync_map         = arm_smmu_iotlb_sync_map,
 #endif
 		.iova_to_phys		= arm_smmu_iova_to_phys,
+#ifdef CONFIG_HISI_CCADA_HOST
+		.enable_rme		= arm_smmu_enable_rme,
+#endif
 #ifdef CONFIG_ARM_SMMU_V3_HTTU
 		.support_dirty_log	= arm_smmu_support_dirty_log,
 		.switch_dirty_log	= arm_smmu_switch_dirty_log,
