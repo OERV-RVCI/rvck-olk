@@ -24,6 +24,9 @@
 #include <linux/slab.h>
 #include <linux/types.h>
 #include <linux/uaccess.h>
+#ifdef CONFIG_HISI_CCADA_HOST
+#include <asm/hisi_cca_da.h>
+#endif
 
 #include "vfio_pci_priv.h"
 
@@ -121,6 +124,17 @@ static int vfio_pci_open_device(struct vfio_device *core_vdev)
 			return ret;
 		}
 	}
+
+#ifdef CONFIG_HISI_CCADA_HOST
+	/* Assign dev to vm in rme support platform */
+	if (is_support_rme() && vdev->vdev.kvm) {
+		ret = kvm_rme_assign_device(pdev, vdev->vdev.kvm);
+		if (ret) {
+			vfio_pci_core_disable(vdev);
+			return ret;
+		}
+	}
+#endif
 
 	vfio_pci_core_finish_enable(vdev);
 
