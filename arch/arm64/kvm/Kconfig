@@ -68,6 +68,14 @@ config HISI_CCA
 
 	  If unsure, say N.
 
+config HISI_CCADA_HOST
+	bool "Enable hisilicon CCA device assignment host feature"
+	depends on KVM && ARM_SMMU_V3
+	help
+	  Support hisilicon CCA device assignment in the host
+
+	  If unsure, say N.
+
 config NVHE_EL2_DEBUG
 	bool "Debug mode for non-VHE EL2 object"
 	depends on KVM

@@ -2720,6 +2720,14 @@ config HISI_VIRTCCA_GUEST
 
 	  If unsure, say N.
 
+config HISI_CCADA_GUEST
+	bool "Enable hisilicon CCA device assignment guest feature"
+	depends on DMA_RESTRICTED_POOL
+	help
+	  Support hisilicon CCA device assignment in the guest
+
+	  If unsure, say N.
+
 menu "Power management options"
 
 source "kernel/power/Kconfig"
