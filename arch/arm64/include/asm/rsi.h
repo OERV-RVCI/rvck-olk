@@ -65,4 +65,17 @@ static inline int rsi_set_memory_range_shared(phys_addr_t start,
 	return rsi_set_memory_range(start, end, RSI_RIPAS_EMPTY,
 				    RSI_CHANGE_DESTROYED);
 }
+
+#ifdef CONFIG_HISI_CCADA_GUEST
+static inline bool rsi_is_realm_dev(u16 bdf)
+{
+	bool is_realm_dev = false;
+	unsigned long ret;
+
+	ret = rsi_validate_dev(bdf, &is_realm_dev);
+	WARN_ON(ret);
+
+	return is_realm_dev;
+}
+#endif /* CONFIG_HISI_CCADA_GUEST */
 #endif /* __ASM_RSI_H_ */

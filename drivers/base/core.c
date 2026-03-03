@@ -33,6 +33,9 @@
 #include <linux/sysfs.h>
 #include <linux/dma-map-ops.h> /* for dma_default_coherent */
 #include <linux/virtcca_cvm_domain.h>
+#ifdef CONFIG_HISI_CCADA_GUEST
+#include <asm/realm_guest.h>
+#endif
 
 #if defined(CONFIG_PSWIOTLB) && !defined(__GENKSYMS__)
 #include <linux/pswiotlb.h>
@@ -3175,6 +3178,9 @@ void device_initialize(struct device *dev)
 #endif
 	swiotlb_dev_init(dev);
 	enable_swiotlb_for_cvm_dev(dev, false);
+#ifdef CONFIG_HISI_CCADA_GUEST
+	enable_swiotlb_for_realm_dev(dev, false);
+#endif
 #ifdef CONFIG_PSWIOTLB
 	if ((pswiotlb_force_disable != true) &&
 			is_phytium_ps_socs())

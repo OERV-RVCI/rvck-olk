@@ -71,7 +71,9 @@
 #include <uapi/linux/virtio_mmio.h>
 #include <linux/virtio_ring.h>
 #include <linux/virtcca_cvm_domain.h>
-
+#ifdef CONFIG_HISI_CCADA_GUEST
+#include <asm/realm_guest.h>
+#endif
 
 /* The alignment to use between consumer and producer parts of vring.
  * Currently hardcoded to the page size. */
@@ -620,6 +622,9 @@ static int virtio_mmio_probe(struct platform_device *pdev)
 	int rc;
 
 	enable_swiotlb_for_cvm_dev(&pdev->dev, true);
+#ifdef CONFIG_HISI_CCADA_GUEST
+	enable_swiotlb_for_realm_dev(&pdev->dev, true);
+#endif
 	vm_dev = kzalloc(sizeof(*vm_dev), GFP_KERNEL);
 	if (!vm_dev)
 		return -ENOMEM;

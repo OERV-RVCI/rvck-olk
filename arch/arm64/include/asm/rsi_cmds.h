@@ -159,4 +159,26 @@ static inline unsigned long rsi_attestation_token_continue(phys_addr_t granule,
 	return res.a0;
 }
 
+#ifdef CONFIG_HISI_CCADA_GUEST
+/**
+ * rsi_validate_dev - Validate if a pci dev is deleagted to realm or not.
+ *
+ * @bdf: The bdf of the pci dev.
+ * @is_realm_dev: True if the dev is delegated to realm.
+ */
+static inline unsigned long rsi_validate_dev(unsigned long bdf, bool *is_realm_dev)
+{
+	struct arm_smccc_1_2_regs regs = {
+		SMC_RSI_VALIDATE_DEV,
+		bdf
+	};
+
+	arm_smccc_1_2_smc(&regs, &regs);
+
+	if (is_realm_dev)
+		*is_realm_dev = !!regs.a1;
+	return regs.a0;
+}
+#endif
+
 #endif /* __ASM_RSI_CMDS_H */

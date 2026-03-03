@@ -30,6 +30,9 @@
 #include <linux/highmem.h>
 #include <linux/spinlock.h>
 #include <linux/virtcca_cvm_domain.h>
+#ifdef CONFIG_HISI_CCADA_GUEST
+#include <asm/realm_guest.h>
+#endif
 
 struct virtio_pci_vq_info {
 	/* the actual virtqueue */

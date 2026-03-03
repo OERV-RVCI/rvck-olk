@@ -41,6 +41,10 @@
 #include <asm/cputype.h>
 #include <asm/exception.h>
 
+#ifdef CONFIG_HISI_CCADA_GUEST
+#include <asm/realm_guest.h>
+#endif
+
 #ifdef CONFIG_ARCH_PHYTIUM
 #include <asm/phytium_machine_types.h>
 #endif
@@ -440,6 +444,20 @@ static struct page *its_alloc_pages_node(int node, gfp_t gfp,
 	if (virtcca_cvm_domain())
 		return virtcca_its_alloc_shared_pages_node(node, gfp, order);
 
+#ifdef CONFIG_HISI_CCADA_GUEST
+	/*
+	 * If in the confidential virtual machine scenario, its page is obtained
+	 * from the swiotlb pool. If the allocation is successful, the allocated
+	 * page is returned directly, if it fails, the page is still obtained
+	 * through the decryption with shared memory.
+	 */
+	if (is_realm_world()) {
+		page = realm_alloc_swiotlb_shared_pages(gfp, order);
+		if (page)
+			return page;
+	}
+#endif
+
 	page = alloc_pages_node(node, gfp, order);
 
 	if (!page)
@@ -469,6 +487,11 @@ static void its_free_pages(void *addr, unsigned int order)
 		virtcca_its_free_shared_pages(addr, order);
 		return;
 	}
+
+#ifdef CONFIG_HISI_CCADA_GUEST
+	if (is_realm_world() && realm_free_swiotlb_shared_pages(addr, order))
+		return;
+#endif
 
 	/*
 	 * If the memory cannot be encrypted again then we must leak the pages.

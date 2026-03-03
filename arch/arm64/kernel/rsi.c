@@ -12,6 +12,7 @@
 
 #include <asm/io.h>
 #include <asm/mem_encrypt.h>
+#include <asm/realm_guest.h>
 #include <asm/rsi.h>
 
 static struct realm_config config;
@@ -159,6 +160,8 @@ void __init arm64_rsi_init(void)
 		return;
 
 	arm64_rsi_setup_memory();
+
+	realm_guest_init();
 
 	static_branch_enable(&rsi_present);
 }
