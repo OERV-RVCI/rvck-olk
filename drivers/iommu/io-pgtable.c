@@ -32,6 +32,9 @@ io_pgtable_init_table[IO_PGTABLE_NUM_FMTS] = {
 	[AMD_IOMMU_V1] = &io_pgtable_amd_iommu_v1_init_fns,
 	[AMD_IOMMU_V2] = &io_pgtable_amd_iommu_v2_init_fns,
 #endif
+#ifdef CONFIG_HISI_CCADA_HOST
+	[CCA_REALM_S2] = &io_pgtable_realm_s2_init_fns,
+#endif
 };
 
 static int check_custom_allocator(enum io_pgtable_fmt fmt,

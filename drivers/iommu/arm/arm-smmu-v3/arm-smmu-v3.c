@@ -2751,6 +2751,11 @@ static int arm_smmu_domain_finalise(struct arm_smmu_domain *smmu_domain,
 		return -EINVAL;
 	}
 
+#ifdef CONFIG_HISI_CCADA_HOST
+	if (smmu_domain->realm)
+		fmt = CCA_REALM_S2;
+#endif
+
 	if (smmu->features & ARM_SMMU_FEAT_HD)
 		pgtbl_cfg.quirks |= IO_PGTABLE_QUIRK_ARM_HD;
 
