@@ -8,6 +8,7 @@
 #include <asm/rmi_cmds.h>
 #include <asm/hisi_cca_da.h>
 #include <linux/crash_dump.h>
+#include <linux/io-pgtable.h>
 
 #include "arm-smmu-v3.h"
 #include "arm-r-smmu-v3.h"
@@ -77,7 +78,7 @@ static bool is_realm_dev_attach(struct arm_smmu_domain *smmu_domain)
 static bool is_realm_dev_detach(struct arm_smmu_domain *smmu_domain,
 				struct arm_smmu_master *master)
 {
-	if (!smmu_domain->realm)
+	if (!smmu_domain->realm && rme_is_realm_dev(master->dev))
 		return true;
 	else
 		return false;
@@ -88,8 +89,11 @@ void realm_smmu_attach_dev(struct arm_smmu_domain *smmu_domain,
 {
 	int i, j;
 	bool attach;
+	u64 vttbr;
 	struct arm_smmu_device *smmu = master->smmu;
 	struct realm_smmu_device *realm = &smmu->realm;
+	const struct io_pgtable_cfg *pgtbl_cfg =
+		&io_pgtable_ops_to_pgtable(smmu_domain->pgtbl_ops)->cfg;
 
 	if (!arm_smmu_support_rme(smmu))
 		return;
@@ -104,6 +108,13 @@ void realm_smmu_attach_dev(struct arm_smmu_domain *smmu_domain,
 		attach = false;
 	else
 		return;
+
+	vttbr = pgtbl_cfg->arm_lpae_s2_cfg.vttbr;
+
+	if (attach)
+		rme_add_dev_entry(dev, vttbr, smmu_domain->realm);
+	else
+		rme_remove_dev_entry(dev);
 
 	write_lock(&realm->fwd_lock);
 	for (i = 0; i < master->num_streams; i++) {

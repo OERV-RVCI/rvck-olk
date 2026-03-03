@@ -4,6 +4,7 @@
  */
 #include <linux/hashtable.h>
 #include <linux/pci.h>
+#include <linux/vfio.h>
 #include <asm/rmi_cmds.h>
 #include <asm/kvm_emulate.h>
 #include <asm/hisi_cca_da.h>
@@ -23,11 +24,135 @@ struct dev_hash_entry {
 static DEFINE_HASHTABLE(g_root_dev_htable, MAX_REALM_DEV_NUM_ORDER);
 static DEFINE_SPINLOCK(g_dev_htable_lock);
 
+static DEFINE_HASHTABLE(g_realm_dev_htable, MAX_REALM_DEV_NUM_ORDER);
+static DEFINE_SPINLOCK(g_realm_dev_lock);
+
 bool is_support_rme(void)
 {
 	return static_branch_unlikely(&kvm_rme_is_available);
 }
 EXPORT_SYMBOL_GPL(is_support_rme);
+
+struct realm *rme_get_realm(u64 vttbr)
+{
+	struct realm_dev_entry *dev_entry;
+	struct vfio_device *vfio_device;
+	struct device *dev = NULL;
+	struct kvm *kvm;
+	int bkt;
+
+	spin_lock(&g_realm_dev_lock);
+	hash_for_each(g_realm_dev_htable, bkt, dev_entry, node) {
+		if (dev_entry->vttbr == vttbr) {
+			dev = dev_entry->dev;
+			break;
+		}
+	}
+	spin_unlock(&g_realm_dev_lock);
+
+	if (!dev)
+		return NULL;
+
+	vfio_device = dev_get_drvdata(dev);
+	if (!vfio_device || vfio_device->dev != dev) {
+		pr_err("Can not find vfio_device\n");
+		return NULL;
+	}
+
+	kvm = vfio_device->kvm;
+	if (!kvm) {
+		pr_err("Can not find kvm\n");
+		return NULL;
+	}
+
+	return &kvm->arch.realm;
+}
+
+static void rme_dev_entry_set(struct realm_dev_entry *dev_entry,
+			      struct device *dev, u64 vttbr, bool realm)
+{
+	dev_entry->dev = dev;
+	dev_entry->vttbr = vttbr;
+	dev_entry->realm = realm;
+}
+
+void rme_add_dev_entry(struct device *dev, u64 vttbr, bool realm)
+{
+	struct realm_dev_entry *dev_entry;
+
+	spin_lock(&g_realm_dev_lock);
+	hash_for_each_possible(g_realm_dev_htable, dev_entry, node, (u64)dev) {
+		if (dev_entry->dev == dev) {
+			rme_dev_entry_set(dev_entry, dev, vttbr, realm);
+			spin_unlock(&g_realm_dev_lock);
+			return;
+		}
+	}
+	dev_entry = kzalloc(sizeof(*dev_entry), GFP_ATOMIC);
+	if (!dev_entry) {
+		spin_unlock(&g_realm_dev_lock);
+		pr_err("Alloc realm_dev_entry failed\n");
+		return;
+	}
+	rme_dev_entry_set(dev_entry, dev, vttbr, realm);
+	hash_add(g_realm_dev_htable, &dev_entry->node, (u64)dev);
+	spin_unlock(&g_realm_dev_lock);
+}
+
+void rme_update_msi_iova(u64 vttbr, u64 msi_iova)
+{
+	struct realm_dev_entry *dev_entry;
+	int bkt;
+
+	spin_lock(&g_realm_dev_lock);
+	hash_for_each(g_realm_dev_htable, bkt, dev_entry, node) {
+		if (dev_entry->vttbr == vttbr)
+			dev_entry->msi_iova = msi_iova;
+	}
+	spin_unlock(&g_realm_dev_lock);
+}
+
+static struct realm_dev_entry rme_get_dev_entry(struct device *dev)
+{
+	struct realm_dev_entry *dev_entry;
+	struct realm_dev_entry ret = {0};
+
+	spin_lock(&g_realm_dev_lock);
+	hash_for_each_possible(g_realm_dev_htable, dev_entry, node, (u64)dev) {
+		if (dev_entry->dev == dev) {
+			ret = *dev_entry;
+			break;
+		}
+	}
+	spin_unlock(&g_realm_dev_lock);
+	return ret;
+}
+
+u64 rme_get_msi_iova(struct device *dev)
+{
+	return rme_get_dev_entry(dev).msi_iova;
+}
+
+bool rme_is_realm_dev(struct device *dev)
+{
+	return rme_get_dev_entry(dev).realm;
+}
+
+void rme_remove_dev_entry(struct device *dev)
+{
+	struct hlist_node *next;
+	struct realm_dev_entry *dev_entry;
+
+	spin_lock(&g_realm_dev_lock);
+	hash_for_each_possible_safe(g_realm_dev_htable, dev_entry, next, node, (u64)dev) {
+		if (dev_entry->dev == dev) {
+			hash_del(&dev_entry->node);
+			kfree(dev_entry);
+			break;
+		}
+	}
+	spin_unlock(&g_realm_dev_lock);
+}
 
 /**
  * get_child_devices_rec - Traverse pcie topology to find child devices

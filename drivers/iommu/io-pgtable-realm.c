@@ -10,6 +10,7 @@
 
 #include <linux/pci.h>
 #include <asm/rmi_cmds.h>
+#include <asm/hisi_cca_da.h>
 #include <linux/io-pgtable.h>
 
 #include "io-pgtable-arm.h"
@@ -18,6 +19,29 @@
 #define REALM_S2_MAX_CONCAT_PAGES	16
 #define REALM_MAX_LEVELS		4
 
+/* Page table bits */
+#define REALM_PTE_TYPE_SHIFT		0
+#define REALM_PTE_TYPE_MASK		0x3
+
+#define REALM_PTE_TYPE_BLOCK		1
+#define REALM_PTE_TYPE_TABLE		3
+#define REALM_PTE_TYPE_PAGE		3
+
+#define REALM_PTE_ADDR_MASK		GENMASK_ULL(47, 12)
+
+#define REALM_PTE_XN			(((realm_iopte)3) << 53)
+#define REALM_PTE_AF			(((realm_iopte)1) << 10)
+#define REALM_PTE_SH_IS			(((realm_iopte)3) << 8)
+#define REALM_PTE_NS			(((realm_iopte)1) << 5)
+
+/* Stage-2 PTE */
+#define REALM_PTE_HAP_FAULT		(((realm_iopte)0) << 6)
+#define REALM_PTE_HAP_READ		(((realm_iopte)1) << 6)
+#define REALM_PTE_HAP_WRITE		(((realm_iopte)2) << 6)
+#define REALM_PTE_MEMATTR_OIWB		(((realm_iopte)0xf) << 2)
+#define REALM_PTE_MEMATTR_NC		(((realm_iopte)0x5) << 2)
+#define REALM_PTE_MEMATTR_DEV		(((realm_iopte)0x1) << 2)
+
 /* Register bits */
 #define REALM_VTCR_SL0_MASK		0x3
 
@@ -25,8 +49,43 @@
 #define io_pgtable_to_data(x)						\
 	container_of((x), struct realm_io_pgtable, iop)
 
+#define io_pgtable_ops_to_data(x)					\
+	io_pgtable_to_data(io_pgtable_ops_to_pgtable(x))
+
+/*
+ * Calculate the right shift amount to get to the portion describing level l
+ * in a virtual address mapped by the pagetable in d.
+ */
+#define REALM_LVL_SHIFT(l, d)						\
+	(((REALM_MAX_LEVELS - (l)) * (d)->bits_per_level) +		\
+	ilog2(sizeof(realm_iopte)))
+
+#define REALM_GRANULE(d)						\
+	(sizeof(realm_iopte) << (d)->bits_per_level)
 #define REALM_PGD_SIZE(d)						\
 	(sizeof(realm_iopte) << (d)->pgd_bits)
+#define REALM_PTES_PER_TABLE(d)						\
+	(REALM_GRANULE(d) >> ilog2(sizeof(realm_iopte)))
+
+/*
+ * Calculate the index at level l used to map virtual address a using the
+ * pagetable in d.
+ */
+#define REALM_PGD_IDX(l, d)						\
+	((l) == (d)->start_level ? (d)->pgd_bits - (d)->bits_per_level : 0)
+
+#define REALM_LVL_IDX(a, l, d)						\
+	(((u64)(a) >> REALM_LVL_SHIFT(l, d)) &			\
+	 ((1 << ((d)->bits_per_level + REALM_PGD_IDX(l, d))) - 1))
+
+/* Calculate the block/page mapping size at level l for pagetable in d. */
+#define REALM_BLOCK_SIZE(l, d)	(1ULL << REALM_LVL_SHIFT(l, d))
+
+/* IOPTE accessors */
+#define iopte_deref(pte, d) __va(iopte_to_paddr(pte, d))
+
+#define iopte_type(pte)					\
+	(((pte) >> REALM_PTE_TYPE_SHIFT) & REALM_PTE_TYPE_MASK)
 
 typedef u64 realm_iopte;
 
@@ -39,6 +98,36 @@ struct realm_io_pgtable {
 	bool ns;
 	void *ns_pgd;
 };
+
+static inline bool iopte_leaf(realm_iopte pte, int lvl,
+			      enum io_pgtable_fmt fmt)
+{
+	if (lvl == (REALM_MAX_LEVELS - 1))
+		return iopte_type(pte) == REALM_PTE_TYPE_PAGE;
+
+	return iopte_type(pte) == REALM_PTE_TYPE_BLOCK;
+}
+
+static phys_addr_t iopte_to_paddr(realm_iopte pte,
+				  struct realm_io_pgtable *data)
+{
+	u64 paddr = pte & REALM_PTE_ADDR_MASK;
+
+	if (REALM_GRANULE(data) < SZ_64K)
+		return paddr;
+
+	/* Rotate the packed high-order bits back to the top */
+	return (paddr | (paddr << (48 - 12))) & (REALM_PTE_ADDR_MASK << 4);
+}
+
+static realm_iopte paddr_to_iopte(phys_addr_t paddr,
+				     struct realm_io_pgtable *data)
+{
+	realm_iopte pte = paddr;
+
+	/* Of the bits which overlap, either 51:48 or 15:12 are always RES0 */
+	return (pte | (pte >> (48 - 12))) & REALM_PTE_ADDR_MASK;
+}
 
 static void *realm_host_alloc_pages(size_t size, gfp_t gfp,
 				    struct io_pgtable_cfg *cfg,
@@ -64,6 +153,473 @@ static void *realm_host_alloc_pages(size_t size, gfp_t gfp,
 		return NULL;
 
 	return pages;
+}
+
+static void realm_host_free_pages(void *pages, size_t size,
+				  struct io_pgtable_cfg *cfg,
+				  void *cookie)
+{
+	if (cfg->free)
+		cfg->free(cookie, pages, size);
+	else
+		free_pages((unsigned long)pages, get_order(size));
+}
+
+#define MAX_MSI_SUPPROT 64
+#define REALM_MSI_IOVA_BASE 0xa004000
+#define REALM_MSI_IOVA_OFFSET 4096
+#define MSI_IOVA(id) (REALM_MSI_IOVA_BASE + (id) * REALM_MSI_IOVA_OFFSET)
+
+static unsigned long g_msi_addr_slot[MAX_MSI_SUPPROT];
+static DEFINE_SPINLOCK(msi_iova_lock);
+
+static unsigned long get_msi_iova(unsigned long paddr, bool need_alloc)
+{
+	unsigned long msi_addr = 0;
+	int i;
+
+	spin_lock(&msi_iova_lock);
+	for (i = 0; i < MAX_MSI_SUPPROT; i++) {
+		if (g_msi_addr_slot[i] == paddr) {
+			msi_addr = MSI_IOVA(i);
+			break;
+		} else if (g_msi_addr_slot[i] == 0) {
+			if (need_alloc) {
+				g_msi_addr_slot[i] = paddr;
+				msi_addr = MSI_IOVA(i);
+			}
+			break;
+		}
+	}
+	spin_unlock(&msi_iova_lock);
+
+	return msi_addr;
+}
+
+static int realm_mmio_map(struct realm_io_pgtable *data, unsigned long iova,
+			  phys_addr_t paddr, size_t size, size_t pgcount,
+			  realm_iopte prot, int lvl, realm_iopte *pgd,
+			  gfp_t gfp)
+{
+	struct io_pgtable_cfg *cfg = &data->iop.cfg;
+	struct realm *realm;
+	unsigned long msi_iova;
+	int ret;
+
+	if (iova != REALM_MSI_ORIG_IOVA)
+		return 0;
+
+	if (size != SZ_4K || pgcount != 1) {
+		pr_err("Bad size of pgcount\n");
+		return -EINVAL;
+	}
+
+	msi_iova = get_msi_iova(paddr, true);
+	if (!msi_iova) {
+		pr_err("Bad msi_iova\n");
+		return -EINVAL;
+	}
+
+	rme_update_msi_iova(cfg->arm_lpae_s2_cfg.vttbr, msi_iova);
+
+	realm = rme_get_realm(cfg->arm_lpae_s2_cfg.vttbr);
+	if (!realm)
+		return -EINVAL;
+
+	ret = realm_map_mmio_protected(realm, msi_iova, __phys_to_pfn(paddr), size, NULL);
+	if (!ret)
+		return ret;
+
+	io_pgtable_tlb_flush_walk(&data->iop, msi_iova, size, REALM_GRANULE(data));
+
+	return 0;
+}
+
+static void realm_host_init_pte(struct realm_io_pgtable *data,
+				phys_addr_t paddr, realm_iopte prot,
+				int lvl, int num_entries, realm_iopte *ptep)
+{
+	realm_iopte pte = prot;
+	size_t sz = REALM_BLOCK_SIZE(lvl, data);
+	int i;
+
+	if (data->iop.fmt != ARM_MALI_LPAE && lvl == REALM_MAX_LEVELS - 1)
+		pte |= REALM_PTE_TYPE_PAGE;
+	else
+		pte |= REALM_PTE_TYPE_BLOCK;
+
+	for (i = 0; i < num_entries; i++)
+		ptep[i] = pte | paddr_to_iopte(paddr + i * sz, data);
+}
+
+static size_t realm_host_unmap(struct realm_io_pgtable *data,
+			       struct iommu_iotlb_gather *gather,
+			       unsigned long iova, size_t size, size_t pgcount,
+			       int lvl, realm_iopte *ptep);
+
+static int realm_init_pte(struct realm_io_pgtable *data,
+			  unsigned long iova, phys_addr_t paddr,
+			  realm_iopte prot, int lvl, int num_entries,
+			  realm_iopte *ptep)
+{
+	int i;
+
+	for (i = 0; i < num_entries; i++)
+		if (iopte_leaf(ptep[i], lvl, data->iop.fmt)) {
+			/* We require an unmap first */
+			return -EEXIST;
+		} else if (iopte_type(ptep[i]) == REALM_PTE_TYPE_TABLE) {
+			/*
+			 * We need to unmap and free the old table before
+			 * overwriting it with a block entry.
+			 */
+			realm_iopte *tblp;
+			size_t sz = REALM_BLOCK_SIZE(lvl, data);
+
+			tblp = ptep - REALM_LVL_IDX(iova, lvl, data);
+			if (realm_host_unmap(data, NULL, iova + i * sz, sz, 1,
+					     lvl, tblp) != sz) {
+				WARN_ON(1);
+				return -EINVAL;
+			}
+		}
+
+	realm_host_init_pte(data, paddr, prot, lvl, num_entries, ptep);
+	return 0;
+}
+
+static realm_iopte realm_install_table(realm_iopte *table, realm_iopte *ptep,
+				       realm_iopte curr,
+				       struct realm_io_pgtable *data)
+{
+	realm_iopte old, new;
+
+	new = paddr_to_iopte(__pa(table), data) | REALM_PTE_TYPE_TABLE;
+	/*
+	 * Ensure the table itself is visible before its PTE can be.
+	 * Whilst we could get away with cmpxchg64_release below, this
+	 * doesn't have any ordering semantics when !CONFIG_SMP.
+	 */
+	dma_wmb();
+
+	old = cmpxchg64_relaxed(ptep, curr, new);
+
+	return old;
+}
+
+static int realm_host_map(struct realm_io_pgtable *data, unsigned long iova,
+			  phys_addr_t paddr, size_t size, size_t pgcount,
+			  realm_iopte prot, int lvl, realm_iopte *ptep,
+			  gfp_t gfp, size_t *mapped)
+{
+	realm_iopte *cptep, pte;
+	size_t block_size = REALM_BLOCK_SIZE(lvl, data);
+	size_t tblsz = REALM_GRANULE(data);
+	struct io_pgtable_cfg *cfg = &data->iop.cfg;
+	int ret = 0, num_entries, max_entries, map_idx_start;
+
+	/* Find our entry at the current level */
+	map_idx_start = REALM_LVL_IDX(iova, lvl, data);
+	ptep += map_idx_start;
+
+	/* If we can install a leaf entry at this level, then do so */
+	if (size == block_size) {
+		max_entries = REALM_PTES_PER_TABLE(data) - map_idx_start;
+		num_entries = min_t(int, pgcount, max_entries);
+		ret = realm_init_pte(data, iova, paddr, prot, lvl, num_entries, ptep);
+		if (!ret)
+			*mapped += num_entries * size;
+
+		return ret;
+	}
+
+	/* We can't allocate tables at the final level */
+	if (WARN_ON(lvl >= REALM_MAX_LEVELS - 1))
+		return -EINVAL;
+
+	/* Grab a pointer to the next level */
+	pte = READ_ONCE(*ptep);
+	if (!pte) {
+		cptep = realm_host_alloc_pages(tblsz, gfp, cfg, data->iop.cookie);
+		if (!cptep)
+			return -ENOMEM;
+
+		pte = realm_install_table(cptep, ptep, 0, data);
+		if (pte)
+			realm_host_free_pages(cptep, tblsz, cfg, data->iop.cookie);
+
+#ifdef CONFIG_HISILICON_ERRATUM_162100602
+		if (lvl <= 2)
+			io_pgtable_tlb_flush_walk(&data->iop, iova, 0, REALM_GRANULE(data));
+#endif
+	}
+
+	if (pte && !iopte_leaf(pte, lvl, data->iop.fmt)) {
+		cptep = iopte_deref(pte, data);
+	} else if (pte) {
+		/* We require an unmap first */
+		return -EEXIST;
+	}
+
+	/* Rinse, repeat */
+	return realm_host_map(data, iova, paddr, size, pgcount, prot, lvl + 1,
+			      cptep, gfp, mapped);
+}
+
+static void realm_host_free_pgtable(struct realm_io_pgtable *data, int lvl,
+				    realm_iopte *ptep)
+{
+	realm_iopte *start, *end;
+	unsigned long table_size;
+
+	if (lvl == data->start_level)
+		table_size = REALM_PGD_SIZE(data);
+	else
+		table_size = REALM_GRANULE(data);
+
+	start = ptep;
+
+	/* Only leaf entries at the last level */
+	if (lvl == REALM_MAX_LEVELS - 1)
+		end = ptep;
+	else
+		end = (void *)ptep + table_size;
+
+	while (ptep != end) {
+		realm_iopte pte = *ptep++;
+
+		if (!pte || iopte_leaf(pte, lvl, data->iop.fmt))
+			continue;
+
+		realm_host_free_pgtable(data, lvl + 1, iopte_deref(pte, data));
+	}
+
+	realm_host_free_pages(start, table_size, &data->iop.cfg, data->iop.cookie);
+}
+
+static size_t realm_host_unmap(struct realm_io_pgtable *data,
+			       struct iommu_iotlb_gather *gather,
+			       unsigned long iova, size_t size, size_t pgcount,
+			       int lvl, realm_iopte *ptep)
+{
+	realm_iopte pte;
+	struct io_pgtable *iop = &data->iop;
+	int i = 0, num_entries, max_entries, unmap_idx_start;
+
+	/* Something went horribly wrong and we ran out of page table */
+	if (WARN_ON(lvl == REALM_MAX_LEVELS))
+		return 0;
+
+	unmap_idx_start = REALM_LVL_IDX(iova, lvl, data);
+	ptep += unmap_idx_start;
+	pte = READ_ONCE(*ptep);
+	if (WARN_ON(!pte))
+		return 0;
+
+	/* If the size matches this level, we're in the right place */
+	if (size == REALM_BLOCK_SIZE(lvl, data)) {
+		max_entries = REALM_PTES_PER_TABLE(data) - unmap_idx_start;
+		num_entries = min_t(int, pgcount, max_entries);
+
+		while (i < num_entries) {
+			pte = READ_ONCE(*ptep);
+			if (WARN_ON(!pte))
+				break;
+
+			*ptep = 0;
+
+			if (!iopte_leaf(pte, lvl, iop->fmt)) {
+				/* Also flush any partial walks */
+				io_pgtable_tlb_flush_walk(iop, iova + i * size, size,
+							  REALM_GRANULE(data));
+				realm_host_free_pgtable(data, lvl + 1, iopte_deref(pte, data));
+			} else if (!iommu_iotlb_gather_queued(gather)) {
+				io_pgtable_tlb_add_page(iop, gather, iova + i * size, size);
+			}
+
+			ptep++;
+			i++;
+		}
+
+		return i * size;
+	}
+
+	/* Keep on walkin' */
+	ptep = iopte_deref(pte, data);
+	return realm_host_unmap(data, gather, iova, size, pgcount, lvl + 1, ptep);
+}
+
+static realm_iopte realm_prot_to_pte(struct realm_io_pgtable *data, int prot)
+{
+	realm_iopte pte;
+
+	pte = REALM_PTE_HAP_FAULT;
+	if (prot & IOMMU_READ)
+		pte |= REALM_PTE_HAP_READ;
+	if (prot & IOMMU_WRITE)
+		pte |= REALM_PTE_HAP_WRITE;
+
+	if (prot & IOMMU_MMIO)
+		pte |= REALM_PTE_MEMATTR_DEV;
+	else if (prot & IOMMU_CACHE)
+		pte |= REALM_PTE_MEMATTR_OIWB;
+	else
+		pte |= REALM_PTE_MEMATTR_NC;
+
+	if (prot & IOMMU_CACHE)
+		pte |= REALM_PTE_SH_IS;
+
+	if (prot & IOMMU_NOEXEC)
+		pte |= REALM_PTE_XN;
+
+	pte |= REALM_PTE_AF;
+
+	return pte;
+}
+
+static int realm_map_pages(struct io_pgtable_ops *ops, unsigned long iova,
+			   phys_addr_t paddr, size_t pgsize, size_t pgcount,
+			   int iommu_prot, gfp_t gfp, size_t *mapped)
+{
+	struct realm_io_pgtable *data = io_pgtable_ops_to_data(ops);
+	struct io_pgtable_cfg *cfg = &data->iop.cfg;
+	int ret, lvl = data->start_level;
+	realm_iopte prot;
+	long iaext = (s64)iova >> cfg->ias;
+
+	if (WARN_ON(!pgsize || (pgsize & cfg->pgsize_bitmap) != pgsize))
+		return -EINVAL;
+
+	if (WARN_ON(iaext || paddr >> cfg->oas))
+		return -ERANGE;
+
+	/* If no access, then nothing to do */
+	if (!(iommu_prot & (IOMMU_READ | IOMMU_WRITE)))
+		return 0;
+
+	prot = realm_prot_to_pte(data, iommu_prot);
+
+	ret = realm_mmio_map(data, iova, paddr, pgsize, pgcount, prot, lvl,
+			     (realm_iopte *)data->pgd, gfp);
+	if (ret)
+		return ret;
+
+	ret = realm_host_map(data, iova, paddr, pgsize, pgcount, prot,
+				lvl, (realm_iopte *)data->pgd, gfp, mapped);
+	if (ret)
+		return ret;
+
+	/*
+	 * Synchronise all PTE updates for the new mapping before there's
+	 * a chance for anything to kick off a table walk for the new iova.
+	 */
+	wmb();
+
+	return ret;
+}
+
+static phys_addr_t realm_iova_to_phys(struct io_pgtable_ops *ops,
+				      unsigned long iova)
+{
+	struct realm_io_pgtable *data = io_pgtable_ops_to_data(ops);
+	realm_iopte pte, *ptep = data->pgd;
+	int lvl = data->start_level;
+
+	do {
+		/* Valid IOPTE pointer? */
+		if (!ptep)
+
+			return 0;
+		/* Grab the IOPTE we're interested in */
+		ptep += REALM_LVL_IDX(iova, lvl, data);
+		pte = READ_ONCE(*ptep);
+
+		/* Valid entry? */
+		if (!pte)
+			return 0;
+
+		/* Leaf entry? */
+		if (iopte_leaf(pte, lvl, data->iop.fmt))
+			goto found_translation;
+
+		/* Take it to the next level */
+		ptep = iopte_deref(pte, data);
+	} while (++lvl < REALM_MAX_LEVELS);
+
+	/* Ran out of page tables to walk */
+	return 0;
+
+found_translation:
+	iova &= (REALM_BLOCK_SIZE(lvl, data) - 1);
+	return iopte_to_paddr(pte, data) | iova;
+}
+
+static int realm_mmio_unmap(struct io_pgtable_ops *ops,
+			    struct realm_io_pgtable *data,
+			    struct iommu_iotlb_gather *gather,
+			    unsigned long iova, size_t size, size_t pgcount,
+			    int lvl, realm_iopte *pgd)
+{
+	struct io_pgtable_cfg *cfg = &data->iop.cfg;
+	unsigned long rtt_addr, next_addr;
+	struct realm *realm;
+	u64 msi_iova;
+	int ret;
+
+	if (iova != REALM_MSI_ORIG_IOVA)
+		return 0;
+
+	if (size != SZ_4K || pgcount != 1) {
+		pr_err("Bad size of pgcount\n");
+		return -EINVAL;
+	}
+
+	msi_iova = get_msi_iova(realm_iova_to_phys(ops, iova), false);
+	if (!msi_iova) {
+		pr_err("Cannot find msi_iova\n");
+		return -EINVAL;
+	}
+
+	realm = rme_get_realm(cfg->arm_lpae_s2_cfg.vttbr);
+	if (!realm) {
+		pr_err("Cannot get realm from vttbr\n");
+		return -EINVAL;
+	}
+
+	ret = rmi_dev_unmap(virt_to_phys(realm->rd), msi_iova, &rtt_addr, &next_addr);
+	if (ret) {
+		pr_err("Destroy iova failed\n");
+		return -ENXIO;
+	}
+
+	return 0;
+}
+
+static size_t realm_unmap_pages(struct io_pgtable_ops *ops, unsigned long iova,
+				size_t pgsize, size_t pgcount,
+				struct iommu_iotlb_gather *gather)
+{
+	struct realm_io_pgtable *data = io_pgtable_ops_to_data(ops);
+	struct io_pgtable_cfg *cfg = &data->iop.cfg;
+	long iaext = (s64)iova >> cfg->ias;
+	int sl = data->start_level;
+	size_t unmap_size;
+	int ret;
+
+	if (WARN_ON(!pgsize || (pgsize & cfg->pgsize_bitmap) != pgsize || !pgcount))
+		return 0;
+
+	if (WARN_ON(iaext))
+		return 0;
+
+	ret = realm_mmio_unmap(ops, data, gather, iova, pgsize, pgcount, sl,
+			      (realm_iopte *)data->pgd);
+	if (ret)
+		return 0;
+
+	unmap_size = realm_host_unmap(data, gather, iova, pgsize, pgcount, sl,
+				      (realm_iopte *)data->pgd);
+	return unmap_size;
 }
 
 static struct realm_io_pgtable *realm_alloc_pgtable(struct io_pgtable_cfg *cfg,
@@ -99,9 +655,9 @@ static struct realm_io_pgtable *realm_alloc_pgtable(struct io_pgtable_cfg *cfg,
 	data->pgd_bits = va_bits - (data->bits_per_level * (levels - 1));
 
 	data->iop.ops = (struct io_pgtable_ops) {
-		.map_pages	= NULL,
-		.unmap_pages	= NULL,
-		.iova_to_phys	= NULL,
+		.map_pages	= realm_map_pages,
+		.unmap_pages	= realm_unmap_pages,
+		.iova_to_phys	= realm_iova_to_phys,
 	};
 
 	return data;
@@ -188,6 +744,8 @@ out_free_data:
 static void realm_free_pgtable(struct io_pgtable *iop)
 {
 	struct realm_io_pgtable *data = io_pgtable_to_data(iop);
+
+	realm_host_free_pgtable(data, data->start_level, data->pgd);
 
 	kfree(data);
 }
