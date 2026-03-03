@@ -317,6 +317,7 @@ retry:
 	if (WARN_ON(ret))
 		return -ENXIO;
 
+	put_page(phys_to_page(rtt_addr));
 	*out_rtt = rtt_addr;
 
 	return 0;
@@ -909,6 +910,8 @@ static int realm_create_protected_data_granule(struct realm *realm,
 	if (rmi_granule_delegate(dst_phys))
 		return -ENXIO;
 
+	get_page(phys_to_page(dst_phys));
+
 	ret = rmi_data_create(rd, dst_phys, ipa, src_phys, flags);
 	if (RMI_RETURN_STATUS(ret) == RMI_ERROR_RTT) {
 		/* Create missing RTTs and retry */
@@ -937,7 +940,6 @@ int realm_create_protected_data_page(struct realm *realm,
 {
 	unsigned long rd = virt_to_phys(realm->rd);
 	phys_addr_t dst_phys, src_phys;
-	bool undelegate_failed = false;
 	int ret, offset;
 
 	dst_phys = page_to_phys(dst_page);
@@ -964,8 +966,8 @@ int realm_create_protected_data_page(struct realm *realm,
 err:
 	if (ret == -EIO) {
 		/* current offset needs undelegating */
-		if (WARN_ON(rmi_granule_undelegate(dst_phys)))
-			undelegate_failed = true;
+		if (!WARN_ON(rmi_granule_undelegate(dst_phys)))
+			put_page(dst_page);
 	}
 	while (offset > 0) {
 		ipa -= RMM_PAGE_SIZE;
@@ -974,16 +976,8 @@ err:
 
 		rmi_data_destroy(rd, ipa, NULL, NULL);
 
-		if (WARN_ON(rmi_granule_undelegate(dst_phys)))
-			undelegate_failed = true;
-	}
-
-	if (undelegate_failed) {
-		/*
-		 * A granule could not be undelegated,
-		 * so the page has to be leaked
-		 */
-		get_page(dst_page);
+		if (!WARN_ON(rmi_granule_undelegate(dst_phys)))
+			put_page(dst_page);
 	}
 
 	return -ENXIO;
@@ -1144,6 +1138,7 @@ int realm_map_protected(struct realm *realm,
 			return 0;
 		}
 
+		get_page(phys_to_page(phys));
 		ret = rmi_data_create_unknown(rd, phys, ipa);
 
 		if (RMI_RETURN_STATUS(ret) == RMI_ERROR_RTT) {
@@ -1177,10 +1172,8 @@ int realm_map_protected(struct realm *realm,
 	return 0;
 
 err_undelegate:
-	if (WARN_ON(rmi_granule_undelegate(phys))) {
-		/* Page can't be returned to NS world so is lost */
-		get_page(phys_to_page(phys));
-	}
+	if (!WARN_ON(rmi_granule_undelegate(phys)))
+		put_page(phys_to_page(phys));
 err:
 	while (size > 0) {
 		unsigned long data, top;
@@ -1191,10 +1184,8 @@ err:
 
 		WARN_ON(rmi_data_destroy(rd, ipa, &data, &top));
 
-		if (WARN_ON(rmi_granule_undelegate(phys))) {
-			/* Page can't be returned to NS world so is lost */
-			get_page(phys_to_page(phys));
-		}
+		if (!WARN_ON(rmi_granule_undelegate(phys)))
+			put_page(phys_to_page(phys));
 	}
 	return -ENXIO;
 }
@@ -1714,6 +1705,7 @@ int _kvm_realm_enable_cap(struct kvm *kvm, struct kvm_enable_cap *cap)
 
 void _kvm_destroy_realm(struct kvm *kvm)
 {
+	struct kvm_s2_mmu *mmu = &kvm->arch.mmu;
 	struct realm *realm = &kvm->arch.realm;
 	size_t pgd_size = kvm_pgtable_stage2_pgd_size(kvm->arch.vtcr);
 	int i;
@@ -1727,6 +1719,11 @@ void _kvm_destroy_realm(struct kvm *kvm)
 		return;
 
 #ifdef CONFIG_HISI_CCADA_HOST
+	write_lock(&kvm->mmu_lock);
+	unmap_stage2_range(mmu, 0, BIT(realm->ia_bits - 1), true);
+	write_unlock(&kvm->mmu_lock);
+	kvm_realm_destroy_rtts(kvm, mmu->pgt->ia_bits);
+
 	/* undelegate and detach dev from realm */
 	realm_destroy_dev_list(realm);
 #endif
