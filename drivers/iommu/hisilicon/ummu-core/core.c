@@ -274,6 +274,22 @@ out_unlock:
 	return ret;
 }
 
+int ummu_core_dev_config(struct device *dev, int type, int command, void *data)
+{
+	if (!data)
+		return -EINVAL;
+
+	guard(mutex)(&global_device_lock);
+	if (!global_core_device)
+		return -ENODEV;
+
+	if (!global_core_device->ops || !global_core_device->ops->dev_config)
+		return -EOPNOTSUPP;
+
+	return global_core_device->ops->dev_config(dev, type, command, data);
+}
+EXPORT_SYMBOL_GPL(ummu_core_dev_config);
+
 int ummu_get_sva_mode(struct device *dev)
 {
 	u32 hw_cap;

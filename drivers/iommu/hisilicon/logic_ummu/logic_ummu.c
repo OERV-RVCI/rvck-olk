@@ -237,6 +237,7 @@ static int logic_ummu_attach_dev(struct iommu_domain *domain,
 		if (core_ops && core_ops->cfg_sync)
 			core_ops->cfg_sync(ummu_base_domain);
 	}
+
 	return ret;
 }
 
@@ -1819,6 +1820,42 @@ static int logic_ummu_get_hw_cap(struct device *dev, u32 *hw_cap)
 	return core_ops->get_hw_cap(dev, hw_cap);
 }
 
+static int logic_ummu_dev_config(struct device *dev, int type, int command, void *data)
+{
+	const struct ummu_core_ops *core_ops = get_agent_core_ops();
+	struct ummu_base_domain *ummu_base_domain;
+	struct logic_ummu_domain *logic_domain;
+	struct iommu_domain *domain;
+	int ret;
+
+	if (!core_ops || !core_ops->dev_config || !core_ops->cfg_sync_all)
+		return -EOPNOTSUPP;
+
+	domain = iommu_get_domain_for_dev(dev);
+	if (!domain) {
+		dev_err(dev, "invalid device.\n");
+		return -ENODEV;
+	}
+	logic_domain = iommu_to_logic_domain(domain);
+	if (!logic_domain->agent_domain) {
+		pr_err("invalid agent_domain.\n");
+		return -EINVAL;
+	}
+
+	ret = core_ops->dev_config(dev, type, command, data);
+	if (ret)
+		return ret;
+
+	list_for_each_entry(ummu_base_domain, &logic_domain->base_domain.list, list) {
+		if (ummu_base_domain == logic_domain->agent_domain)
+			continue;
+
+		core_ops->cfg_sync_all(ummu_base_domain);
+	}
+
+	return 0;
+}
+
 static struct ummu_core_ops logic_ummu_core_ops = {
 	.cfg_sync_all = logic_ummu_cfg_sync_all,
 	.cfg_sync = logic_ummu_cfg_sync,
@@ -1829,6 +1866,7 @@ static struct ummu_core_ops logic_ummu_core_ops = {
 	.invalidate_cfg = logic_ummu_invalidate_cfg,
 	.tdev_support_attr = logic_ummu_device_support_attr,
 	.get_hw_cap = logic_ummu_get_hw_cap,
+	.dev_config = logic_ummu_dev_config,
 };
 
 /* workaround. should be in macro */
