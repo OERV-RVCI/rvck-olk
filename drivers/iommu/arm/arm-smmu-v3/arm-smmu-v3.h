@@ -751,6 +751,16 @@ struct arm_smmu_strtab_cfg {
 	};
 };
 
+#ifdef CONFIG_HISI_CCADA_HOST
+/* An SMMUv3 realm instance */
+struct realm_smmu_device {
+	resource_size_t ioaddr;
+	bool				support_msi;
+	bool				forward_cmd;
+	bool				enabled;
+};
+#endif
+
 /* An SMMUv3 instance */
 struct arm_smmu_device {
 	struct device			*dev;
@@ -839,6 +849,9 @@ struct arm_smmu_device {
 	int				s_gerr_irq;
 	resource_size_t			ioaddr;
 	uint64_t			s_smmu_id;
+#endif
+#ifdef CONFIG_HISI_CCADA_HOST
+	struct realm_smmu_device	realm;
 #endif
 };
 

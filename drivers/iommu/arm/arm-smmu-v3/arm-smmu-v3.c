@@ -37,6 +37,10 @@
 #include "arm-s-smmu-v3.h"
 #endif
 
+#ifdef CONFIG_HISI_CCADA_HOST
+#include "arm-r-smmu-v3.h"
+#endif
+
 static bool disable_msipolling;
 module_param(disable_msipolling, bool, 0444);
 MODULE_PARM_DESC(disable_msipolling,
@@ -3419,8 +3423,13 @@ arm_smmu_domain_alloc_user(struct device *dev, u32 flags,
 	}
 
 #ifdef CONFIG_HISI_CCADA_HOST
-	if (flags & IOMMU_HWPT_RME)
+	if (flags & IOMMU_HWPT_RME) {
+		if (!arm_smmu_support_rme(master->smmu)) {
+			ret = -EOPNOTSUPP;
+			goto err_free;
+		}
 		smmu_domain->realm = true;
+	}
 #endif
 
 	smmu_domain->domain.type = IOMMU_DOMAIN_UNMANAGED;
@@ -3938,12 +3947,17 @@ static int arm_smmu_clear_dirty_log(struct iommu_domain *domain,
 static int arm_smmu_enable_rme(struct iommu_domain *domain)
 {
 	struct arm_smmu_domain *smmu_domain = to_smmu_domain(domain);
+	struct arm_smmu_device *smmu = smmu_domain->smmu;
+	int ret = 0;
 
 	mutex_lock(&smmu_domain->init_mutex);
-	smmu_domain->realm = true;
+	if (arm_smmu_support_rme(smmu))
+		smmu_domain->realm = true;
+	else
+		ret = -EOPNOTSUPP;
 	mutex_unlock(&smmu_domain->init_mutex);
 
-	return 0;
+	return ret;
 }
 #endif
 
@@ -5748,6 +5762,10 @@ static int arm_smmu_device_probe(struct platform_device *pdev)
 	virtcca_smmu_device_init(pdev, smmu, ioaddr, false);
 #endif
 
+#ifdef CONFIG_HISI_CCADA_HOST
+	arm_r_smmu_device_init(smmu, ioaddr);
+#endif
+
 	/* And we're up. Go go go! */
 	ret = iommu_device_sysfs_add(&smmu->iommu, dev, NULL,
 				     "smmu3.%pa", &ioaddr);
@@ -5774,6 +5792,10 @@ err_free_iopf:
 static void arm_smmu_device_remove(struct platform_device *pdev)
 {
 	struct arm_smmu_device *smmu = platform_get_drvdata(pdev);
+
+#ifdef CONFIG_HISI_CCADA_HOST
+	arm_r_smmu_device_remove(smmu);
+#endif
 
 	iommu_device_unregister(&smmu->iommu);
 	iommu_device_sysfs_remove(&smmu->iommu);

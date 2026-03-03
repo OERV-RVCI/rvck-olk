@@ -675,6 +675,96 @@ static inline int rmi_dev_unmap(unsigned long rd, unsigned long ipa,
 
 	return regs.a0;
 }
+
+#define MMIO_REG_READ 0
+#define MMIO_REG_WRITE 1
+
+#define SMMU_R_REG_32_BIT 32
+#define SMMU_R_REG_64_BIT 64
+
+/**
+ * rmi_smmu_reg_read() - Read realm smmu register
+ * @ioaddr: PA of the realm smmu
+ * @reg: Offset of the register
+ * @bits: Register read bits
+ * @value: Pointer to read result
+ *
+ * Read realm smmu register for given offset
+ *
+ * Return: RMI return code
+ */
+static inline int rmi_smmu_reg_read(unsigned long ioaddr, unsigned long reg,
+				    unsigned long bits, unsigned long *value)
+{
+	struct arm_smccc_1_2_regs regs = {
+		SMC_RMI_HISI_EXT, CCADA_SMMU_REG_RW,
+		ioaddr,
+		MMIO_REG_READ,
+		reg,
+		0,
+		bits,
+	};
+
+	arm_smccc_1_2_smc(&regs, &regs);
+
+	if (regs.a0 == 0)
+		*value = regs.a1;
+
+	return regs.a0;
+}
+
+static inline int rmi_smmu_reg_read32(unsigned long ioaddr, unsigned long reg,
+				      u32 *value)
+{
+	unsigned long reg_value;
+	int ret;
+
+	ret = rmi_smmu_reg_read(ioaddr, reg, SMMU_R_REG_32_BIT, &reg_value);
+	*value = (u32)reg_value;
+
+	return ret;
+}
+
+/**
+ * rmi_smmu_reg_write() - Write realm smmu register
+ * @ioaddr: PA of the realm smmu
+ * @reg: Offset of the register
+ * @bits: Register write bits
+ * @value: Value to write
+ *
+ * Write realm smmu register for given offset
+ *
+ * Return: RMI return code
+ */
+static inline int rmi_smmu_reg_write(unsigned long ioaddr, unsigned long reg,
+				     unsigned long bits, unsigned long value)
+{
+	struct arm_smccc_1_2_regs regs = {
+		SMC_RMI_HISI_EXT, CCADA_SMMU_REG_RW,
+		ioaddr,
+		MMIO_REG_WRITE,
+		reg,
+		value,
+		bits,
+	};
+
+	arm_smccc_1_2_smc(&regs, &regs);
+
+	return regs.a0;
+}
+
+static inline int rmi_smmu_reg_write32(unsigned long ioaddr, unsigned long reg,
+				       u32 value)
+{
+	return rmi_smmu_reg_write(ioaddr, reg, SMMU_R_REG_32_BIT,
+				  (unsigned long)value);
+}
+
+static inline int rmi_smmu_reg_write64(unsigned long ioaddr, unsigned long reg,
+				       unsigned long value)
+{
+	return rmi_smmu_reg_write(ioaddr, reg, SMMU_R_REG_64_BIT, value);
+}
 #endif
 
 #endif /* __ASM_RMI_CMDS_H */
