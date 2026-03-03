@@ -2708,6 +2708,10 @@ static int arm_smmu_domain_finalise(struct arm_smmu_domain *smmu_domain,
 	virtcca_smmu_set_stage(domain, smmu_domain);
 #endif
 
+#ifdef CONFIG_HISI_CCADA_HOST
+	realm_smmu_set_stage(smmu_domain);
+#endif
+
 	pgtbl_cfg = (struct io_pgtable_cfg) {
 		.pgsize_bitmap	= smmu->pgsize_bitmap,
 		.coherent_walk	= smmu->features & ARM_SMMU_FEAT_COHERENCY,
