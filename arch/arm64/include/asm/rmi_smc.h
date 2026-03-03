@@ -87,6 +87,9 @@ enum hisi_ext_cmd {
 #define RMI_UNASSIGNED			0
 #define RMI_ASSIGNED			1
 #define RMI_TABLE			2
+#ifdef CONFIG_HISI_CCADA_HOST
+#define RMI_ASSIGNED_DEV		3
+#endif
 
 #define RMI_RETURN_STATUS(ret)		((ret) & 0xFF)
 #define RMI_RETURN_INDEX(ret)		(((ret) >> 8) & 0xFF)
@@ -99,6 +102,7 @@ enum hisi_ext_cmd {
 
 #ifdef CONFIG_HISI_CCADA_HOST
 #define RMI_ERROR_DEV_INFO	9
+#define RMI_ERROR_DEV_ADDR	10
 #define RMI_ERROR_DEV_EXISTS	11
 #endif
 
@@ -106,6 +110,9 @@ enum rmi_ripas {
 	RMI_EMPTY = 0,
 	RMI_RAM = 1,
 	RMI_DESTROYED = 2,
+#ifdef CONFIG_HISI_CCADA_HOST
+	RMI_DEV = 3,
+#endif
 };
 
 #define RMI_NO_MEASURE_CONTENT	0

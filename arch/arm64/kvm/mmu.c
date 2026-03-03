@@ -1620,6 +1620,7 @@ static int user_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa,
 	if (exec_fault && device)
 		return -ENOEXEC;
 
+#ifndef CONFIG_HISI_CCADA_HOST
 	/*
 	 * Adapted from cca-v8
 	 * Since OLK-6.6 does not implement the private_memslot_fault()
@@ -1629,6 +1630,7 @@ static int user_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa,
 	if (device && _vcpu_is_rec(vcpu) &&
 	    kvm_gpa_from_fault(kvm, fault_ipa) == fault_ipa)
 		return -EINVAL;
+#endif
 
 	read_lock(&kvm->mmu_lock);
 	pgt = vcpu->arch.hw_mmu->pgt;

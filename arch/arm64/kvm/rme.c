@@ -322,6 +322,66 @@ retry:
 	return 0;
 }
 
+#ifdef CONFIG_HISI_CCADA_HOST
+static bool realm_is_addr_dev(struct realm *realm, unsigned long addr)
+{
+	phys_addr_t rd = virt_to_phys(realm->rd);
+	struct rtt_entry rtt;
+
+	if (rmi_rtt_read_entry(rd, addr, RMM_RTT_MAX_LEVEL, &rtt))
+		return false;
+
+	if (rtt.ripas == RMI_DEV && rtt.state == RMI_ASSIGNED_DEV)
+		return true;
+
+	return false;
+}
+
+static int realm_destroy_private_dev_granule(struct realm *realm,
+					     unsigned long ipa,
+					     unsigned long *next_addr,
+					     phys_addr_t *out_rtt)
+{
+	unsigned long rd = virt_to_phys(realm->rd);
+	unsigned long rtt_addr;
+	phys_addr_t rtt;
+	int ret;
+
+retry:
+	ret = rmi_dev_unmap(rd, ipa, &rtt_addr, next_addr);
+	if (RMI_RETURN_STATUS(ret) == RMI_ERROR_RTT) {
+		if (*next_addr > ipa)
+			return 0; /* UNASSIGNED */
+		rtt = alloc_delegated_granule(NULL);
+		if (WARN_ON(rtt == PHYS_ADDR_MAX))
+			return -ENOMEM;
+		/*
+		 * ASSIGNED - ipa is mapped as a block, so split. The index
+		 * from the return code should be 2 otherwise it appears
+		 * there's a huge page bigger than KVM currently supports
+		 */
+		WARN_ON(RMI_RETURN_INDEX(ret) != 2);
+		ret = realm_rtt_create(realm, ipa, 3, rtt);
+		if (WARN_ON(ret)) {
+			free_delegated_granule(rtt);
+			return -ENXIO;
+		}
+		goto retry;
+	} else if (WARN_ON(ret)) {
+		return -ENXIO;
+	}
+
+	/*
+	 * Device is not allowed to switch from Realm to NS,
+	 * thus don't need to undelegate device mmio.
+	 */
+
+	*out_rtt = rtt_addr;
+
+	return 0;
+}
+#endif
+
 static int realm_unmap_private_page(struct realm *realm,
 				    unsigned long ipa,
 				    unsigned long *next_addr)
@@ -332,8 +392,18 @@ static int realm_unmap_private_page(struct realm *realm,
 	int ret;
 
 	for (addr = ipa; addr < end; addr = *next_addr) {
+#ifdef CONFIG_HISI_CCADA_HOST
+		if (realm_is_addr_dev(realm, addr))
+			ret = realm_destroy_private_dev_granule(realm, addr,
+								next_addr,
+								&out_rtt);
+		else
+			ret = realm_destroy_private_granule(realm, addr,
+							    next_addr, &out_rtt);
+#else
 		ret = realm_destroy_private_granule(realm, addr, next_addr,
 						    &out_rtt);
+#endif
 		if (ret)
 			return ret;
 	}
@@ -933,6 +1003,94 @@ int fold_rtt(struct realm *realm, unsigned long addr, int level)
 	return 0;
 }
 
+#ifdef CONFIG_HISI_CCADA_HOST
+int realm_map_mmio_protected(struct realm *realm, unsigned long ipa,
+			     kvm_pfn_t pfn, unsigned long map_size,
+			     struct kvm_mmu_memory_cache *memcache)
+{
+	phys_addr_t phys = __pfn_to_phys(pfn);
+	phys_addr_t rd = virt_to_phys(realm->rd);
+	unsigned long base_ipa = ipa;
+	unsigned long size;
+	unsigned long data;
+	unsigned long top;
+	int map_level;
+	int level;
+	int ret = 0;
+
+	if (WARN_ON(!IS_ALIGNED(map_size, RMM_PAGE_SIZE)))
+		return -EINVAL;
+
+	if (WARN_ON(!IS_ALIGNED(ipa, map_size)))
+		return -EINVAL;
+
+	if (IS_ALIGNED(map_size, RMM_L2_BLOCK_SIZE))
+		map_level = 2;
+	else
+		map_level = 3;
+
+	if (map_level < RMM_RTT_MAX_LEVEL) {
+		/*
+		 * A temporary RTT is needed during the map, precreate it,
+		 * however if there is an error (e.g. missing parent tables)
+		 * this will be handled below.
+		 */
+		realm_create_rtt_levels(realm, ipa, map_level,
+					RMM_RTT_MAX_LEVEL, memcache);
+	}
+
+	for (size = 0; size < map_size; size += RMM_PAGE_SIZE) {
+		ret = rmi_dev_map(rd, phys, ipa);
+		if (ret == RMI_ERROR_DEV_ADDR) {
+			/*
+			 * It's likely we raced with another VCPU on the same
+			 * fault. Assume the other VCPU has handled the fault
+			 * and return to the guest.
+			 */
+			return 0;
+		}
+		if (RMI_RETURN_STATUS(ret) == RMI_ERROR_RTT) {
+			/* Create missing RTTs and retry */
+			level = RMI_RETURN_INDEX(ret);
+
+			WARN_ON(level == RMM_RTT_MAX_LEVEL);
+
+			ret = realm_create_rtt_levels(realm, ipa, level,
+						      RMM_RTT_MAX_LEVEL,
+						      memcache);
+			if (ret)
+				goto err;
+
+			ret = rmi_dev_map(rd, phys, ipa);
+		}
+
+		if (WARN_ON(ret))
+			goto err;
+
+		phys += RMM_PAGE_SIZE;
+		ipa += RMM_PAGE_SIZE;
+	}
+
+	if (map_size == RMM_L2_BLOCK_SIZE) {
+		ret = fold_rtt(realm, base_ipa, map_level + 1);
+		if (WARN_ON(ret))
+			goto err;
+	}
+
+	return 0;
+
+err:
+	while (size > 0) {
+		phys -= RMM_PAGE_SIZE;
+		size -= RMM_PAGE_SIZE;
+		ipa -= RMM_PAGE_SIZE;
+
+		WARN_ON(rmi_dev_unmap(rd, ipa, &data, &top));
+	}
+	return -ENXIO;
+}
+#endif
+
 int realm_map_protected(struct realm *realm,
 			unsigned long ipa,
 			kvm_pfn_t pfn,
@@ -945,6 +1103,13 @@ int realm_map_protected(struct realm *realm,
 	unsigned long size;
 	int map_level;
 	int ret = 0;
+
+#ifdef CONFIG_HISI_CCADA_HOST
+	/* If pfn is not map memory, it is device */
+	if (!pfn_is_map_memory(pfn))
+		return realm_map_mmio_protected(realm, ipa, pfn, map_size,
+						memcache);
+#endif
 
 	if (WARN_ON(!IS_ALIGNED(map_size, RMM_PAGE_SIZE)))
 		return -EINVAL;

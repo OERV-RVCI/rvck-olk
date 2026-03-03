@@ -624,6 +624,57 @@ static inline int rmi_dev_undelegate(unsigned long bdf)
 
 	return regs.a0;
 }
+
+/**
+ * rmi_dev_map() - Create a dev mmio mapping
+ * @rd: PA of the RD
+ * @ipa: IPA at which the granule will be mapped in the guest
+ * @rtt: Output structure describing the RTTE
+ *
+ * Map a dev mmio IPA to a PA, create a stage 2 mapping.
+ *
+ * Return: RMI return code
+ */
+static inline int rmi_dev_map(unsigned long rd, unsigned long pa,
+			      unsigned long ipa)
+{
+	struct arm_smccc_1_2_regs regs = {
+		SMC_RMI_HISI_EXT, CCADA_DEV_MAP,
+		rd, pa, ipa
+	};
+
+	arm_smccc_1_2_smc(&regs, &regs);
+
+	return regs.a0;
+}
+
+/**
+ * rmi_dev_unmap() - Destroy a dev Granule
+ * @rd: PA of the RD
+ * @ipa: IPA at which the granule is mapped in the guest
+ * @data_out: PA of the granule which was destroyed
+ * @top_out: Top IPA of non-live RTT entries
+ *
+ * Unmap a dev mmio IPA from stage 2.
+ *
+ * Return: RMI return code
+ */
+
+static inline int rmi_dev_unmap(unsigned long rd, unsigned long ipa,
+				unsigned long *data_out, unsigned long *top_out)
+{
+	struct arm_smccc_1_2_regs regs = {
+		SMC_RMI_HISI_EXT, CCADA_DEV_UNMAP,
+		rd, ipa
+	};
+
+	arm_smccc_1_2_smc(&regs, &regs);
+
+	*data_out = regs.a1;
+	*top_out = regs.a2;
+
+	return regs.a0;
+}
 #endif
 
 #endif /* __ASM_RMI_CMDS_H */

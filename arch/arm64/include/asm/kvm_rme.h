@@ -129,6 +129,11 @@ int realm_map_protected(struct realm *realm,
 			kvm_pfn_t pfn,
 			unsigned long size,
 			struct kvm_mmu_memory_cache *memcache);
+#ifdef CONFIG_HISI_CCADA_HOST
+int realm_map_mmio_protected(struct realm *realm, unsigned long ipa,
+			     kvm_pfn_t pfn, unsigned long map_size,
+			     struct kvm_mmu_memory_cache *memcache);
+#endif
 int realm_map_non_secure(struct realm *realm,
 			 unsigned long ipa,
 			 kvm_pfn_t pfn,
