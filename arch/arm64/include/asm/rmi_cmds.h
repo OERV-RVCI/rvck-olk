@@ -604,16 +604,21 @@ static inline int rmi_dev_delegate(unsigned long dev_bdf, unsigned long root_bdf
  * rmi_dev_attach() - Attach the device to realm
  * @dev_bdf: BDF of the pci device assigned to realm
  * @rd: PA of the RD
+ * @smmu_addr: Base address of the smmu device
+ * @s2_vmid: Stage 2 vmid
+ * @lvl_strtab: Strtab level
  *
- * Request the rmm to attach the device to realm.
+ * Request the rmm to attach the device to realm and config ste for the device.
  *
  * Return: RMI return code
  */
-static inline int rmi_dev_attach(unsigned long dev_bdf, unsigned long rd)
+static inline int rmi_dev_attach(unsigned long dev_bdf, unsigned long rd,
+				 unsigned long smmu_addr, unsigned long s2_vmid,
+				 unsigned long lvl_strtab)
 {
 	struct arm_smccc_1_2_regs regs = {
 		SMC_RMI_HISI_EXT, CCADA_DEV_ATTACH,
-		dev_bdf, rd
+		dev_bdf, rd, smmu_addr, s2_vmid, lvl_strtab
 	};
 
 	arm_smccc_1_2_smc(&regs, &regs);

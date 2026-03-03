@@ -72,6 +72,8 @@ void realm_smmu_attach_dev(struct arm_smmu_domain *smmu_domain,
 			   struct arm_smmu_master *master, struct device *dev);
 void realm_smmu_domain_clear(struct arm_smmu_domain *smmu_domain);
 
+int realm_smmu_init_l2_strtab(struct arm_smmu_device *smmu, u32 sid);
+
 static inline void realm_smmu_set_stage(struct arm_smmu_domain *smmu_domain)
 {
 	if (smmu_domain->realm || smmu_domain->pcipc_ns)

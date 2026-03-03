@@ -9,6 +9,9 @@
 #include <asm/kvm_emulate.h>
 #include <asm/hisi_cca_da.h>
 
+#include "../../../../drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.h"
+#include "../../../../drivers/iommu/arm/arm-smmu-v3/arm-r-smmu-v3.h"
+
 #define MAX_REALM_DEV_NUM_ORDER		8
 #define PCI_DEVICE_ID_HUAWEI_ZIP_PF	0xa250
 #define PCI_DEVICE_ID_HUAWEI_SEC_PF	0xa255
@@ -796,7 +799,32 @@ int realm_attach_devs(struct realm *realm)
 	rd = virt_to_phys(realm->rd);
 
 	list_for_each_entry(dev, &realm->rdev_list, list) {
-		ret = rmi_dev_attach(dev->dev_bdf, rd);
+		struct iommu_domain *domain;
+		struct arm_smmu_domain *smmu_domain;
+		struct arm_smmu_s2_cfg *s2_cfg;
+		struct arm_smmu_device *smmu;
+		bool lvl_strtab;
+		u64 smmu_addr;
+
+		domain = iommu_get_domain_for_dev(dev->dev);
+		smmu_domain = to_smmu_domain(domain);
+
+		if (!smmu_domain) {
+			ret = -EINVAL;
+			goto err_detach;
+		}
+
+		smmu = smmu_domain->smmu;
+		smmu_addr = smmu->realm.ioaddr;
+
+		ret = realm_smmu_init_l2_strtab(smmu, dev->dev_bdf);
+		if (ret)
+			goto err_detach;
+
+		s2_cfg = &smmu_domain->s2_cfg;
+		lvl_strtab = !!(smmu->features & ARM_SMMU_FEAT_2_LVL_STRTAB);
+		ret = rmi_dev_attach(dev->dev_bdf, rd, smmu_addr, s2_cfg->vmid,
+				     lvl_strtab);
 		if (ret)
 			goto err_detach;
 	}
