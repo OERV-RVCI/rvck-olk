@@ -759,11 +759,33 @@ struct realm_smmu_queue {
 	int				irq; /* Wired interrupt */
 };
 
+/* High-level stream table and context descriptor structures */
+struct arm_smmu_strtab_l1_desc {
+	u8				span;
+
+	struct arm_smmu_ste		*l2ptr;
+	dma_addr_t			l2ptr_dma;
+};
+
+struct realm_smmu_strtab_cfg {
+	union {
+		struct arm_smmu_ste *linear;
+		__le64 *l1_desc;
+	} strtab;
+	dma_addr_t			strtab_dma;
+	struct arm_smmu_strtab_l1_desc	*l1_desc;
+	unsigned int			num_l1_ents;
+
+	u64				strtab_base;
+	u32				strtab_base_cfg;
+};
+
 /* An SMMUv3 realm instance */
 struct realm_smmu_device {
 	resource_size_t ioaddr;
 	struct realm_smmu_queue	rcmdq;
 	struct realm_smmu_queue	revtq;
+	struct realm_smmu_strtab_cfg strtab_cfg;
 
 	bool				support_msi;
 	bool				forward_cmd;

@@ -840,6 +840,18 @@ struct queue_params {
 	unsigned long q_log2;
 };
 
+struct strtab_params {
+	unsigned long strtab_base;
+	unsigned long strtab_base_cfg;
+};
+
+struct strtab_l2_params {
+	unsigned long strtab_base;
+	unsigned long sid;
+	unsigned long l2_pa;
+	unsigned long span;
+};
+
 static inline int realm_smmu_config(unsigned long config, unsigned long ioaddr,
 				    void *params, unsigned long size)
 {
@@ -885,6 +897,60 @@ static inline int realm_config_queue(enum smmu_config config,
 		.queue_type = queue_type,
 		.q_base = q_base,
 		.q_log2 = q_log2,
+	};
+
+	return realm_smmu_config(config, ioaddr, (void *)&params, sizeof(params));
+}
+
+/**
+ * realm_config_strtab() - Config realm smmu stream table
+ * @config: Config type
+ * @ioaddr: PA of the realm smmu
+ * @strtab_base: PA of realm smmu stream table
+ * @strtab_base_cfg: Stream table's format and size config
+ *
+ * Config realm smmu stream table
+ *
+ * Return: RMI return code
+ */
+static inline int realm_config_strtab(enum smmu_config config,
+				      unsigned long ioaddr,
+				      unsigned long strtab_base,
+				      unsigned long strtab_base_cfg)
+{
+	struct strtab_params params = {
+		.strtab_base = strtab_base,
+		.strtab_base_cfg = strtab_base_cfg,
+	};
+
+	return realm_smmu_config(config, ioaddr, (void *)&params, sizeof(params));
+}
+
+/**
+ * realm_config_strtab_l2() - Config realm smmu level-2 stream table
+ * @config: Config type
+ * @ioaddr: PA of the realm smmu
+ * @strtab_base: PA of realm smmu stream table
+ * @sid: Stream id of device
+ * @l2_pa: PA of realm smmu level-2 stream table
+ * @span: Span of realm smmu level-2 stream table
+ *
+ * Config realm smmu level-2 stream table
+ *
+ * Return: RMI return code
+ */
+static inline int realm_config_strtab_l2(enum smmu_config config,
+					 unsigned long ioaddr,
+					 unsigned long strtab_base,
+					 unsigned long sid,
+					 unsigned long l2_pa,
+					 unsigned long span)
+{
+	struct strtab_l2_params params = {
+		.strtab_base = strtab_base,
+		.sid = sid,
+		.l2_pa = l2_pa,
+		.span = span,
 	};
 
 	return realm_smmu_config(config, ioaddr, (void *)&params, sizeof(params));
