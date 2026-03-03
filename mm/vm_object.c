@@ -194,6 +194,9 @@ void vm_object_split(struct vm_area_struct *old_vma, struct vm_area_struct *new_
 	struct gm_mapping *page;
 	unsigned long transferred_pages = 0;
 
+	if (!old_vma->vm_obj || !new_vma->vm_obj)
+		return;
+
 	XA_STATE(xas, old_vma->vm_obj->logical_page_table,
 		linear_page_index(old_vma, new_vma->vm_start));
 
