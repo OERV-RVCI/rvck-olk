@@ -821,3 +821,257 @@ int kvm_arm_vcpu_rme_dev_validate(struct kvm_vcpu *vcpu,
 
 	return 0;
 }
+
+
+#define MMIO_REG_32_BIT 32
+static u32 rme_mmio_read32(unsigned long addr, struct pci_dev *pdev)
+{
+	unsigned long value;
+	int ret;
+
+	ret = rmi_dev_mmio_read(addr, MMIO_REG_32_BIT, &value, pci_dev_id(pdev));
+	if (ret) {
+		pr_err("rmi_dev_mmio_read error, ret = %d\n", ret);
+		return 0;
+	}
+
+	return value;
+}
+
+static void rme_mmio_write32(unsigned long addr, unsigned long value,
+			     struct pci_dev *pdev)
+{
+	int ret;
+
+	ret = rmi_dev_mmio_write(addr, MMIO_REG_32_BIT, value, pci_dev_id(pdev));
+	if (ret)
+		pr_err("rmi_dev_mmio_write error, ret = %d\n", ret);
+}
+
+static inline u64 get_pci_desc_pbase(struct pci_dev *dev, u16 msi_index)
+{
+	u64 table_pbase, desc_pbase;
+	u32 table_offset;
+	u8 bir;
+
+	/* Get the MSI-X table physical address */
+	pci_read_config_dword(dev, dev->msix_cap + PCI_MSIX_TABLE, &table_offset);
+	bir = (u8)(table_offset & PCI_MSIX_TABLE_BIR);
+	table_offset &= PCI_MSIX_TABLE_OFFSET;
+	table_pbase = pci_resource_start(dev, bir) + table_offset;
+
+	/* Get the MSI-X entry physical address */
+	desc_pbase = table_pbase + msi_index * PCI_MSIX_ENTRY_SIZE;
+
+	return desc_pbase;
+}
+
+bool rme_dev_pci_read_msi_msg(struct msi_desc *desc, struct msi_msg *msg)
+{
+	struct pci_dev *dev = msi_desc_to_pci_dev(desc);
+	u64 pbase;
+
+	if (!is_support_rme() || !is_dev_delegated(dev))
+		return false;
+
+	pbase = get_pci_desc_pbase(dev, desc->msi_index);
+
+	msg->address_lo = rme_mmio_read32(pbase + PCI_MSIX_ENTRY_LOWER_ADDR, dev);
+	msg->address_hi = rme_mmio_read32(pbase + PCI_MSIX_ENTRY_UPPER_ADDR, dev);
+	msg->data = rme_mmio_read32(pbase + PCI_MSIX_ENTRY_DATA, dev);
+
+	return true;
+}
+EXPORT_SYMBOL_GPL(rme_dev_pci_read_msi_msg);
+
+static u64 rme_get_msi_addr(struct msi_desc *desc, struct msi_msg *msg)
+{
+	struct pci_dev *dev = msi_desc_to_pci_dev(desc);
+	u64 addr = (u64)msg->address_lo | ((u64)msg->address_hi << 32);
+
+	if (!addr)
+		return addr;
+
+	return (addr - REALM_MSI_ORIG_IOVA) + rme_get_msi_iova(&dev->dev);
+}
+
+bool rme_dev_pci_write_msg_msi(struct msi_desc *desc, struct msi_msg *msg)
+{
+	struct pci_dev *dev = msi_desc_to_pci_dev(desc);
+	u64 pbase, msi_addr;
+	bool unmasked;
+	u32 ctrl;
+
+	if (!is_support_rme() || !is_dev_delegated(dev))
+		return false;
+
+	msi_addr = rme_get_msi_addr(desc, msg);
+
+	pbase = get_pci_desc_pbase(dev, desc->msi_index);
+
+	ctrl = desc->pci.msix_ctrl;
+	unmasked = !(ctrl & PCI_MSIX_ENTRY_CTRL_MASKBIT);
+
+	rme_mmio_write32(pbase + PCI_MSIX_ENTRY_LOWER_ADDR, lower_32_bits(msi_addr), dev);
+	rme_mmio_write32(pbase + PCI_MSIX_ENTRY_UPPER_ADDR, upper_32_bits(msi_addr), dev);
+	rme_mmio_write32(pbase + PCI_MSIX_ENTRY_DATA, msg->data, dev);
+
+	if (unmasked && desc->pci.msi_attrib.can_mask)
+		rme_mmio_write32(pbase + PCI_MSIX_ENTRY_VECTOR_CTRL, ctrl, dev);
+
+	/* Ensure that the writes are visible in the device */
+	rme_mmio_read32(pbase + PCI_MSIX_ENTRY_DATA, dev);
+
+	return true;
+}
+EXPORT_SYMBOL_GPL(rme_dev_pci_write_msg_msi);
+
+void rme_dev_fix_msi_address(struct msi_desc *desc, struct msi_msg *msg)
+{
+	struct pci_dev *dev = msi_desc_to_pci_dev(desc);
+	u64 msi_addr;
+
+	if (!is_support_rme() || !is_dev_delegated(dev))
+		return;
+
+	msi_addr = rme_get_msi_addr(desc, msg);
+	msg->address_lo = lower_32_bits(msi_addr);
+	msg->address_hi = upper_32_bits(msi_addr);
+}
+EXPORT_SYMBOL_GPL(rme_dev_fix_msi_address);
+
+bool rme_dev_msix_prepare_msi_desc(struct pci_dev *dev, struct msi_desc *desc)
+{
+	u64 pbase;
+
+	if (!is_support_rme() || !is_dev_delegated(dev))
+		return false;
+
+	pbase = get_pci_desc_pbase(dev, desc->msi_index);
+
+	desc->pci.msix_ctrl = rme_mmio_read32(pbase + PCI_MSIX_ENTRY_VECTOR_CTRL, dev);
+
+	return true;
+}
+EXPORT_SYMBOL_GPL(rme_dev_msix_prepare_msi_desc);
+
+bool rme_dev_pci_msix_write_vector_ctrl(struct msi_desc *desc, u32 ctrl)
+{
+	struct pci_dev *dev = msi_desc_to_pci_dev(desc);
+	u64 pbase;
+
+	if (!is_support_rme() || !is_dev_delegated(dev))
+		return false;
+
+	pbase = get_pci_desc_pbase(dev, desc->msi_index);
+
+	if (desc->pci.msi_attrib.can_mask)
+		rme_mmio_write32(pbase + PCI_MSIX_ENTRY_VECTOR_CTRL, ctrl, dev);
+
+	return true;
+}
+EXPORT_SYMBOL_GPL(rme_dev_pci_msix_write_vector_ctrl);
+
+bool rme_dev_pci_msix_mask(struct msi_desc *desc)
+{
+	struct pci_dev *dev = msi_desc_to_pci_dev(desc);
+	u64 pbase;
+
+	if (!is_support_rme() || !is_dev_delegated(dev))
+		return false;
+
+	pbase = get_pci_desc_pbase(dev, desc->msi_index);
+
+	/* Flush write to device */
+	rme_mmio_read32(pbase, dev);
+
+	return true;
+}
+EXPORT_SYMBOL_GPL(rme_dev_pci_msix_mask);
+
+bool rme_dev_msix_mask_all(struct pci_dev *dev, int tsize)
+{
+	u64 pbase;
+	u32 ctrl = PCI_MSIX_ENTRY_CTRL_MASKBIT;
+	u16 rw_ctrl;
+	int i;
+
+	if (!is_support_rme() || !is_dev_delegated(dev))
+		return false;
+
+	pbase = get_pci_desc_pbase(dev, 0);
+
+	if (pci_msi_ignore_mask)
+		goto out;
+
+	for (i = 0; i < tsize; i++, pbase += PCI_MSIX_ENTRY_SIZE)
+		rme_mmio_write32(pbase + PCI_MSIX_ENTRY_VECTOR_CTRL, ctrl, dev);
+
+out:
+	pci_read_config_word(dev, dev->msix_cap + PCI_MSIX_FLAGS, &rw_ctrl);
+	rw_ctrl &= ~PCI_MSIX_FLAGS_MASKALL;
+	rw_ctrl |= 0;
+	pci_write_config_word(dev, dev->msix_cap + PCI_MSIX_FLAGS, rw_ctrl);
+
+	pcibios_free_irq(dev);
+	return true;
+}
+EXPORT_SYMBOL_GPL(rme_dev_msix_mask_all);
+
+/**
+ * rme_mmio_va_to_pa - To convert the virtual address of the mmio space
+ * to a physical address, it is necessary to implement this interface
+ * because the kernel insterface __pa has an error when converting the
+ * physical address of the virtual address of the mmio space
+ * @addr:	MMIO virtual address
+ */
+static u64 rme_mmio_va_to_pa(const void *addr)
+{
+	uint64_t pa, par_el1;
+
+	asm volatile(
+		"AT S1E1W, %0\n"
+		::"r"((uint64_t)(addr))
+	);
+	isb();
+	asm volatile(
+		"mrs %0, par_el1\n"
+		: "=r"(par_el1)
+	);
+
+	pa = ((uint64_t)(addr) & (PAGE_SIZE - 1)) |
+		(par_el1 & ULL(0x000ffffffffff000));
+
+	if (par_el1 & UL(1 << 0))
+		return (uint64_t)(addr);
+	else
+		return pa;
+}
+
+u32 readl_hook(void __iomem *addr, struct pci_dev *pdev)
+{
+	if (is_support_rme() && is_dev_delegated(pdev))
+		return rme_mmio_read32(rme_mmio_va_to_pa(addr), pdev);
+
+	return readl(addr);
+}
+EXPORT_SYMBOL_GPL(readl_hook);
+
+void writel_hook(u32 val, void __iomem *addr, struct pci_dev *pdev)
+{
+	if (is_support_rme() && is_dev_delegated(pdev))
+		rme_mmio_write32(rme_mmio_va_to_pa(addr), val, pdev);
+
+	writel(val, addr);
+}
+EXPORT_SYMBOL_GPL(writel_hook);
+
+void __raw_writel_hook(u32 val, void __iomem *addr,
+		       struct pci_dev *pdev)
+{
+	if (is_support_rme() && is_dev_delegated(pdev))
+		rme_mmio_write32(rme_mmio_va_to_pa(addr), val, pdev);
+
+	__raw_writel(val, addr);
+}
+EXPORT_SYMBOL_GPL(__raw_writel_hook);

@@ -55,4 +55,15 @@ void rme_remove_dev_entry(struct device *dev);
 
 int realm_smmu_init_l2_strtab(struct arm_smmu_device *smmu, u32 sid);
 
+bool rme_dev_pci_read_msi_msg(struct msi_desc *desc, struct msi_msg *msg);
+bool rme_dev_pci_write_msg_msi(struct msi_desc *desc, struct msi_msg *msg);
+void rme_dev_fix_msi_address(struct msi_desc *desc, struct msi_msg *msg);
+bool rme_dev_msix_prepare_msi_desc(struct pci_dev *dev, struct msi_desc *desc);
+bool rme_dev_pci_msix_write_vector_ctrl(struct msi_desc *desc, u32 ctrl);
+bool rme_dev_pci_msix_mask(struct msi_desc *desc);
+bool rme_dev_msix_mask_all(struct pci_dev *dev, int tsize);
+
+u32 readl_hook(void __iomem *addr, struct pci_dev *pdev);
+void writel_hook(u32 val, void __iomem *addr, struct pci_dev *pdev);
+void __raw_writel_hook(u32 val, void __iomem *addr, struct pci_dev *pdev);
 #endif

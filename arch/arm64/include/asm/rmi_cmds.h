@@ -715,6 +715,65 @@ static inline int rmi_dev_unmap(unsigned long rd, unsigned long ipa,
 #define MMIO_REG_READ 0
 #define MMIO_REG_WRITE 1
 
+/**
+ * rmi_dev_mmio_read() - Transfer to rmm to read dev mmio
+ * @reg: The dev mmio register reading from
+ * @bits: Reading size
+ * @value: Value returned from rmm
+ * @dev_bdf: BDF of the pci device
+ *
+ * Transfer to rmm to read value from dev mmio.
+ *
+ * Return: RMI return code
+ */
+static inline int rmi_dev_mmio_read(unsigned long reg, unsigned long bits,
+				    unsigned long *value, unsigned long dev_bdf)
+{
+	struct arm_smccc_1_2_regs regs = {
+		SMC_RMI_HISI_EXT, CCADA_DEV_MMIO_RW,
+		reg,
+		MMIO_REG_READ,
+		0,
+		bits,
+		dev_bdf,
+	};
+
+	arm_smccc_1_2_smc(&regs, &regs);
+
+	if (regs.a0 == 0)
+		*value = regs.a1;
+
+	return regs.a0;
+}
+
+/**
+ * rmi_dev_mmio_write() - Transfer to rmm to write dev mmio
+ * @reg: The dev mmio register writing to
+ * @bits: Writing size
+ * @value: Target writing value
+ * @dev_bdf: BDF of the pci device
+ *
+ * Transfer to rmm to write value to dev mmio.
+ *
+ * Return: RMI return code
+ */
+static inline int rmi_dev_mmio_write(unsigned long reg, unsigned long bits,
+				     unsigned long value, unsigned long dev_bdf)
+{
+	struct arm_smccc_1_2_regs regs = {
+		SMC_RMI_HISI_EXT, CCADA_DEV_MMIO_RW,
+		reg,
+		MMIO_REG_WRITE,
+		value,
+		bits,
+		dev_bdf,
+	};
+
+	arm_smccc_1_2_smc(&regs, &regs);
+
+	return regs.a0;
+}
+
 #define SMMU_R_REG_32_BIT 32
 #define SMMU_R_REG_64_BIT 64
 

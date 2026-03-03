@@ -9,6 +9,12 @@
 #endif
 #endif
 
+#ifdef CONFIG_HISI_CCADA_HOST
+#ifndef __GENKSYMS__
+#include <asm/hisi_cca_da.h>
+#endif
+#endif
+
 #define msix_table_size(flags)	((flags & PCI_MSIX_FLAGS_QSIZE) + 1)
 
 int pci_msi_setup_msi_irqs(struct pci_dev *dev, int nvec, int type);
@@ -47,6 +53,11 @@ static inline void pci_msix_write_vector_ctrl(struct msi_desc *desc, u32 ctrl)
 		return;
 #endif
 
+#ifdef CONFIG_HISI_CCADA_HOST
+	if (rme_dev_pci_msix_write_vector_ctrl(desc, ctrl))
+		return;
+#endif
+
 	if (desc->pci.msi_attrib.can_mask)
 		writel(ctrl, desc_addr + PCI_MSIX_ENTRY_VECTOR_CTRL);
 }
@@ -60,6 +71,12 @@ static inline void pci_msix_mask(struct msi_desc *desc)
 	if (is_virtcca_cvm_enable() && virtcca_pci_msix_mask(desc))
 		return;
 #endif
+
+#ifdef CONFIG_HISI_CCADA_HOST
+	if (rme_dev_pci_msix_mask(desc))
+		return;
+#endif
+
 	/* Flush write to device */
 	readl(desc->pci.mask_base);
 }
