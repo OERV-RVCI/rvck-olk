@@ -280,6 +280,11 @@ static int iommufd_option(struct iommufd_ucmd *ucmd)
 	case IOMMU_OPTION_HUGE_PAGES:
 		rc = iommufd_ioas_option(ucmd);
 		break;
+#ifdef CONFIG_HISI_CCADA_HOST
+	case IOMMU_OPTION_REALM:
+		rc = iommufd_option_realm(cmd, ucmd->ictx);
+		break;
+#endif
 	default:
 		return -EOPNOTSUPP;
 	}

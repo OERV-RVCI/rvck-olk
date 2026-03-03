@@ -3390,8 +3390,13 @@ arm_smmu_domain_alloc_user(struct device *dev, u32 flags,
 			   const struct iommu_user_data *user_data)
 {
 	struct arm_smmu_master *master = dev_iommu_priv_get(dev);
+#ifdef CONFIG_HISI_CCADA_HOST
+	const u32 PAGING_FLAGS = IOMMU_HWPT_ALLOC_DIRTY_TRACKING |
+				 IOMMU_HWPT_ALLOC_NEST_PARENT | IOMMU_HWPT_RME;
+#else
 	const u32 PAGING_FLAGS = IOMMU_HWPT_ALLOC_DIRTY_TRACKING |
 				 IOMMU_HWPT_ALLOC_NEST_PARENT;
+#endif
 	struct arm_smmu_domain *smmu_domain;
 	int ret;
 
@@ -3412,6 +3417,11 @@ arm_smmu_domain_alloc_user(struct device *dev, u32 flags,
 		smmu_domain->stage = ARM_SMMU_DOMAIN_S2;
 		smmu_domain->nest_parent = true;
 	}
+
+#ifdef CONFIG_HISI_CCADA_HOST
+	if (flags & IOMMU_HWPT_RME)
+		smmu_domain->realm = true;
+#endif
 
 	smmu_domain->domain.type = IOMMU_DOMAIN_UNMANAGED;
 	smmu_domain->domain.ops = arm_smmu_ops.default_domain_ops;

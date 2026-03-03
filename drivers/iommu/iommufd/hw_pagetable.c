@@ -139,6 +139,11 @@ iommufd_hwpt_paging_alloc(struct iommufd_ctx *ictx, struct iommufd_ioas *ioas,
 	hwpt_paging->ioas = ioas;
 	hwpt_paging->nest_parent = flags & IOMMU_HWPT_ALLOC_NEST_PARENT;
 
+#ifdef CONFIG_HISI_CCADA_HOST
+	if (ictx->realm)
+		flags |= IOMMU_HWPT_RME;
+#endif
+
 	if (ops->domain_alloc_user) {
 		hwpt->domain = ops->domain_alloc_user(idev->dev, flags, NULL,
 						      user_data);
@@ -164,6 +169,14 @@ iommufd_hwpt_paging_alloc(struct iommufd_ctx *ictx, struct iommufd_ioas *ioas,
 			goto out_abort;
 		}
 	}
+
+#ifdef CONFIG_HISI_CCADA_HOST
+	if (ictx->realm) {
+		rc = iommu_enable_rme(hwpt->domain);
+		if (rc)
+			goto out_abort;
+	}
+#endif
 
 	/*
 	 * Set the coherency mode before we do iopt_table_add_domain() as some

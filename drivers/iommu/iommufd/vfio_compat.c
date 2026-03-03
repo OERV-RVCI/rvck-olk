@@ -283,6 +283,9 @@ static int iommufd_vfio_check_extension(struct iommufd_ctx *ictx,
 	case VFIO_TYPE1_IOMMU:
 	case VFIO_TYPE1v2_IOMMU:
 	case VFIO_UNMAP_ALL:
+#ifdef CONFIG_HISI_CCADA_HOST
+	case VFIO_TYPE1_IOMMU_RME:
+#endif
 		return 1;
 
 	case VFIO_NOIOMMU_IOMMU:
@@ -325,9 +328,15 @@ static int iommufd_vfio_set_iommu(struct iommufd_ctx *ictx, unsigned long type)
 		return 0;
 	}
 
+#ifdef CONFIG_HISI_CCADA_HOST
+	if ((type != VFIO_TYPE1_IOMMU && type != VFIO_TYPE1v2_IOMMU &&
+	     type != VFIO_TYPE1_IOMMU_RME) || no_iommu_mode)
+		return -EINVAL;
+#else
 	if ((type != VFIO_TYPE1_IOMMU && type != VFIO_TYPE1v2_IOMMU) ||
 	    no_iommu_mode)
 		return -EINVAL;
+#endif
 
 	/* VFIO fails the set_iommu if there is no group */
 	ioas = get_compat_ioas(ictx);
@@ -344,6 +353,10 @@ static int iommufd_vfio_set_iommu(struct iommufd_ctx *ictx, unsigned long type)
 	 */
 	if (type == VFIO_TYPE1_IOMMU)
 		rc = iopt_disable_large_pages(&ioas->iopt);
+#ifdef CONFIG_HISI_CCADA_HOST
+	if (type == VFIO_TYPE1_IOMMU_RME)
+		ictx->realm = 1;
+#endif
 	iommufd_put_object(ictx, &ioas->obj);
 	return rc;
 }

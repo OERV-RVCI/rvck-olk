@@ -380,6 +380,29 @@ static int iommufd_ioas_option_huge_pages(struct iommu_option *cmd,
 	return -EOPNOTSUPP;
 }
 
+#ifdef CONFIG_HISI_CCADA_HOST
+int iommufd_option_realm(struct iommu_option *cmd, struct iommufd_ctx *ictx)
+{
+	if (cmd->op == IOMMU_OPTION_OP_GET) {
+		cmd->val64 = !ictx->realm;
+		return 0;
+	}
+	if (cmd->op == IOMMU_OPTION_OP_SET) {
+		if (cmd->val64 == 0) {
+			ictx->realm = 0;
+			return 0;
+		}
+		if (cmd->val64 == 1) {
+			ictx->realm = 1;
+			return 0;
+		}
+		return -EINVAL;
+	}
+	return -EOPNOTSUPP;
+}
+#endif
+
+
 int iommufd_ioas_option(struct iommufd_ucmd *ucmd)
 {
 	struct iommu_option *cmd = ucmd->cmd;
