@@ -788,6 +788,10 @@ struct realm_smmu_device {
 	struct realm_smmu_strtab_cfg strtab_cfg;
 	int rgerr_irq;
 
+	unsigned long *sid_bitmap;
+	unsigned long *vmid_bitmap;
+	rwlock_t fwd_lock;
+
 	bool				support_msi;
 	bool				forward_cmd;
 	bool				enabled;

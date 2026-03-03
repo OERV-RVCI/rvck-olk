@@ -68,6 +68,10 @@ bool arm_smmu_support_rme(struct arm_smmu_device *smmu);
 void arm_r_smmu_device_init(struct arm_smmu_device *smmu, resource_size_t ioaddr);
 void arm_r_smmu_device_remove(struct arm_smmu_device *smmu);
 
+void realm_smmu_attach_dev(struct arm_smmu_domain *smmu_domain,
+			   struct arm_smmu_master *master, struct device *dev);
+void realm_smmu_domain_clear(struct arm_smmu_domain *smmu_domain);
+
 static inline void realm_smmu_set_stage(struct arm_smmu_domain *smmu_domain)
 {
 	if (smmu_domain->realm)

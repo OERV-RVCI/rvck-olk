@@ -4,6 +4,7 @@
  */
 
 #include <linux/pci.h>
+#include <linux/bitops.h>
 #include <asm/rmi_cmds.h>
 #include <asm/hisi_cca_da.h>
 #include <linux/crash_dump.h>
@@ -68,14 +69,98 @@ static int realm_smmu_write_reg_sync(struct arm_smmu_device *smmu, u32 val,
 					    ARM_SMMU_POLL_TIMEOUT_US);
 }
 
+static bool is_realm_dev_attach(struct arm_smmu_domain *smmu_domain)
+{
+	return smmu_domain->realm;
+}
+
+static bool is_realm_dev_detach(struct arm_smmu_domain *smmu_domain,
+				struct arm_smmu_master *master)
+{
+	if (!smmu_domain->realm)
+		return true;
+	else
+		return false;
+}
+
+void realm_smmu_attach_dev(struct arm_smmu_domain *smmu_domain,
+			   struct arm_smmu_master *master, struct device *dev)
+{
+	int i, j;
+	bool attach;
+	struct arm_smmu_device *smmu = master->smmu;
+	struct realm_smmu_device *realm = &smmu->realm;
+
+	if (!arm_smmu_support_rme(smmu))
+		return;
+
+	if (smmu_domain->stage != ARM_SMMU_DOMAIN_S2)
+		return;
+
+	if (is_realm_dev_attach(smmu_domain)) {
+		smmu->realm.forward_cmd = true;
+		attach = true;
+	} else if (is_realm_dev_detach(smmu_domain, master))
+		attach = false;
+	else
+		return;
+
+	write_lock(&realm->fwd_lock);
+	for (i = 0; i < master->num_streams; i++) {
+		u32 sid = master->streams[i].id;
+		/* Bridged PCI devices may end up with duplicated IDs */
+		for (j = 0; j < i; j++)
+			if (master->streams[j].id == sid)
+				break;
+		if (j < i)
+			continue;
+
+		if (attach)
+			bitmap_set(realm->sid_bitmap, sid, 1);
+		else
+			bitmap_clear(realm->sid_bitmap, sid, 1);
+	}
+
+	if (attach)
+		bitmap_set(realm->vmid_bitmap, smmu_domain->s2_cfg.vmid, 1);
+
+	write_unlock(&realm->fwd_lock);
+}
+
+void realm_smmu_domain_clear(struct arm_smmu_domain *smmu_domain)
+{
+	struct arm_smmu_device *smmu = smmu_domain->smmu;
+
+	if (!arm_smmu_support_rme(smmu))
+		return;
+
+	write_lock(&smmu->realm.fwd_lock);
+	bitmap_clear(smmu->realm.vmid_bitmap, smmu_domain->s2_cfg.vmid, 1);
+	write_unlock(&smmu->realm.fwd_lock);
+}
+
 static bool is_realm_sid(struct arm_smmu_device *smmu, u32 sid)
 {
-	return false;
+	struct realm_smmu_device *realm = &smmu->realm;
+	bool ret;
+
+	read_lock(&realm->fwd_lock);
+	ret = bitmap_read(realm->sid_bitmap, sid, 1);
+	read_unlock(&realm->fwd_lock);
+
+	return ret;
 }
 
 static bool is_realm_vmid(struct arm_smmu_device *smmu, u32 vmid)
 {
-	return false;
+	struct realm_smmu_device *realm = &smmu->realm;
+	bool ret;
+
+	read_lock(&realm->fwd_lock);
+	ret = bitmap_read(realm->vmid_bitmap, vmid, 1);
+	read_unlock(&realm->fwd_lock);
+
+	return ret;
 }
 
 static bool realm_smmu_need_forward(struct arm_smmu_device *smmu, u64 cmd0, u64 cm1)
@@ -537,6 +622,18 @@ void arm_r_smmu_device_init(struct arm_smmu_device *smmu, resource_size_t ioaddr
 			return;
 		}
 	}
+
+	realm->sid_bitmap = devm_bitmap_zalloc(smmu->dev, 1 << smmu->sid_bits,
+					       GFP_KERNEL);
+	if (!realm->sid_bitmap)
+		return;
+
+	realm->vmid_bitmap = devm_bitmap_zalloc(smmu->dev, 1 << smmu->vmid_bits,
+						GFP_KERNEL);
+	if (!realm->vmid_bitmap)
+		return;
+
+	rwlock_init(&realm->fwd_lock);
 
 	realm->rcmdq.max_n_shift = smmu->cmdq.q.llq.max_n_shift;
 	/* realm cmdq */

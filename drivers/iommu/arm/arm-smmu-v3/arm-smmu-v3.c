@@ -2639,6 +2639,10 @@ static void arm_smmu_domain_free_paging(struct iommu_domain *domain)
 
 	free_io_pgtable_ops(smmu_domain->pgtbl_ops);
 
+#ifdef CONFIG_HISI_CCADA_HOST
+	realm_smmu_domain_clear(smmu_domain);
+#endif
+
 	/* Free the ASID or VMID */
 	if (smmu_domain->stage == ARM_SMMU_DOMAIN_S1) {
 		/* Prevent SVA from touching the CD while we're freeing it */
@@ -3150,6 +3154,10 @@ static int arm_smmu_attach_dev(struct iommu_domain *domain, struct device *dev)
 		mutex_unlock(&arm_smmu_asid_lock);
 		return ret;
 	}
+
+#ifdef CONFIG_HISI_CCADA_HOST
+	realm_smmu_attach_dev(smmu_domain, master, dev);
+#endif
 
 	switch (smmu_domain->stage) {
 	case ARM_SMMU_DOMAIN_S1: {
