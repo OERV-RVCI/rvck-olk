@@ -542,6 +542,88 @@ static inline int rmi_root_dev_delegate(unsigned long params_addr,
 
 	return regs.a0;
 }
+
+/**
+ * rmi_dev_delegate() - Delegate the assigned dev
+ * @dev_bdf: BDF of the pci device assigned to realm
+ * @root_bdf: BDF of the root dev
+ *
+ * Request the rmm to delegate device mmio range.
+ *
+ * Return: RMI return code
+ */
+static inline int rmi_dev_delegate(unsigned long dev_bdf, unsigned long root_bdf)
+{
+	struct arm_smccc_1_2_regs regs = {
+		SMC_RMI_HISI_EXT, CCADA_DEV_DELEGATE,
+		dev_bdf, root_bdf
+	};
+
+	arm_smccc_1_2_smc(&regs, &regs);
+
+	return regs.a0;
+}
+
+/**
+ * rmi_dev_attach() - Attach the device to realm
+ * @dev_bdf: BDF of the pci device assigned to realm
+ * @rd: PA of the RD
+ *
+ * Request the rmm to attach the device to realm.
+ *
+ * Return: RMI return code
+ */
+static inline int rmi_dev_attach(unsigned long dev_bdf, unsigned long rd)
+{
+	struct arm_smccc_1_2_regs regs = {
+		SMC_RMI_HISI_EXT, CCADA_DEV_ATTACH,
+		dev_bdf, rd
+	};
+
+	arm_smccc_1_2_smc(&regs, &regs);
+
+	return regs.a0;
+}
+
+/**
+ * rmi_dev_detach() - Detach the device from realm
+ * @dev_bdf: BDF of the pci device assigned to realm
+ *
+ * Request the rmm to detach the device from realm.
+ *
+ * Return: RMI return code
+ */
+static inline int rmi_dev_detach(unsigned long dev_bdf)
+{
+	struct arm_smccc_1_2_regs regs = {
+		SMC_RMI_HISI_EXT, CCADA_DEV_DETACH,
+		dev_bdf,
+	};
+
+	arm_smccc_1_2_smc(&regs, &regs);
+
+	return regs.a0;
+}
+
+/**
+ * rmi_dev_undelegate() - Undelegate the device
+ * @dev_bdf: BDF of the pci device assigned to realm
+ *
+ * Request the rmm to undelegate device mmio range.
+ *
+ * Return: RMI return code
+ */
+static inline int rmi_dev_undelegate(unsigned long bdf)
+{
+	struct arm_smccc_1_2_regs regs = {
+		SMC_RMI_HISI_EXT, CCADA_DEV_UNDELEGATE,
+		bdf
+	};
+
+	arm_smccc_1_2_smc(&regs, &regs);
+
+	return regs.a0;
+}
 #endif
 
 #endif /* __ASM_RMI_CMDS_H */

@@ -12,6 +12,17 @@ struct rmi_dev_delegate_params {
 	uint16_t devs[MAX_DEV_PER_PORT]; /* BDF of each attachable device */
 };
 
+struct rdev_node {
+	uint16_t dev_bdf;
+	struct device *dev;
+	struct list_head list;
+};
+
 bool is_support_rme(void);
+
+int realm_attach_devs(struct realm *realm);
+void realm_destroy_dev_list(struct realm *realm);
+int kvm_rme_assign_device(struct pci_dev *pdev, struct kvm *kvm);
+void kvm_rme_unassign_device(struct pci_dev *pdev, struct kvm *kvm);
 
 #endif

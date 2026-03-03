@@ -13,6 +13,9 @@
 #include <asm/kvm_pgtable.h>
 #include <asm/kvm_rme_hisi_cca.h>
 #include <asm/cca_base.h>
+#ifdef CONFIG_HISI_CCADA_HOST
+#include <asm/hisi_cca_da.h>
+#endif
 
 static unsigned long rmm_feat_reg0;
 
@@ -1418,6 +1421,15 @@ static int kvm_create_realm(struct kvm *kvm)
 	free_page((unsigned long)realm->params);
 	realm->params = NULL;
 
+#ifdef CONFIG_HISI_CCADA_HOST
+	ret = realm_attach_devs(realm);
+	if (ret) {
+		kvm_err("Fail to attach devs\n");
+		kvm_destroy_realm(kvm);
+		return ret;
+	}
+#endif
+
 	return 0;
 }
 
@@ -1548,6 +1560,11 @@ void _kvm_destroy_realm(struct kvm *kvm)
 
 	if (!kvm_realm_is_created(kvm))
 		return;
+
+#ifdef CONFIG_HISI_CCADA_HOST
+	/* undelegate and detach dev from realm */
+	realm_destroy_dev_list(realm);
+#endif
 
 	WRITE_ONCE(realm->state, REALM_STATE_DYING);
 
@@ -1841,6 +1858,10 @@ int _kvm_init_realm_vm(struct kvm *kvm)
 
 	if (!kvm->arch.realm.params)
 		return -ENOMEM;
+
+#ifdef CONFIG_HISI_CCADA_HOST
+	INIT_LIST_HEAD(&kvm->arch.realm.rdev_list);
+#endif
 	return 0;
 }
 

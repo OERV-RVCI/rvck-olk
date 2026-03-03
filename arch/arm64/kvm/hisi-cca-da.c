@@ -378,3 +378,172 @@ static void rme_dev_unassign(struct pci_dev *pdev)
 
 	spin_unlock(&g_dev_htable_lock);
 }
+
+static int realm_add_dev_to_list(struct pci_dev *pdev, struct kvm *kvm)
+{
+	struct rdev_node *realm_dev;
+
+	/* Add the dev to list first. Once the RD is created, do rmi_dev_attach */
+	realm_dev = kzalloc(sizeof(*realm_dev), GFP_KERNEL);
+	if (!realm_dev)
+		return -ENOMEM;
+
+	realm_dev->dev_bdf = pci_dev_id(pdev);
+	realm_dev->dev = &pdev->dev;
+	list_add_tail(&realm_dev->list, &kvm->arch.realm.rdev_list);
+
+	return 0;
+}
+
+static void realm_del_dev_from_list(struct pci_dev *pdev, struct kvm *kvm)
+{
+	struct rdev_node *pos, *n;
+	struct realm *realm;
+
+	if (!kvm_is_realm(kvm))
+		return;
+
+	realm = &kvm->arch.realm;
+	list_for_each_entry_safe(pos, n, &realm->rdev_list, list) {
+		if (pos->dev == &pdev->dev) {
+			list_del(&pos->list);
+			kfree(pos);
+			break;
+		}
+	}
+}
+
+static int rme_dev_delegate(struct pci_dev *pdev, struct pci_dev *root_dev)
+{
+	phys_addr_t dev_info_phys;
+	void *dev_info;
+	int ret;
+
+	ret = rmi_dev_delegate(pci_dev_id(pdev), pci_dev_id(root_dev));
+	/* Handle the case that the device is created after the root port is delegated */
+	if (ret == RMI_ERROR_DEV_INFO) {
+		dev_info = (void *)get_zeroed_page(GFP_ATOMIC);
+		if (!dev_info) {
+			pci_err(pdev, "Failed to allocate page for dev\n");
+			return -ENOMEM;
+		}
+
+		dev_info_phys = virt_to_phys(dev_info);
+		if (rmi_granule_delegate(dev_info_phys)) {
+			free_page((unsigned long)dev_info);
+			return -ENXIO;
+		}
+
+		ret = rmi_dev_init(pci_dev_id(pdev), dev_info_phys);
+		if (ret && ret != RMI_ERROR_DEV_EXISTS) {
+			if (WARN_ON(rmi_granule_undelegate(dev_info_phys))) {
+				/* leak the page */
+				return -ENXIO;
+			}
+			free_page((unsigned long)dev_info);
+			return -ENXIO;
+		}
+
+		ret = rmi_dev_delegate(pci_dev_id(pdev), pci_dev_id(root_dev));
+		if (ret)
+			return -ENXIO;
+	} else if (ret) {
+		return -ENXIO;
+	}
+
+	return 0;
+}
+
+int kvm_rme_assign_device(struct pci_dev *pdev, struct kvm *kvm)
+{
+	struct pci_dev *root_dev;
+	int ret;
+
+	if (!is_support_rme() || !pdev || !kvm)
+		return -EINVAL;
+
+	root_dev = rme_get_root_dev(pdev);
+	if (!root_dev) {
+		/* Integrated PCIe device such as PCIe PMU is not supported to assigned to realm */
+		if (kvm_is_realm(kvm))
+			return -EINVAL;
+		else
+			return 0;
+	}
+
+	ret = rme_dev_assign(root_dev, kvm);
+	if (ret) {
+		pci_err(pdev, "Failed to assign dev\n");
+		return ret;
+	}
+
+	if (!kvm_is_realm(kvm))
+		return 0;
+
+	ret = realm_add_dev_to_list(pdev, kvm);
+	if (ret) {
+		pci_err(pdev, "Failed to add dev list\n");
+		rme_dev_unassign(pdev);
+		return ret;
+	}
+
+	ret = rme_dev_delegate(pdev, root_dev);
+	if (ret) {
+		pci_err(pdev, "Failed to delegate dev\n");
+		realm_del_dev_from_list(pdev, kvm);
+		rme_dev_unassign(pdev);
+	}
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(kvm_rme_assign_device);
+
+void kvm_rme_unassign_device(struct pci_dev *pdev, struct kvm *kvm)
+{
+	if (!pdev || !kvm || !is_support_rme())
+		return;
+
+	/* Rme dev undelegate will be processed in _kvm_destroy_realm */
+	if (kvm_is_realm(kvm))
+		rmi_dev_detach(pci_dev_id(pdev));
+
+	rme_dev_unassign(pdev);
+}
+EXPORT_SYMBOL_GPL(kvm_rme_unassign_device);
+
+void realm_destroy_dev_list(struct realm *realm)
+{
+	struct rdev_node *pos, *n;
+
+	list_for_each_entry_safe(pos, n, &realm->rdev_list, list) {
+		WARN_ON(rmi_dev_undelegate(pos->dev_bdf));
+		list_del(&pos->list);
+		kfree(pos);
+	}
+}
+
+/* After RD created, call this to do attach dev */
+int realm_attach_devs(struct realm *realm)
+{
+	struct rdev_node *dev;
+	phys_addr_t rd;
+	int ret;
+
+	if (!realm || !realm->rd)
+		return -EINVAL;
+
+	rd = virt_to_phys(realm->rd);
+
+	list_for_each_entry(dev, &realm->rdev_list, list) {
+		ret = rmi_dev_attach(dev->dev_bdf, rd);
+		if (ret)
+			goto err_detach;
+	}
+
+	return 0;
+
+err_detach:
+	realm_destroy_dev_list(realm);
+
+	return ret;
+}

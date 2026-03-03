@@ -68,6 +68,9 @@ struct realm {
 #ifdef CONFIG_HISI_CCA
 	bool hisi_cca_enable;
 #endif
+#ifdef CONFIG_HISI_CCADA_HOST
+	struct list_head rdev_list;
+#endif
 #endif
 };
 
