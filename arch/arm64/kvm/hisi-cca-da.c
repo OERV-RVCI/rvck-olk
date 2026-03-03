@@ -13,6 +13,7 @@
 #define PCI_DEVICE_ID_HUAWEI_ZIP_PF	0xa250
 #define PCI_DEVICE_ID_HUAWEI_SEC_PF	0xa255
 #define PCI_DEVICE_ID_HUAWEI_HPRE_PF	0xa258
+#define PCI_BDF_MASK			0xffff
 
 struct dev_hash_entry {
 	u16 root_bdf; /* The bdf of the root device: pcie root port, or acc PF */
@@ -27,11 +28,77 @@ static DEFINE_SPINLOCK(g_dev_htable_lock);
 static DEFINE_HASHTABLE(g_realm_dev_htable, MAX_REALM_DEV_NUM_ORDER);
 static DEFINE_SPINLOCK(g_realm_dev_lock);
 
+static DECLARE_BITMAP(g_pcipc_ns, (PCI_BDF_MASK + 1));
+static DEFINE_SPINLOCK(g_pcipc_ns_lock);
+
 bool is_support_rme(void)
 {
 	return static_branch_unlikely(&kvm_rme_is_available);
 }
 EXPORT_SYMBOL_GPL(is_support_rme);
+
+void hisi_pcipc_ns_remove(const struct pci_device_id *id_table)
+{
+	const struct pci_device_id *ent;
+	struct pci_dev *pdev = NULL;
+	uint16_t bdf;
+
+	if (!is_support_rme())
+		return;
+
+	spin_lock(&g_pcipc_ns_lock);
+	for_each_pci_dev(pdev) {
+		ent = pci_match_id(id_table, pdev);
+		if (!ent)
+			continue;
+		bdf = pci_dev_id(pdev);
+		bitmap_clear(g_pcipc_ns, bdf, 1);
+	}
+	spin_unlock(&g_pcipc_ns_lock);
+}
+EXPORT_SYMBOL_GPL(hisi_pcipc_ns_remove);
+
+/*
+ * hisi_pcipc_ns_add should be called before pci_register_driver
+ */
+void hisi_pcipc_ns_add(const struct pci_device_id *id_table)
+{
+	const struct pci_device_id *ent;
+	struct pci_dev *pdev = NULL;
+	uint16_t bdf;
+
+	if (!is_support_rme())
+		return;
+
+	spin_lock(&g_pcipc_ns_lock);
+	for_each_pci_dev(pdev) {
+		ent = pci_match_id(id_table, pdev);
+		if (!ent)
+			continue;
+
+		bdf = pci_dev_id(pdev);
+		bitmap_set(g_pcipc_ns, bdf, 1);
+	}
+	spin_unlock(&g_pcipc_ns_lock);
+}
+EXPORT_SYMBOL_GPL(hisi_pcipc_ns_add);
+
+bool is_hisi_pcipc_ns(struct device *dev)
+{
+	bool is_pcipc_ns = false;
+
+	if (!is_support_rme() || !dev)
+		return false;
+
+	if (dev_is_pci(dev)) {
+		spin_lock(&g_pcipc_ns_lock);
+		is_pcipc_ns = bitmap_read(g_pcipc_ns, pci_dev_id(to_pci_dev(dev)), 1);
+		spin_unlock(&g_pcipc_ns_lock);
+	}
+
+	return is_pcipc_ns;
+}
+EXPORT_SYMBOL_GPL(is_hisi_pcipc_ns);
 
 struct realm *rme_get_realm(u64 vttbr)
 {
@@ -69,21 +136,26 @@ struct realm *rme_get_realm(u64 vttbr)
 }
 
 static void rme_dev_entry_set(struct realm_dev_entry *dev_entry,
-			      struct device *dev, u64 vttbr, bool realm)
+			      struct device *dev, u64 vttbr, bool realm,
+			      u64 ns_vttbr, bool pcipc_ns)
 {
 	dev_entry->dev = dev;
 	dev_entry->vttbr = vttbr;
 	dev_entry->realm = realm;
+	dev_entry->ns_vttbr = ns_vttbr;
+	dev_entry->pcipc_ns = pcipc_ns;
 }
 
-void rme_add_dev_entry(struct device *dev, u64 vttbr, bool realm)
+void rme_add_dev_entry(struct device *dev, u64 vttbr, bool realm, u64 ns_vttbr,
+		       bool pcipc_ns)
 {
 	struct realm_dev_entry *dev_entry;
 
 	spin_lock(&g_realm_dev_lock);
 	hash_for_each_possible(g_realm_dev_htable, dev_entry, node, (u64)dev) {
 		if (dev_entry->dev == dev) {
-			rme_dev_entry_set(dev_entry, dev, vttbr, realm);
+			rme_dev_entry_set(dev_entry, dev, vttbr, realm, ns_vttbr,
+					  pcipc_ns);
 			spin_unlock(&g_realm_dev_lock);
 			return;
 		}
@@ -94,10 +166,11 @@ void rme_add_dev_entry(struct device *dev, u64 vttbr, bool realm)
 		pr_err("Alloc realm_dev_entry failed\n");
 		return;
 	}
-	rme_dev_entry_set(dev_entry, dev, vttbr, realm);
+	rme_dev_entry_set(dev_entry, dev, vttbr, realm, ns_vttbr, pcipc_ns);
 	hash_add(g_realm_dev_htable, &dev_entry->node, (u64)dev);
 	spin_unlock(&g_realm_dev_lock);
 }
+EXPORT_SYMBOL_GPL(rme_add_dev_entry);
 
 void rme_update_msi_iova(u64 vttbr, u64 msi_iova)
 {
@@ -133,10 +206,25 @@ u64 rme_get_msi_iova(struct device *dev)
 	return rme_get_dev_entry(dev).msi_iova;
 }
 
+u64 rme_get_ns_vttbr(struct device *dev)
+{
+	return rme_get_dev_entry(dev).ns_vttbr;
+}
+EXPORT_SYMBOL_GPL(rme_get_ns_vttbr);
+
 bool rme_is_realm_dev(struct device *dev)
 {
 	return rme_get_dev_entry(dev).realm;
 }
+EXPORT_SYMBOL_GPL(rme_is_realm_dev);
+
+bool rme_is_pcipc_ns_dev(struct device *dev)
+{
+	struct realm_dev_entry dev_entry = rme_get_dev_entry(dev);
+
+	return !dev_entry.realm && dev_entry.pcipc_ns;
+}
+EXPORT_SYMBOL_GPL(rme_is_pcipc_ns_dev);
 
 void rme_remove_dev_entry(struct device *dev)
 {
@@ -153,6 +241,54 @@ void rme_remove_dev_entry(struct device *dev)
 	}
 	spin_unlock(&g_realm_dev_lock);
 }
+EXPORT_SYMBOL_GPL(rme_remove_dev_entry);
+
+int realm_smmu_init_l2_strtab(struct arm_smmu_device *smmu, u32 sid)
+{
+	int ret;
+	size_t size;
+	struct arm_smmu_ste *l2ptr;
+	struct realm_smmu_strtab_cfg *cfg = &smmu->realm.strtab_cfg;
+	struct arm_smmu_strtab_l1_desc *desc = &cfg->l1_desc[sid >> STRTAB_SPLIT];
+
+	if (desc->l2ptr)
+		return 0;
+
+	size = (1 << STRTAB_SPLIT) * sizeof(struct arm_smmu_ste);
+	desc->span = STRTAB_SPLIT + 1;
+
+	l2ptr = dma_alloc_coherent(smmu->dev, size, &desc->l2ptr_dma, GFP_KERNEL);
+	if (!l2ptr)
+		return -ENOMEM;
+
+	ret = granule_delegate_range(desc->l2ptr_dma, size);
+	if (ret) {
+		dev_err(smmu->dev,
+			"failed to delegate realm l2 stream table for SID %u\n",
+			sid);
+		goto out_free;
+	}
+
+	ret = realm_config_strtab_l2(SMMU_STRTAB_L2_INIT, smmu->realm.ioaddr,
+				     cfg->strtab_dma, sid, desc->l2ptr_dma,
+				     desc->span);
+	if (ret) {
+		dev_err(smmu->dev,
+			"failed to init realm l2 stream table for SID %u\n",
+			sid);
+		goto out_undelegate;
+	}
+	desc->l2ptr = l2ptr;
+	return 0;
+
+out_undelegate:
+	if (WARN_ON(granule_undelegate_range(desc->l2ptr_dma, size)))
+		return ret;
+out_free:
+	dma_free_coherent(smmu->dev, size, l2ptr, desc->l2ptr_dma);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(realm_smmu_init_l2_strtab);
 
 /**
  * get_child_devices_rec - Traverse pcie topology to find child devices

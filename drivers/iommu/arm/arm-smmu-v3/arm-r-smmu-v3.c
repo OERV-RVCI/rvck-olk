@@ -70,15 +70,57 @@ static int realm_smmu_write_reg_sync(struct arm_smmu_device *smmu, u32 val,
 					    ARM_SMMU_POLL_TIMEOUT_US);
 }
 
+void realm_smmu_write_ste(struct arm_smmu_master *master, u32 sid,
+			  const struct arm_smmu_ste *target)
+{
+	u64 ns_vttbr;
+	bool lvl_strtab;
+	struct arm_smmu_ste *rste;
+	struct arm_smmu_device *smmu = master->smmu;
+
+	if (!arm_smmu_support_rme(smmu))
+		return;
+
+	if (!rme_is_pcipc_ns_dev(master->dev))
+		return;
+
+	lvl_strtab = !!(smmu->features & ARM_SMMU_FEAT_2_LVL_STRTAB);
+	if (lvl_strtab) {
+		if (realm_smmu_init_l2_strtab(smmu, sid))
+			return;
+	}
+
+	rste = (struct arm_smmu_ste *)get_zeroed_page(GFP_KERNEL);
+	if (!rste) {
+		dev_err(smmu->dev, "failed to allocate realm ste page\n");
+		return;
+	}
+
+	memcpy(rste, target, sizeof(struct arm_smmu_ste));
+
+	if (rste->data[3] & STRTAB_STE_3_S2TTB_MASK) {
+		ns_vttbr = rme_get_ns_vttbr(master->dev);
+		rste->data[3] =  ns_vttbr & STRTAB_STE_3_S2TTB_MASK;
+	}
+
+	if (rmi_smmu_ste_write(smmu->realm.ioaddr, sid, virt_to_phys(rste),
+			       lvl_strtab))
+		dev_err(smmu->dev, "failed to write realm ste\n");
+
+	free_page((unsigned long)rste);
+}
+
 static bool is_realm_dev_attach(struct arm_smmu_domain *smmu_domain)
 {
-	return smmu_domain->realm;
+	return smmu_domain->realm || smmu_domain->pcipc_ns;
 }
 
 static bool is_realm_dev_detach(struct arm_smmu_domain *smmu_domain,
 				struct arm_smmu_master *master)
 {
 	if (!smmu_domain->realm && rme_is_realm_dev(master->dev))
+		return true;
+	else if (!smmu_domain->pcipc_ns && rme_is_pcipc_ns_dev(master->dev))
 		return true;
 	else
 		return false;
@@ -89,7 +131,7 @@ void realm_smmu_attach_dev(struct arm_smmu_domain *smmu_domain,
 {
 	int i, j;
 	bool attach;
-	u64 vttbr;
+	u64 vttbr, ns_vttbr;
 	struct arm_smmu_device *smmu = master->smmu;
 	struct realm_smmu_device *realm = &smmu->realm;
 	const struct io_pgtable_cfg *pgtbl_cfg =
@@ -109,10 +151,12 @@ void realm_smmu_attach_dev(struct arm_smmu_domain *smmu_domain,
 	else
 		return;
 
-	vttbr = pgtbl_cfg->arm_lpae_s2_cfg.vttbr;
+	vttbr = pgtbl_cfg->realm_s2_cfg.vttbr;
+	ns_vttbr = pgtbl_cfg->realm_s2_cfg.ns_vttbr;
 
 	if (attach)
-		rme_add_dev_entry(dev, vttbr, smmu_domain->realm);
+		rme_add_dev_entry(dev, vttbr, smmu_domain->realm, ns_vttbr,
+				  smmu_domain->pcipc_ns);
 	else
 		rme_remove_dev_entry(dev);
 

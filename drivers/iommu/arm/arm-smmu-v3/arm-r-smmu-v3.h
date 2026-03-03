@@ -74,7 +74,7 @@ void realm_smmu_domain_clear(struct arm_smmu_domain *smmu_domain);
 
 static inline void realm_smmu_set_stage(struct arm_smmu_domain *smmu_domain)
 {
-	if (smmu_domain->realm)
+	if (smmu_domain->realm || smmu_domain->pcipc_ns)
 		smmu_domain->stage = ARM_SMMU_DOMAIN_S2;
 }
 

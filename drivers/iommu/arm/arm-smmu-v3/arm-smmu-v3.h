@@ -951,6 +951,7 @@ struct arm_smmu_domain {
 #endif
 #ifdef CONFIG_HISI_CCADA_HOST
 	bool				realm;
+	bool				pcipc_ns;
 #endif
 };
 

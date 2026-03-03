@@ -1008,6 +1008,143 @@ static inline int rmi_smmu_send_cmdlist(unsigned long ioaddr,
 	return regs.a0;
 }
 
+/**
+ * rmi_smmu_map() - Create non-secure mapping from iova to pa for the realm smmu
+ * @pgd: Realm page table dentry
+ * @iova: Start iova
+ * @pa: Start pa
+ * @prot: Prot of the PTE(page table entry)
+ * @page_attr: Size and page count of mappings
+ * @map_cnt: Number of successful mappings
+ *
+ * Create multiple non-secure mapping from iova to pa in the realm smmu stage-2
+ * page table
+ *
+ * Return: RMI return code
+ */
+static inline int rmi_smmu_map(unsigned long pgd, unsigned long iova,
+			       unsigned long pa, unsigned long prot,
+			       unsigned long page_attr, unsigned long *map_cnt)
+{
+	struct arm_smccc_1_2_regs regs = {
+		SMC_RMI_HISI_EXT, CCADA_SMMU_MAP,
+		pgd, iova, pa, prot, page_attr
+	};
+
+	arm_smccc_1_2_smc(&regs, &regs);
+
+	*map_cnt = regs.a1;
+
+	return regs.a0;
+}
+
+/**
+ * rmi_smmu_page_table_create() - Create realm page-table for given iova and level
+ * @pgd: Realm page table dentry
+ * @iova: Given iova
+ * @tbl_entry: Relam page table entry's PA and attribute
+ * @tbl_size: Relam page table size
+ * @lvl: Create page table at given level
+ *
+ * Create realm page-table for given iova and level
+ *
+ * Return: RMI return code
+ */
+static inline int rmi_smmu_page_table_create(unsigned long pgd,
+					     unsigned long iova,
+					     unsigned long tbl_entry,
+					     unsigned long tbl_size,
+					     unsigned long lvl)
+{
+	struct arm_smccc_1_2_regs regs = {
+		SMC_RMI_HISI_EXT, CCADA_SMMU_PAGE_TABLE_CREATE,
+		pgd, iova, tbl_entry, tbl_size, lvl
+	};
+
+	arm_smccc_1_2_smc(&regs, &regs);
+
+	return regs.a0;
+}
+
+/**
+ * rmi_smmu_page_table_destroy() - Destroy realm page-table for given iova and level
+ * @pgd: Realm page table dentry
+ * @iova: Given iova
+ * @tbl_pa: PA of realm page table
+ * @tbl_size: Relam page table size
+ * @lvl: Create page table at given level
+ *
+ * Destroy realm page-table for given iova and level
+ *
+ * Return: RMI return code
+ */
+static inline int rmi_smmu_page_table_destroy(unsigned long pgd,
+					      unsigned long iova,
+					      unsigned long tbl_pa,
+					      unsigned long tbl_size,
+					      unsigned long lvl)
+{
+	struct arm_smccc_1_2_regs regs = {
+		SMC_RMI_HISI_EXT, CCADA_SMMU_PAGE_TABLE_DESTROY,
+		pgd, iova, tbl_pa, tbl_size, lvl
+	};
+
+	arm_smccc_1_2_smc(&regs, &regs);
+
+	return regs.a0;
+}
+
+/**
+ * rmi_smmu_read_pte() - Read realm PTE
+ * @pgd: Realm page table dentry
+ * @iova: Given iova
+ * @lvl: Level of PTE
+ * @pte: Value of PTE
+ *
+ * Read realm PTE(Page table entry) for given iova and level
+ *
+ * Return: RMI return code
+ */
+static inline int rmi_smmu_read_pte(unsigned long pgd, unsigned long iova,
+				    unsigned long lvl, unsigned long *pte)
+{
+	struct arm_smccc_1_2_regs regs = {
+		SMC_RMI_HISI_EXT, CCADA_SMMU_READ_PTE,
+		pgd, iova, lvl
+	};
+
+	arm_smccc_1_2_smc(&regs, &regs);
+
+	*pte = regs.a1;
+	return regs.a0;
+}
+
+/**
+ * rmi_smmu_ste_write() - Write realm smmu stream table entry
+ * @smmu_addr: PA of the realm smmu
+ * @sid: Steam id
+ * @ste_pa: PA of stream table entry
+ * @lvl_strtab: Level of stream table
+ *
+ * Write realm smmu stream table entry
+ *
+ * Return: RMI return code
+ */
+static inline int rmi_smmu_ste_write(unsigned long smmu_addr,
+				     unsigned long sid,
+				     unsigned long ste_pa,
+				     unsigned long lvl_strtab)
+{
+	struct arm_smccc_1_2_regs regs = {
+		SMC_RMI_HISI_EXT, CCADA_SMMU_STE_WRITE,
+		smmu_addr, sid, ste_pa, lvl_strtab
+	};
+
+	arm_smccc_1_2_smc(&regs, &regs);
+
+	return regs.a0;
+}
+
 #endif
 
 #endif /* __ASM_RMI_CMDS_H */

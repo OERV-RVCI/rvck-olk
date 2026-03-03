@@ -39,6 +39,7 @@
 
 #ifdef CONFIG_HISI_CCADA_HOST
 #include "arm-r-smmu-v3.h"
+#include <asm/hisi_cca_da.h>
 #endif
 
 static bool disable_msipolling;
@@ -2623,6 +2624,12 @@ static struct iommu_domain *arm_smmu_domain_alloc_paging(struct device *dev)
 		struct arm_smmu_master *master = dev_iommu_priv_get(dev);
 		int ret;
 
+#ifdef CONFIG_HISI_CCADA_HOST
+		if (dev_is_pci(dev) && is_hisi_pcipc_ns(dev) &&
+		    arm_smmu_support_rme(master->smmu))
+			smmu_domain->pcipc_ns = true;
+#endif
+
 		ret = arm_smmu_domain_finalise(smmu_domain, master->smmu, 0);
 		if (ret) {
 			kfree(smmu_domain);
@@ -2754,6 +2761,8 @@ static int arm_smmu_domain_finalise(struct arm_smmu_domain *smmu_domain,
 #ifdef CONFIG_HISI_CCADA_HOST
 	if (smmu_domain->realm)
 		fmt = CCA_REALM_S2;
+	else if (smmu_domain->pcipc_ns)
+		fmt = CCA_REALM_NS_S2;
 #endif
 
 	if (smmu->features & ARM_SMMU_FEAT_HD)

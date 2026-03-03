@@ -21,6 +21,7 @@ enum io_pgtable_fmt {
 	APPLE_DART2,
 #ifdef CONFIG_HISI_CCADA_HOST
 	CCA_REALM_S2,
+	CCA_REALM_NS_S2,
 #endif
 	IO_PGTABLE_NUM_FMTS,
 };
@@ -168,6 +169,22 @@ struct io_pgtable_cfg {
 				u32	tsz:6;
 			}	vtcr;
 		} arm_lpae_s2_cfg;
+
+#ifdef CONFIG_HISI_CCADA_HOST
+		struct {
+			u64	vttbr;
+			struct {
+				u32	ps:3;
+				u32	tg:2;
+				u32	sh:2;
+				u32	orgn:2;
+				u32	irgn:2;
+				u32	sl:2;
+				u32	tsz:6;
+			}	vtcr;
+			u64	ns_vttbr;
+		} realm_s2_cfg;
+#endif
 
 		struct {
 			u32	ttbr;
@@ -327,6 +344,7 @@ extern struct io_pgtable_init_fns io_pgtable_amd_iommu_v2_init_fns;
 extern struct io_pgtable_init_fns io_pgtable_apple_dart_init_fns;
 #ifdef CONFIG_HISI_CCADA_HOST
 extern struct io_pgtable_init_fns io_pgtable_realm_s2_init_fns;
+extern struct io_pgtable_init_fns io_pgtable_realm_ns_s2_init_fns;
 #endif
 
 #endif /* __IO_PGTABLE_H */

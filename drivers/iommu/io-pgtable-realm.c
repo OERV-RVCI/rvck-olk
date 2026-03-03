@@ -449,6 +449,134 @@ static size_t realm_host_unmap(struct realm_io_pgtable *data,
 	return realm_host_unmap(data, gather, iova, size, pgcount, lvl + 1, ptep);
 }
 
+static void *__realm_alloc_pages(size_t size, gfp_t gfp,
+				 struct io_pgtable_cfg *cfg)
+{
+	struct device *dev = cfg->iommu_dev;
+	int order = get_order(size);
+	struct page *p;
+	void *pages;
+
+	p = alloc_pages_node(dev_to_node(dev), gfp | __GFP_ZERO, order);
+	if (unlikely(!p))
+		return NULL;
+
+	pages = page_address(p);
+	if (granule_delegate_range(virt_to_phys(pages), size)) {
+		free_pages((unsigned long)pages, order);
+		return NULL;
+	}
+
+	return pages;
+}
+
+static void __realm_free_pages(void *pages, size_t size,
+			       struct io_pgtable_cfg *cfg)
+{
+	/* If the undelegate fails then leak the pages */
+	if (WARN_ON(granule_undelegate_range(virt_to_phys(pages), size)))
+		return;
+
+	free_pages((unsigned long)pages, get_order(size));
+}
+
+static int realm_ns_map(struct realm_io_pgtable *data, unsigned long iova,
+			phys_addr_t paddr, size_t size, size_t pgcount,
+			realm_iopte prot, int lvl, realm_iopte *pgd,
+			gfp_t gfp, size_t *mapped)
+{
+	int ret = 0;
+	realm_iopte *cptep;
+	phys_addr_t phys, tbl_entry;
+	size_t page_attr, block_size;
+	size_t tblsz = REALM_GRANULE(data);
+	unsigned long pgdp = virt_to_phys(pgd), map_cnt;
+
+	if (size > SZ_1G || pgcount > U32_MAX)
+		return -EINVAL;
+
+	page_attr = size | (pgcount << 32);
+
+	lvl = rmi_smmu_map(pgdp, iova, paddr, prot, page_attr, &map_cnt);
+	if (lvl == REALM_MAX_LEVELS)
+		*mapped += map_cnt * size;
+	if (lvl < 0)
+		return -EINVAL;
+
+	for (; lvl < REALM_MAX_LEVELS; lvl++) {
+		block_size = REALM_BLOCK_SIZE(lvl, data);
+
+		/* If we can install a leaf entry at this level, then do so */
+		if (size == block_size) {
+			lvl = rmi_smmu_map(pgdp, iova, paddr, prot, page_attr, &map_cnt);
+			if (lvl == REALM_MAX_LEVELS)
+				*mapped += map_cnt * size;
+			break;
+		}
+
+		/* We can't allocate tables at the final level */
+		if (WARN_ON(lvl >= REALM_MAX_LEVELS - 1))
+			return -EINVAL;
+
+		cptep = (realm_iopte *)__realm_alloc_pages(tblsz, GFP_KERNEL,
+							   &data->iop.cfg);
+		if (!cptep)
+			return -ENOMEM;
+
+		phys = virt_to_phys(cptep);
+		tbl_entry = phys | REALM_PTE_TYPE_TABLE;
+		ret = rmi_smmu_page_table_create(pgdp, iova, tbl_entry, tblsz,
+						 lvl);
+		if (ret) {
+			__realm_free_pages(cptep, tblsz, &data->iop.cfg);
+			break;
+		}
+	}
+
+	return ret;
+}
+
+static void realm_ns_free_pgtable(struct realm_io_pgtable *data, int lvl,
+				  void *va, unsigned long iova)
+{
+	unsigned long i, entry_num, pte, table_size, next, pa;
+
+	if (lvl == data->start_level)
+		table_size = REALM_PGD_SIZE(data);
+	else
+		table_size = REALM_GRANULE(data);
+
+	entry_num = table_size / sizeof(realm_iopte);
+	for (i = 0; i < entry_num; i++) {
+		next = iova + (i << REALM_LVL_SHIFT(lvl, data));
+		rmi_smmu_read_pte(virt_to_phys(data->ns_pgd), next, lvl, &pte);
+		if (!pte || iopte_leaf(pte, lvl, data->iop.fmt))
+			continue;
+
+		pa = pte & REALM_PTE_ADDR_MASK;
+		realm_ns_free_pgtable(data, lvl + 1, __va(pa), next);
+	}
+	(void)rmi_smmu_page_table_destroy(virt_to_phys(data->ns_pgd), iova,
+					  virt_to_phys(va), table_size, lvl);
+	__realm_free_pages(va, table_size, &data->iop.cfg);
+}
+
+static size_t realm_ns_unmap(struct realm_io_pgtable *data,
+			     struct iommu_iotlb_gather *gather,
+			     unsigned long iova, size_t size, size_t pgcount,
+			     int lvl, realm_iopte *pgd)
+{
+	unsigned long map_cnt;
+
+	if (size > SZ_1G || pgcount > U32_MAX)
+		return -EINVAL;
+
+	(void)rmi_smmu_map(virt_to_phys(pgd), iova, 0, 0, size | (pgcount << 32),
+			   &map_cnt);
+
+	return map_cnt * size;
+}
+
 static realm_iopte realm_prot_to_pte(struct realm_io_pgtable *data, int prot)
 {
 	realm_iopte pte;
@@ -499,15 +627,28 @@ static int realm_map_pages(struct io_pgtable_ops *ops, unsigned long iova,
 
 	prot = realm_prot_to_pte(data, iommu_prot);
 
-	ret = realm_mmio_map(data, iova, paddr, pgsize, pgcount, prot, lvl,
-			     (realm_iopte *)data->pgd, gfp);
-	if (ret)
-		return ret;
-
 	ret = realm_host_map(data, iova, paddr, pgsize, pgcount, prot,
 				lvl, (realm_iopte *)data->pgd, gfp, mapped);
 	if (ret)
 		return ret;
+
+	if (!data->ns) {
+		ret = realm_mmio_map(data, iova, paddr, pgsize, pgcount, prot, lvl,
+				(realm_iopte *)data->pgd, gfp);
+		if (ret)
+			return ret;
+	} else {
+		size_t r_mapped = 0;
+
+		ret = realm_ns_map(data, iova, paddr, pgsize, pgcount,
+				   prot | REALM_PTE_NS, lvl,
+				   (realm_iopte *)data->ns_pgd, gfp, &r_mapped);
+		if (ret)
+			return ret;
+
+		if (r_mapped != *mapped)
+			return -EPERM;
+	}
 
 	/*
 	 * Synchronise all PTE updates for the new mapping before there's
@@ -603,7 +744,7 @@ static size_t realm_unmap_pages(struct io_pgtable_ops *ops, unsigned long iova,
 	struct io_pgtable_cfg *cfg = &data->iop.cfg;
 	long iaext = (s64)iova >> cfg->ias;
 	int sl = data->start_level;
-	size_t unmap_size;
+	size_t unmapped, r_unmapped;
 	int ret;
 
 	if (WARN_ON(!pgsize || (pgsize & cfg->pgsize_bitmap) != pgsize || !pgcount))
@@ -612,14 +753,22 @@ static size_t realm_unmap_pages(struct io_pgtable_ops *ops, unsigned long iova,
 	if (WARN_ON(iaext))
 		return 0;
 
-	ret = realm_mmio_unmap(ops, data, gather, iova, pgsize, pgcount, sl,
-			      (realm_iopte *)data->pgd);
-	if (ret)
-		return 0;
-
-	unmap_size = realm_host_unmap(data, gather, iova, pgsize, pgcount, sl,
+	unmapped = realm_host_unmap(data, gather, iova, pgsize, pgcount, sl,
 				      (realm_iopte *)data->pgd);
-	return unmap_size;
+
+	if (!data->ns) {
+		ret = realm_mmio_unmap(ops, data, gather, iova, pgsize, pgcount, sl,
+				(realm_iopte *)data->pgd);
+		if (ret)
+			return 0;
+	} else {
+		r_unmapped = realm_ns_unmap(data, gather, iova, pgsize, pgcount,
+					    sl, (realm_iopte *)data->ns_pgd);
+		if (unmapped != r_unmapped)
+			return 0;
+	}
+
+	return unmapped;
 }
 
 static struct realm_io_pgtable *realm_alloc_pgtable(struct io_pgtable_cfg *cfg,
@@ -724,6 +873,19 @@ static struct io_pgtable *__realm_alloc_pgtable_s2(struct io_pgtable_cfg *cfg,
 	vtcr->tsz = 64ULL - cfg->ias;
 	vtcr->sl = ~sl & REALM_VTCR_SL0_MASK;
 
+	if (data->ns) {
+		data->ns_pgd = __realm_alloc_pages(REALM_PGD_SIZE(data), GFP_KERNEL, cfg);
+		if (!data->ns_pgd)
+			goto out_free_data;
+
+		if (rmi_smmu_page_table_create(virt_to_phys(data->ns_pgd), 0,
+					       virt_to_phys(data->ns_pgd),
+					       REALM_PGD_SIZE(data), 0)) {
+			goto out_free_realm_page;
+		}
+		cfg->realm_s2_cfg.ns_vttbr = virt_to_phys(data->ns_pgd);
+	}
+
 	/* Ensure the empty pgd is visible before any actual TTBR write */
 	wmb();
 
@@ -736,6 +898,8 @@ static struct io_pgtable *__realm_alloc_pgtable_s2(struct io_pgtable_cfg *cfg,
 	cfg->arm_lpae_s2_cfg.vttbr = virt_to_phys(data->pgd);
 	return &data->iop;
 
+out_free_realm_page:
+	__realm_free_pages(data->ns_pgd, REALM_PGD_SIZE(data), cfg);
 out_free_data:
 	kfree(data);
 	return NULL;
@@ -744,6 +908,9 @@ out_free_data:
 static void realm_free_pgtable(struct io_pgtable *iop)
 {
 	struct realm_io_pgtable *data = io_pgtable_to_data(iop);
+
+	if (data->ns)
+		realm_ns_free_pgtable(data, data->start_level, data->ns_pgd, 0UL);
 
 	realm_host_free_pgtable(data, data->start_level, data->pgd);
 
@@ -756,7 +923,18 @@ realm_alloc_pgtable_s2(struct io_pgtable_cfg *cfg, void *cookie)
 	return __realm_alloc_pgtable_s2(cfg, cookie, false);
 }
 
+static struct io_pgtable *
+realm_ns_alloc_pgtable_s2(struct io_pgtable_cfg *cfg, void *cookie)
+{
+	return __realm_alloc_pgtable_s2(cfg, cookie, true);
+}
+
 struct io_pgtable_init_fns io_pgtable_realm_s2_init_fns = {
 	.alloc	= realm_alloc_pgtable_s2,
+	.free	= realm_free_pgtable,
+};
+
+struct io_pgtable_init_fns io_pgtable_realm_ns_s2_init_fns = {
+	.alloc	= realm_ns_alloc_pgtable_s2,
 	.free	= realm_free_pgtable,
 };

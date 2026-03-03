@@ -34,6 +34,7 @@ io_pgtable_init_table[IO_PGTABLE_NUM_FMTS] = {
 #endif
 #ifdef CONFIG_HISI_CCADA_HOST
 	[CCA_REALM_S2] = &io_pgtable_realm_s2_init_fns,
+	[CCA_REALM_NS_S2] = &io_pgtable_realm_ns_s2_init_fns,
 #endif
 };
 
