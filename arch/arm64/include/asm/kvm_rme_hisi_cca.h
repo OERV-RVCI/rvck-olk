@@ -77,6 +77,29 @@ static inline int rmi_cca_hisi_data_destroy(unsigned long rd, unsigned long ipa,
 	return regs.a0;
 }
 
+static inline int rmi_cca_hisi_data_destroy_level(unsigned long rd,
+						  unsigned long ipa,
+						  unsigned long *data_out,
+						  unsigned long *top_out,
+						  unsigned long *level)
+{
+	struct arm_smccc_1_2_regs regs = {
+		SMC_RMI_HISI_EXT, CCA_HISI_DATA_DESTROY,
+		rd, ipa
+	};
+
+	arm_smccc_1_2_smc(&regs, &regs);
+
+	if (data_out)
+		*data_out = regs.a1;
+	if (top_out)
+		*top_out = regs.a2;
+	if (level)
+		*level = regs.a3;
+
+	return regs.a0;
+}
+
 int realm_hisi_cca_populate_region(struct kvm *kvm, phys_addr_t ipa_base,
 				   phys_addr_t ipa_end, phys_addr_t *ipa_top,
 				   u32 flags);

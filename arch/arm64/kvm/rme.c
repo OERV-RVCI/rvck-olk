@@ -26,6 +26,7 @@ static unsigned long rmm_feat_reg0;
 #define RMM_RTT_LEVEL_SHIFT(l)	\
 	((RMM_PAGE_SHIFT - 3) * (4 - (l)) + 3)
 #define RMM_L2_BLOCK_SIZE	BIT(RMM_RTT_LEVEL_SHIFT(2))
+#define RMM_L1_BLOCK_SIZE	BIT(RMM_RTT_LEVEL_SHIFT(1))
 
 static inline unsigned long rme_rtt_level_mapsize(int level)
 {
@@ -335,6 +336,41 @@ static int realm_unmap_private_page(struct realm *realm,
 
 	return 0;
 }
+
+#ifdef CONFIG_HISI_CCA
+static int hisi_cca_realm_unmap_private(struct realm *realm,
+					unsigned long ipa,
+					unsigned long *next_addr)
+{
+	phys_addr_t rd = virt_to_phys(realm->rd);
+	int ret;
+	struct rtt_entry rtt;
+	unsigned long rtt_addr = 0;
+	unsigned long map_level;
+
+	ret = rmi_rtt_read_entry(rd, ipa, RMM_RTT_MAX_LEVEL, &rtt);
+	if (WARN_ON(ret))
+		return -ENXIO;
+
+	if (rtt.walk_level == RMM_RTT_MAX_LEVEL)
+		return realm_unmap_private_page(realm, ipa, next_addr);
+
+	ret = rmi_cca_hisi_data_destroy_level(rd, ipa, &rtt_addr, next_addr, &map_level);
+	if (RMI_RETURN_STATUS(ret) == RMI_ERROR_RTT)
+		return 0;
+	else if (WARN_ON(ret))
+		return -ENXIO;
+
+	if (map_level > RMM_RTT_MAX_LEVEL)
+		return -ENXIO;
+
+	ret = rmi_cca_hisi_undelegate_range(rtt_addr, rme_rtt_level_mapsize(map_level));
+	if (WARN_ON(ret))
+		return -ENXIO;
+
+	return 0;
+}
+#endif /* CONFIG_HISI_CCA */
 
 /*
  * Returns 0 on successful fold, a negative value on error, a positive value if
@@ -751,9 +787,14 @@ static void realm_unmap_private_range(struct kvm *kvm,
 	int ret;
 
 	for (addr = start; addr < end; addr = next_addr) {
-		ret = realm_unmap_private_page(realm, addr, &next_addr);
+#ifdef CONFIG_HISI_CCA
+		if (kvm_realm_supports_hisi_cca(realm))
+			ret = hisi_cca_realm_unmap_private(realm, addr, &next_addr);
+		else
+#endif
+			ret = realm_unmap_private_page(realm, addr, &next_addr);
 
-		if (ret)
+		if (ret || next_addr == addr)
 			break;
 
 		if (may_block)
@@ -776,13 +817,6 @@ void kvm_realm_unmap_range(struct kvm *kvm, unsigned long start,
 	if (realm->state == REALM_STATE_NONE)
 		return;
 
-#ifdef CONFIG_HISI_CCA
-	if (kvm_realm_supports_hisi_cca(&kvm->arch.realm)) {
-		if (unmap_private)
-			realm_hisi_cca_destroy_data_range(kvm, start, end);
-		return;
-	}
-#endif
 	realm_unmap_shared_range(kvm, find_map_level(realm, start, end),
 				 start, end, may_block);
 	if (unmap_private)
@@ -914,7 +948,9 @@ int realm_map_protected(struct realm *realm,
 	if (WARN_ON(!IS_ALIGNED(ipa, map_size)))
 		return -EINVAL;
 
-	if (IS_ALIGNED(map_size, RMM_L2_BLOCK_SIZE))
+	if (IS_ALIGNED(map_size, RMM_L1_BLOCK_SIZE))
+		map_level = 1;
+	else if (IS_ALIGNED(map_size, RMM_L2_BLOCK_SIZE))
 		map_level = 2;
 	else
 		map_level = 3;
@@ -1012,7 +1048,10 @@ int realm_map_non_secure(struct realm *realm,
 	if (WARN_ON(!IS_ALIGNED(ipa, size)))
 		return -EINVAL;
 
-	if (IS_ALIGNED(size, RMM_L2_BLOCK_SIZE)) {
+	if (IS_ALIGNED(size, RMM_L1_BLOCK_SIZE)) {
+		map_level = 1;
+		map_size = RMM_L1_BLOCK_SIZE;
+	} else if (IS_ALIGNED(size, RMM_L2_BLOCK_SIZE)) {
 		map_level = 2;
 		map_size = RMM_L2_BLOCK_SIZE;
 	} else {
@@ -1170,7 +1209,8 @@ static int kvm_populate_realm(struct kvm *kvm,
 		int ret;
 
 #ifdef CONFIG_HISI_CCA
-		if (kvm_realm_supports_hisi_cca(&kvm->arch.realm))
+		if (kvm_realm_supports_hisi_cca(&kvm->arch.realm) &&
+			ipa_base >= RMM_L1_BLOCK_SIZE)
 			ret = realm_hisi_cca_populate_region(kvm, ipa_base,
 							     ipa_end, &end,
 							     args->flags);
@@ -1548,14 +1588,7 @@ static void kvm_complete_ripas_change(struct kvm_vcpu *vcpu)
 		kvm_mmu_topup_memory_cache(&vcpu->arch.mmu_page_cache,
 					   kvm_mmu_cache_min_pages(kvm));
 		write_lock(&kvm->mmu_lock);
-#ifdef CONFIG_HISI_CCA
-		if (kvm_realm_supports_hisi_cca(&kvm->arch.realm))
-			ret = realm_hisi_cca_set_ipa_state(vcpu, base, top,
-							   ripas, &top_ipa);
-		else
-#endif
-			ret = realm_set_ipa_state(vcpu, base, top, ripas,
-						  &top_ipa);
+		ret = realm_set_ipa_state(vcpu, base, top, ripas, &top_ipa);
 		write_unlock(&kvm->mmu_lock);
 
 		if (WARN_RATELIMIT(ret && ret != -ENOMEM,

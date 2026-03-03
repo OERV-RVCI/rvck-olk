@@ -258,8 +258,8 @@ static int hisi_cca_create_data_block_unknown(struct realm *realm,
 	return 0;
 
 err_undelegate:
-	if (WARN_ON(rmi_cca_hisi_undelegate_range(dst_phys, RMM_L2_BLOCK_SIZE))) {
-		for (int i = 0, offset = 0; offset < RMM_L2_BLOCK_SIZE;
+	if (WARN_ON(rmi_cca_hisi_undelegate_range(dst_phys, level))) {
+		for (int i = 0, offset = 0; offset < rme_rtt_level_mapsize(level);
 		     i++, offset += PAGE_SIZE) {
 			/* Pages can't be returned to NS world so are lost. */
 			get_page(dst_pages[i]);
@@ -609,21 +609,25 @@ int realm_hisi_cca_set_ipa_state(struct kvm_vcpu *vcpu, unsigned long start,
 
 int rmi_cca_hisi_delegate_range(unsigned long start_addr, unsigned long size)
 {
-	unsigned long end_page_off = size - PAGE_SIZE;
-	struct folio *folio = page_folio(phys_to_page(start_addr));
-	struct folio *end_folio = page_folio(phys_to_page(start_addr + end_page_off));
+	unsigned long start = start_addr;
+	unsigned long end = start_addr + size;
+	struct folio *folio;
+	unsigned long nr_pages;
 
-	if (!folio_test_large(folio) || folio != end_folio) {
-		pr_err("delegate range addr check fail\n");
-		return -EINVAL;
-	}
+	while (start < end) {
+		folio = page_folio(phys_to_page(start));
+		if (!folio || __pfn_to_phys(folio_pfn(folio)) != start)
+			return -EINVAL;
+		nr_pages = folio_nr_pages(folio);
 
-	if (folio_test_hugetlb(folio)) {
-		if (rme_isolate_hugetlb(folio))
-			folio_put(folio);
-	} else if (folio_test_lru(folio)) {
-		if (folio_isolate_lru(folio))
-			folio_put(folio);
+		if (folio_test_hugetlb(folio)) {
+			if (rme_isolate_hugetlb(folio))
+				folio_put(folio);
+		} else if (folio_test_lru(folio)) {
+			if (folio_isolate_lru(folio))
+				folio_put(folio);
+		}
+		start += nr_pages * PAGE_SIZE;
 	}
 	return _rmi_cca_hisi_delegate_range(start_addr, size);
 }
