@@ -174,6 +174,19 @@ static void update_arch_timer_irq_lines(struct kvm_vcpu *vcpu)
 #endif
 }
 
+#ifdef CONFIG_HISI_CCADA_HOST
+static int rec_exit_dev(struct kvm_vcpu *vcpu)
+{
+	struct realm_rec *rec = vcpu->arch.rec;
+
+	/* Return to qemu to find the host dev by guest dev bdf */
+	vcpu->run->exit_reason = KVM_EXIT_ARM_RME_DEV;
+	vcpu->run->rme_dev.guest_dev_bdf = rec->run->exit.guest_dev_bdf;
+
+	return 0;
+}
+#endif
+
 /*
  * Return > 0 to return to guest, < 0 on error, 0 (and set exit_reason) on
  * proper exit to userspace.
@@ -231,6 +244,11 @@ int _handle_rec_exit(struct kvm_vcpu *vcpu, int rec_run_ret)
 		return rec_exit_ripas_change(vcpu);
 	case RMI_EXIT_HOST_CALL:
 		return rec_exit_host_call(vcpu);
+#ifdef CONFIG_HISI_CCADA_HOST
+	case RMI_EXIT_DEV_VALIDATE:
+	case RMI_EXIT_DEV_START:
+		return rec_exit_dev(vcpu);
+#endif
 	}
 
 	kvm_pr_unimpl("Unsupported exit reason: %u\n",

@@ -24,5 +24,7 @@ int realm_attach_devs(struct realm *realm);
 void realm_destroy_dev_list(struct realm *realm);
 int kvm_rme_assign_device(struct pci_dev *pdev, struct kvm *kvm);
 void kvm_rme_unassign_device(struct pci_dev *pdev, struct kvm *kvm);
+int kvm_arm_vcpu_rme_dev_validate(struct kvm_vcpu *vcpu,
+				  struct kvm_arm_rme_dev_validate *args);
 
 #endif

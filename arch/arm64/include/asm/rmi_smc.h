@@ -225,7 +225,15 @@ struct rec_enter {
 		};
 		u8 padding2[0x100];
 	};
-	u8 padding3[0x400];
+	/* 0x400 */
+	u8 padding3[0x3f8];
+	union {
+		struct { /* 0x7f8 */
+			u16 dev_bdf;
+			u16 vfio_dev;
+		};
+		u8 padding4[0x8];
+	};
 };
 
 #define RMI_EXIT_SYNC			0x00
@@ -235,6 +243,10 @@ struct rec_enter {
 #define RMI_EXIT_RIPAS_CHANGE		0x04
 #define RMI_EXIT_HOST_CALL		0x05
 #define RMI_EXIT_SERROR			0x06
+#ifdef CONFIG_HISI_CCADA_HOST
+#define RMI_EXIT_DEV_VALIDATE		0xB
+#define RMI_EXIT_DEV_START		0xC
+#endif
 
 struct rec_exit {
 	union { /* 0x000 */
@@ -287,7 +299,13 @@ struct rec_exit {
 		struct {
 			u8 pmu_ovf_status;
 		};
-		u8 padding7[0x100];
+		u8 padding7[0xf8];
+	};
+	union { /* 0x7f8 */
+		struct {
+			u16 guest_dev_bdf;
+		};
+		u8 padding8[0x8];
 	};
 };
 

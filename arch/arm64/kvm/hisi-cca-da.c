@@ -547,3 +547,16 @@ err_detach:
 
 	return ret;
 }
+
+int kvm_arm_vcpu_rme_dev_validate(struct kvm_vcpu *vcpu,
+				  struct kvm_arm_rme_dev_validate *args)
+{
+	if (!vcpu || !args || !_vcpu_is_rec(vcpu))
+		return -EINVAL;
+
+	/* Record host pdev bdf in rec_enter, complete dev validate in rmm */
+	vcpu->arch.rec->run->enter.vfio_dev = args->vfio_dev;
+	vcpu->arch.rec->run->enter.dev_bdf = args->dev_bdf;
+
+	return 0;
+}
