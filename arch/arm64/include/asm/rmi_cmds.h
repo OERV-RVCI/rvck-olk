@@ -496,4 +496,52 @@ static inline int rmi_rtt_unmap_unprotected(unsigned long rd,
 	return res.a0;
 }
 
+#ifdef CONFIG_HISI_CCADA_HOST
+/**
+ * rmi_dev_init() - Initilaize the dev info
+ * @dev_bdf: Bdf of the pci dev
+ * @pa: Pa of the delegated page
+ *
+ * Initilaize the dev info with the delegated memory.
+ *
+ * Return: RMI return code
+ */
+static inline int rmi_dev_init(unsigned long dev_bdf, unsigned long pa)
+{
+	struct arm_smccc_1_2_regs regs = {
+		SMC_RMI_HISI_EXT, CCADA_DEV_INIT,
+		dev_bdf, pa
+	};
+
+	arm_smccc_1_2_smc(&regs, &regs);
+
+	return regs.a0;
+}
+
+/**
+ * rmi_root_dev_delegate() - Delegate the root dev
+ * @params_addr: PA of the struct rmi_dev_delegate_params
+ * @out_dev_bdf: dev bdf returned from rmm
+ *
+ * Request the rmm to delegate root dev and protect the device under it.
+ *
+ * Return: RMI return code
+ */
+static inline int rmi_root_dev_delegate(unsigned long params_addr,
+					unsigned long *out_dev_bdf)
+{
+	struct arm_smccc_1_2_regs regs = {
+		SMC_RMI_HISI_EXT, CCADA_ROOT_DEV_DELEGATE,
+		params_addr
+	};
+
+	arm_smccc_1_2_smc(&regs, &regs);
+
+	if (regs.a0 == RMI_ERROR_DEV_INFO)
+		*out_dev_bdf = regs.a1;
+
+	return regs.a0;
+}
+#endif
+
 #endif /* __ASM_RMI_CMDS_H */

@@ -97,6 +97,11 @@ enum hisi_ext_cmd {
 #define RMI_ERROR_REC		3
 #define RMI_ERROR_RTT		4
 
+#ifdef CONFIG_HISI_CCADA_HOST
+#define RMI_ERROR_DEV_INFO	9
+#define RMI_ERROR_DEV_EXISTS	11
+#endif
+
 enum rmi_ripas {
 	RMI_EMPTY = 0,
 	RMI_RAM = 1,

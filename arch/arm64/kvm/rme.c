@@ -71,6 +71,7 @@ int rmi_granule_delegate(unsigned long phys)
 	}
 	return _rmi_granule_delegate(phys);
 }
+EXPORT_SYMBOL_GPL(rmi_granule_delegate);
 
 #ifdef CONFIG_HISI_CCA
 bool rme_isolate_hugetlb(struct folio *folio)
