@@ -65,14 +65,11 @@
 #include "internal.h"
 #include "ras/ras_event.h"
 
-#define SOFT_OFFLINE_ENABLED		BIT(0)
-#define SOFT_OFFLINE_SKIP_HUGETLB	BIT(1)
-
 static int sysctl_memory_failure_early_kill __read_mostly;
 
 static int sysctl_memory_failure_recovery __read_mostly = 1;
 
-static int sysctl_enable_soft_offline __read_mostly = SOFT_OFFLINE_ENABLED;
+static int sysctl_enable_soft_offline __read_mostly = 1;
 
 atomic_long_t num_poisoned_pages __read_mostly = ATOMIC_LONG_INIT(0);
 
@@ -154,7 +151,7 @@ static struct ctl_table memory_failure_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
 		.extra1		= SYSCTL_ZERO,
-		.extra2		= SYSCTL_THREE,
+		.extra2		= SYSCTL_ONE,
 	},
 	{ }
 };
@@ -2860,18 +2857,10 @@ int soft_offline_page(unsigned long pfn, int flags)
 		return -EIO;
 	}
 
-	if (!(sysctl_enable_soft_offline & SOFT_OFFLINE_ENABLED)) {
+	if (!sysctl_enable_soft_offline) {
 		pr_info_once("disabled by /proc/sys/vm/enable_soft_offline\n");
 		put_ref_page(pfn, flags);
 		return -EOPNOTSUPP;
-	}
-
-	if (sysctl_enable_soft_offline & SOFT_OFFLINE_SKIP_HUGETLB) {
-		if (folio_test_hugetlb(pfn_folio(pfn))) {
-			pr_info_once("disabled for HugeTLB pages by /proc/sys/vm/enable_soft_offline\n");
-			put_ref_page(pfn, flags);
-			return -EOPNOTSUPP;
-		}
 	}
 
 	mutex_lock(&mf_mutex);
