@@ -45,6 +45,18 @@
 #define SMC_RMI_RTT_INIT_RIPAS		SMC_RMI_CALL(0x0168)
 #define SMC_RMI_RTT_SET_RIPAS		SMC_RMI_CALL(0x0169)
 
+#ifdef CONFIG_HISI_CCA
+#define SMC_RMI_HISI_EXT		SMC_RMI_CALL(0x018F)
+
+enum hisi_ext_cmd {
+	CCA_HISI_DELEGATE_RANGE = 0x50,
+	CCA_HISI_UNDELEGATE_RANGE,
+	CCA_HISI_BLOCK_DATA_CREATE,
+	CCA_HISI_BLOCK_DATA_CREATE_UNKNOWN,
+	CCA_HISI_DATA_DESTROY,
+};
+#endif
+
 #define RMI_ABI_MAJOR_VERSION	1
 #define RMI_ABI_MINOR_VERSION	0
 
@@ -91,6 +103,9 @@ enum rmi_ripas {
 #define RMI_REALM_PARAM_FLAG_LPA2		BIT(0)
 #define RMI_REALM_PARAM_FLAG_SVE		BIT(1)
 #define RMI_REALM_PARAM_FLAG_PMU		BIT(2)
+#ifdef CONFIG_HISI_CCA
+#define RMI_REALM_PARAM_FLAG_CCAL		BIT(3)
+#endif
 
 /*
  * Note many of these fields are smaller than u64 but all fields have u64

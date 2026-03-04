@@ -23,6 +23,44 @@ static int rec_exit_reason_notimpl(struct kvm_vcpu *vcpu)
 	return -ENXIO;
 }
 
+#ifdef CONFIG_HISI_CCA
+static int rec_exit_wfx(struct kvm_vcpu *vcpu)
+{
+	u64 esr = kvm_vcpu_get_esr(vcpu);
+
+	if (esr & ESR_ELx_WFx_ISS_WFE)
+		vcpu->stat.wfe_exit_stat++;
+	else
+		vcpu->stat.wfi_exit_stat++;
+
+	if (esr & ESR_ELx_WFx_ISS_WFxT) {
+		if (esr & ESR_ELx_WFx_ISS_RV) {
+			u64 val, now;
+
+			now = kvm_arm_timer_get_reg(vcpu, KVM_REG_ARM_TIMER_CNT);
+			val = vcpu_get_reg(vcpu, kvm_vcpu_sys_get_rt(vcpu));
+
+			if (now >= val)
+				goto out;
+		} else {
+			/* Treat WFxT as WFx if RN is invalid */
+			esr &= ~ESR_ELx_WFx_ISS_WFxT;
+		}
+	}
+
+	if (esr & ESR_ELx_WFx_ISS_WFE) {
+		kvm_vcpu_on_spin(vcpu, vcpu_mode_priv(vcpu));
+	} else {
+		if (esr & ESR_ELx_WFx_ISS_WFxT)
+			vcpu_set_flag(vcpu, IN_WFIT);
+		kvm_vcpu_wfi(vcpu);
+	}
+
+out:
+	return 1;
+}
+#endif
+
 static int rec_exit_sync_dabt(struct kvm_vcpu *vcpu)
 {
 	struct realm_rec *rec = vcpu->arch.rec;
@@ -71,6 +109,9 @@ static int rec_exit_sys_reg(struct kvm_vcpu *vcpu)
 
 static exit_handler_fn rec_exit_handlers[] = {
 	[0 ... ESR_ELx_EC_MAX]	= rec_exit_reason_notimpl,
+#ifdef CONFIG_HISI_CCA
+	[ESR_ELx_EC_WFx]	= rec_exit_wfx,
+#endif
 	[ESR_ELx_EC_SYS64]	= rec_exit_sys_reg,
 	[ESR_ELx_EC_DABT_LOW]	= rec_exit_sync_dabt,
 	[ESR_ELx_EC_IABT_LOW]	= rec_exit_sync_iabt
@@ -128,7 +169,9 @@ static void update_arch_timer_irq_lines(struct kvm_vcpu *vcpu)
 	__vcpu_sys_reg(vcpu, CNTP_CTL_EL0) = rec->run->exit.cntp_ctl;
 	__vcpu_sys_reg(vcpu, CNTP_CVAL_EL0) = rec->run->exit.cntp_cval;
 
-	kvm_realm_timers_update(vcpu);
+#ifdef CONFIG_HISI_CCA
+	kvm_cvm_timers_update(vcpu);
+#endif
 }
 
 /*

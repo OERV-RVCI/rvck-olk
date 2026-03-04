@@ -8,6 +8,7 @@
 #include <linux/virtio_config.h>
 #include <linux/device.h>
 #include <linux/slab.h>
+#include <linux/mem_encrypt.h>
 #include <linux/module.h>
 #include <linux/hrtimer.h>
 #include <linux/dma-mapping.h>
@@ -527,6 +528,15 @@ static inline unsigned int virtqueue_add_desc_split(struct virtqueue *vq,
 	struct vring_desc_extra *extra = vring->split.desc_extra;
 	u16 next;
 
+	/*
+	* In the CCA confidential scenario, we need to call
+	* the `dma_addr_canonical()` function to reverse any conversions
+	* for encrypted/decrypted back to the canonical address, so that
+	* the host can directly access the address without specific conversion.
+	*/
+#ifdef CONFIG_HISI_CCA
+	addr = dma_addr_canonical(addr);
+#endif
 	desc[i].flags = cpu_to_virtio16(vq->vdev, flags);
 	desc[i].addr = cpu_to_virtio64(vq->vdev, addr);
 	desc[i].len = cpu_to_virtio32(vq->vdev, len);

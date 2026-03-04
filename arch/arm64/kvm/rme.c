@@ -11,6 +11,7 @@
 #include <asm/virt.h>
 
 #include <asm/kvm_pgtable.h>
+#include <asm/kvm_rme_hisi_cca.h>
 #include <asm/cca_base.h>
 
 static unsigned long rmm_feat_reg0;
@@ -25,6 +26,7 @@ static unsigned long rmm_feat_reg0;
 #define RMM_RTT_LEVEL_SHIFT(l)	\
 	((RMM_PAGE_SHIFT - 3) * (4 - (l)) + 3)
 #define RMM_L2_BLOCK_SIZE	BIT(RMM_RTT_LEVEL_SHIFT(2))
+#define RMM_L1_BLOCK_SIZE	BIT(RMM_RTT_LEVEL_SHIFT(1))
 
 static inline unsigned long rme_rtt_level_mapsize(int level)
 {
@@ -38,6 +40,56 @@ static bool rme_has_feature(unsigned long feature)
 {
 	return !!u64_get_bits(rmm_feat_reg0, feature);
 }
+
+/**
+ * rmi_granule_delegate() - Delegate a granule
+ * @phys: PA of the granule
+ *
+ * Delegate a granule for use by the realm world.
+ *
+ * Return: RMI return code
+ */
+static int _rmi_granule_delegate(unsigned long phys)
+{
+	struct arm_smccc_res res;
+
+	arm_smccc_1_1_invoke(SMC_RMI_GRANULE_DELEGATE, phys, &res);
+
+	return res.a0;
+}
+
+int rmi_granule_delegate(unsigned long phys)
+{
+	struct folio *folio = page_folio(phys_to_page(phys));
+
+	if (folio_test_hugetlb(folio)) {
+		if (rme_isolate_hugetlb(folio))
+			folio_put(folio);
+	} else if (folio_test_lru(folio)) {
+		if (folio_isolate_lru(folio))
+			folio_put(folio);
+	}
+	return _rmi_granule_delegate(phys);
+}
+
+#ifdef CONFIG_HISI_CCA
+bool rme_isolate_hugetlb(struct folio *folio)
+{
+	bool ret = true;
+
+	spin_lock_irq(&hugetlb_lock);
+	if (!folio_test_hugetlb(folio) ||
+		!folio_test_hugetlb_migratable(folio) ||
+		!folio_try_get(folio)) {
+		ret = false;
+		goto unlock;
+	}
+	folio_clear_hugetlb_migratable(folio);
+unlock:
+	spin_unlock_irq(&hugetlb_lock);
+	return ret;
+}
+#endif
 
 bool kvm_rme_supports_sve(void)
 {
@@ -284,6 +336,41 @@ static int realm_unmap_private_page(struct realm *realm,
 
 	return 0;
 }
+
+#ifdef CONFIG_HISI_CCA
+static int hisi_cca_realm_unmap_private(struct realm *realm,
+					unsigned long ipa,
+					unsigned long *next_addr)
+{
+	phys_addr_t rd = virt_to_phys(realm->rd);
+	int ret;
+	struct rtt_entry rtt;
+	unsigned long rtt_addr = 0;
+	unsigned long map_level;
+
+	ret = rmi_rtt_read_entry(rd, ipa, RMM_RTT_MAX_LEVEL, &rtt);
+	if (WARN_ON(ret))
+		return -ENXIO;
+
+	if (rtt.walk_level == RMM_RTT_MAX_LEVEL)
+		return realm_unmap_private_page(realm, ipa, next_addr);
+
+	ret = rmi_cca_hisi_data_destroy_level(rd, ipa, &rtt_addr, next_addr, &map_level);
+	if (RMI_RETURN_STATUS(ret) == RMI_ERROR_RTT)
+		return 0;
+	else if (WARN_ON(ret))
+		return -ENXIO;
+
+	if (map_level > RMM_RTT_MAX_LEVEL)
+		return -ENXIO;
+
+	ret = rmi_cca_hisi_undelegate_range(rtt_addr, rme_rtt_level_mapsize(map_level));
+	if (WARN_ON(ret))
+		return -ENXIO;
+
+	return 0;
+}
+#endif /* CONFIG_HISI_CCA */
 
 /*
  * Returns 0 on successful fold, a negative value on error, a positive value if
@@ -560,11 +647,9 @@ static int realm_rtt_destroy(struct realm *realm, unsigned long addr,
 	return ret;
 }
 
-static int realm_create_rtt_levels(struct realm *realm,
-				   unsigned long ipa,
-				   int level,
-				   int max_level,
-				   struct kvm_mmu_memory_cache *mc)
+int realm_create_rtt_levels(struct realm *realm, unsigned long ipa,
+			    int level, int max_level,
+			    struct kvm_mmu_memory_cache *mc)
 {
 	if (level == max_level)
 		return 0;
@@ -702,9 +787,14 @@ static void realm_unmap_private_range(struct kvm *kvm,
 	int ret;
 
 	for (addr = start; addr < end; addr = next_addr) {
-		ret = realm_unmap_private_page(realm, addr, &next_addr);
+#ifdef CONFIG_HISI_CCA
+		if (kvm_realm_supports_hisi_cca(realm))
+			ret = hisi_cca_realm_unmap_private(realm, addr, &next_addr);
+		else
+#endif
+			ret = realm_unmap_private_page(realm, addr, &next_addr);
 
-		if (ret)
+		if (ret || next_addr == addr)
 			break;
 
 		if (may_block)
@@ -765,11 +855,11 @@ static int realm_create_protected_data_granule(struct realm *realm,
 	return 0;
 }
 
-static int realm_create_protected_data_page(struct realm *realm,
-					    unsigned long ipa,
-					    struct page *dst_page,
-					    struct page *src_page,
-					    unsigned long flags)
+int realm_create_protected_data_page(struct realm *realm,
+				     unsigned long ipa,
+				     struct page *dst_page,
+				     struct page *src_page,
+				     unsigned long flags)
 {
 	unsigned long rd = virt_to_phys(realm->rd);
 	phys_addr_t dst_phys, src_phys;
@@ -825,7 +915,7 @@ err:
 	return -ENXIO;
 }
 
-static int fold_rtt(struct realm *realm, unsigned long addr, int level)
+int fold_rtt(struct realm *realm, unsigned long addr, int level)
 {
 	phys_addr_t rtt_addr;
 	int ret;
@@ -858,7 +948,9 @@ int realm_map_protected(struct realm *realm,
 	if (WARN_ON(!IS_ALIGNED(ipa, map_size)))
 		return -EINVAL;
 
-	if (IS_ALIGNED(map_size, RMM_L2_BLOCK_SIZE))
+	if (IS_ALIGNED(map_size, RMM_L1_BLOCK_SIZE))
+		map_level = 1;
+	else if (IS_ALIGNED(map_size, RMM_L2_BLOCK_SIZE))
 		map_level = 2;
 	else
 		map_level = 3;
@@ -956,7 +1048,10 @@ int realm_map_non_secure(struct realm *realm,
 	if (WARN_ON(!IS_ALIGNED(ipa, size)))
 		return -EINVAL;
 
-	if (IS_ALIGNED(size, RMM_L2_BLOCK_SIZE)) {
+	if (IS_ALIGNED(size, RMM_L1_BLOCK_SIZE)) {
+		map_level = 1;
+		map_size = RMM_L1_BLOCK_SIZE;
+	} else if (IS_ALIGNED(size, RMM_L2_BLOCK_SIZE)) {
 		map_level = 2;
 		map_size = RMM_L2_BLOCK_SIZE;
 	} else {
@@ -1111,9 +1206,17 @@ static int kvm_populate_realm(struct kvm *kvm,
 	 */
 	while (ipa_base < ipa_end) {
 		phys_addr_t end = min(ipa_end, ipa_base + SZ_2M);
+		int ret;
 
-		int ret = populate_region(kvm, ipa_base, end,
-					  args->flags);
+#ifdef CONFIG_HISI_CCA
+		if (kvm_realm_supports_hisi_cca(&kvm->arch.realm) &&
+			ipa_base >= RMM_L1_BLOCK_SIZE)
+			ret = realm_hisi_cca_populate_region(kvm, ipa_base,
+							     ipa_end, &end,
+							     args->flags);
+		else
+#endif
+			ret = populate_region(kvm, ipa_base, end, args->flags);
 
 		if (ret)
 			return ret;
@@ -1355,6 +1458,12 @@ static int kvm_rme_config_realm(struct kvm *kvm, struct kvm_enable_cap *cap)
 	case ARM_RME_CONFIG_HASH_ALGO:
 		r = config_realm_hash_algo(realm, &cfg);
 		break;
+#ifdef CONFIG_HISI_CCA
+	case ARM_RME_CONFIG_HISI_CCA:
+		realm->hisi_cca_enable = !!cfg.hisi_cca_enable;
+		realm->params->flags |= RMI_REALM_PARAM_FLAG_CCAL;
+		break;
+#endif
 	default:
 		r = -EINVAL;
 	}
@@ -1403,6 +1512,20 @@ int _kvm_realm_enable_cap(struct kvm *kvm, struct kvm_enable_cap *cap)
 	case KVM_CAP_ARM_RME_ACTIVATE_REALM:
 		r = kvm_activate_realm(kvm);
 		break;
+#ifdef CONFIG_HISI_CCA
+	case KVM_CAP_ARM_RME_MAP_RAM_REALM: {
+		struct arm_rme_map_ram_args args;
+		void __user *argp = u64_to_user_ptr(cap->args[1]);
+
+		if (copy_from_user(&args, argp, sizeof(args))) {
+			r = -EFAULT;
+			break;
+		}
+		if (kvm_realm_supports_hisi_cca(&kvm->arch.realm))
+			r = realm_hisi_cca_map_ram(kvm, &args);
+		break;
+	}
+#endif
 	default:
 		r = -EINVAL;
 		break;
@@ -1511,6 +1634,18 @@ int _kvm_rec_pre_enter(struct kvm_vcpu *vcpu)
 int _kvm_rec_enter(struct kvm_vcpu *vcpu)
 {
 	struct realm_rec *rec = vcpu->arch.rec;
+
+#ifdef CONFIG_HISI_CCA
+	if (vcpu->arch.hcr_el2 & HCR_TWI)
+		rec->run->enter.flags |= REC_ENTER_FLAG_TRAP_WFI;
+	else
+		rec->run->enter.flags &= ~REC_ENTER_FLAG_TRAP_WFI;
+
+	if (vcpu->arch.hcr_el2 & HCR_TWE)
+		rec->run->enter.flags |= REC_ENTER_FLAG_TRAP_WFE;
+	else
+		rec->run->enter.flags &= ~REC_ENTER_FLAG_TRAP_WFE;
+#endif
 
 	return rmi_rec_enter(virt_to_phys(rec->rec_page),
 			     virt_to_phys(rec->run));

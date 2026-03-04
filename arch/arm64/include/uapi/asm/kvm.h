@@ -442,10 +442,12 @@ enum {
 #define KVM_CAP_ARM_RME_INIT_RIPAS_REALM	2
 #define KVM_CAP_ARM_RME_POPULATE_REALM		3
 #define KVM_CAP_ARM_RME_ACTIVATE_REALM		4
+#define KVM_CAP_ARM_RME_MAP_RAM_REALM		5
 
 /* List of configuration items accepted for KVM_CAP_ARM_RME_CONFIG_REALM */
 #define ARM_RME_CONFIG_RPV			0
 #define ARM_RME_CONFIG_HASH_ALGO		1
+#define ARM_RME_CONFIG_HISI_CCA			2
 
 #define ARM_RME_CONFIG_MEASUREMENT_ALGO_SHA256		0
 #define ARM_RME_CONFIG_MEASUREMENT_ALGO_SHA512		1
@@ -465,6 +467,10 @@ struct arm_rme_config {
 			__u32	hash_algo;
 		};
 
+		/* cfg == ARM_RME_CONFIG_HISI_CCA */
+		struct {
+			__u8	hisi_cca_enable;
+		};
 		/* Fix the size of the union */
 		__u8	reserved[256];
 	};
@@ -481,6 +487,12 @@ struct arm_rme_populate_realm {
 struct arm_rme_init_ripas {
 	__u64 base;
 	__u64 size;
+	__u64 reserved[2];
+};
+
+struct arm_rme_map_ram_args {
+	__u64 ram_base;
+	__u64 ram_size;
 	__u64 reserved[2];
 };
 
