@@ -264,6 +264,11 @@ void __init swiotlb_update_mem_attributes(void)
 		return;
 	bytes = PAGE_ALIGN(mem->nslabs << IO_TLB_SHIFT);
 	set_memory_decrypted((unsigned long)mem->vaddr, bytes >> PAGE_SHIFT);
+
+#ifdef CONFIG_HISI_CCADA_GUEST
+	if (is_realm_world() && is_swiotlb_allocated())
+		io_tlb_default_mem.for_alloc = true;
+#endif
 }
 
 static void swiotlb_init_io_tlb_pool(struct io_tlb_pool *mem, phys_addr_t start,

@@ -526,6 +526,9 @@ static int virtio_pci_probe(struct pci_dev *pci_dev,
 	int rc;
 
 	enable_swiotlb_for_cvm_dev(&pci_dev->dev, true);
+#ifdef CONFIG_HISI_CCADA_GUEST
+	enable_swiotlb_for_realm_dev(&pci_dev->dev, true);
+#endif
 
 	/* allocate our structure and fill it out */
 	vp_dev = kzalloc(sizeof(struct virtio_pci_device), GFP_KERNEL);

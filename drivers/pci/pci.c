@@ -35,6 +35,11 @@
 #ifdef CONFIG_MACH_LOONGSON64
 #include <linux/suspend.h>
 #endif
+#ifdef CONFIG_HISI_CCADA_GUEST
+#ifndef __GENKSYMS__
+#include <asm/realm_guest.h>
+#endif
+#endif
 #include "pci.h"
 
 DEFINE_MUTEX(pci_slot_mutex);
@@ -2008,6 +2013,10 @@ static int do_pci_enable_device(struct pci_dev *dev, int bars)
 	err = pcibios_enable_device(dev, bars);
 	if (err < 0)
 		return err;
+#ifdef CONFIG_HISI_CCADA_GUEST
+	if (is_realm_world())
+		rsi_rdev_start(pci_dev_id(dev));
+#endif
 	pci_fixup_device(pci_fixup_enable, dev);
 
 	if (dev->msi_enabled || dev->msix_enabled)
@@ -4091,6 +4100,10 @@ static int __pci_request_region(struct pci_dev *pdev, int bar,
 					pci_resource_len(pdev, bar), res_name,
 					exclusive))
 			goto err_out;
+#ifdef CONFIG_HISI_CCADA_GUEST
+		if (ccada_init_mem_region(pdev, bar))
+			goto err_out;
+#endif
 	}
 
 	dr = find_pci_dr(pdev);

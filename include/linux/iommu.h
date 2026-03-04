@@ -832,6 +832,7 @@ struct iommu_ops {
  * @free: Release the domain after use.
  * @get_msi_mapping_domain: Return the related iommu_domain that should hold the
  *                          MSI cookie and accept mapping(s).
+ * @enable_rme: Enable realm management extension for the related iommu_domain
  */
 struct iommu_domain_ops {
 	int (*attach_dev)(struct iommu_domain *domain, struct device *dev);
@@ -880,7 +881,11 @@ struct iommu_domain_ops {
 
 	KABI_USE(1, struct iommu_domain *
 			(*get_msi_mapping_domain)(struct iommu_domain *domain))
+#ifdef CONFIG_HISI_CCADA_HOST
+	KABI_USE(2, int (*enable_rme)(struct iommu_domain *domain))
+#else
 	KABI_RESERVE(2)
+#endif
 	KABI_RESERVE(3)
 	KABI_RESERVE(4)
 	KABI_RESERVE(5)
@@ -1084,6 +1089,9 @@ extern int iommu_group_id(struct iommu_group *group);
 struct kset *iommu_get_group_kset(void);
 extern struct iommu_domain *iommu_group_default_domain(struct iommu_group *);
 
+#ifdef CONFIG_HISI_CCADA_HOST
+int iommu_enable_rme(struct iommu_domain *domain);
+#endif
 int iommu_set_pgtable_quirks(struct iommu_domain *domain,
 		unsigned long quirks);
 

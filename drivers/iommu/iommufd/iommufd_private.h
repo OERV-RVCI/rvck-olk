@@ -29,6 +29,9 @@ struct iommufd_ctx {
 	u8 account_mode;
 	/* Compatibility with VFIO no iommu */
 	u8 no_iommu_mode;
+#ifdef CONFIG_HISI_CCADA_HOST
+	u8 realm;
+#endif
 	struct iommufd_ioas *vfio_ioas;
 	/* Associated KVM pointer */
 	struct kvm *kvm;
@@ -257,6 +260,9 @@ int iommufd_ioas_unmap(struct iommufd_ucmd *ucmd);
 int iommufd_ioas_option(struct iommufd_ucmd *ucmd);
 int iommufd_option_rlimit_mode(struct iommu_option *cmd,
 			       struct iommufd_ctx *ictx);
+#ifdef CONFIG_HISI_CCADA_HOST
+int iommufd_option_realm(struct iommu_option *cmd, struct iommufd_ctx *ictx);
+#endif
 
 int iommufd_vfio_ioas(struct iommufd_ucmd *ucmd);
 int iommufd_check_iova_range(struct io_pagetable *iopt,

@@ -2786,6 +2786,18 @@ static int __init iommu_init(void)
 }
 core_initcall(iommu_init);
 
+#ifdef CONFIG_HISI_CCADA_HOST
+int iommu_enable_rme(struct iommu_domain *domain)
+{
+	if (domain->type != IOMMU_DOMAIN_UNMANAGED)
+		return -EINVAL;
+	if (!domain->ops->enable_rme)
+		return -EINVAL;
+	return domain->ops->enable_rme(domain);
+}
+EXPORT_SYMBOL_GPL(iommu_enable_rme);
+#endif
+
 int iommu_set_pgtable_quirks(struct iommu_domain *domain,
 		unsigned long quirk)
 {

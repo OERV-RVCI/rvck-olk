@@ -167,6 +167,10 @@ void __pci_read_msi_msg(struct msi_desc *entry, struct msi_msg *msg)
 		if (is_virtcca_cvm_enable() && dev != NULL && is_cc_dev(pci_dev_id(dev)))
 			return virtcca_pci_read_msi_msg(dev, msg, base);
 #endif
+#ifdef CONFIG_HISI_CCADA_HOST
+		if (rme_dev_pci_read_msi_msg(entry, msg))
+			return;
+#endif
 		msg->address_lo = readl(base + PCI_MSIX_ENTRY_LOWER_ADDR);
 		msg->address_hi = readl(base + PCI_MSIX_ENTRY_UPPER_ADDR);
 		msg->data = readl(base + PCI_MSIX_ENTRY_DATA);
@@ -197,6 +201,10 @@ static inline void pci_write_msg_msi(struct pci_dev *dev, struct msi_desc *desc,
 #ifdef CONFIG_HISI_VIRTCCA_CODA
 	if (virtcca_pci_write_msg_msi(desc, msg))
 		return;
+#endif
+
+#ifdef CONFIG_HISI_CCADA_HOST
+	rme_dev_fix_msi_address(desc, msg);
 #endif
 
 	pci_read_config_word(dev, pos + PCI_MSI_FLAGS, &msgctl);
@@ -236,6 +244,10 @@ static inline void pci_write_msg_msix(struct msi_desc *desc, struct msi_msg *msg
 
 #ifdef CONFIG_HISI_VIRTCCA_CODA
 	if (virtcca_pci_write_msg_msix(desc, msg))
+		return;
+#endif
+#ifdef CONFIG_HISI_CCADA_HOST
+	if (rme_dev_pci_write_msg_msi(desc, msg))
 		return;
 #endif
 	writel(msg->address_lo, base + PCI_MSIX_ENTRY_LOWER_ADDR);
@@ -668,6 +680,10 @@ void msix_prepare_msi_desc(struct pci_dev *dev, struct msi_desc *desc)
 		if (is_virtcca_cvm_enable() && is_cc_dev(pci_dev_id(dev)))
 			return virtcca_msix_prepare_msi_desc(dev, desc, addr);
 #endif
+#ifdef CONFIG_HISI_CCADA_HOST
+		if (rme_dev_msix_prepare_msi_desc(dev, desc))
+			return;
+#endif
 		desc->pci.msix_ctrl = readl(addr + PCI_MSIX_ENTRY_VECTOR_CTRL);
 	}
 }
@@ -808,6 +824,10 @@ static int msix_capability_init(struct pci_dev *dev, struct msix_entry *entries,
 #ifdef CONFIG_HISI_VIRTCCA_CODA
 	if (is_virtcca_cvm_enable() && is_cc_dev(pci_dev_id(dev)))
 		return virtcca_msix_mask_all_cc(dev, dev->msix_base, tsize, pci_dev_id(dev));
+#endif
+#ifdef CONFIG_HISI_CCADA_HOST
+	if (rme_dev_msix_mask_all(dev, tsize))
+		return 0;
 #endif
 	msix_mask_all(dev->msix_base, tsize);
 	pci_msix_clear_and_set_ctrl(dev, PCI_MSIX_FLAGS_MASKALL, 0);

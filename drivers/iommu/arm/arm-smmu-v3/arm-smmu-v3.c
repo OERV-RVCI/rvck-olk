@@ -37,6 +37,11 @@
 #include "arm-s-smmu-v3.h"
 #endif
 
+#ifdef CONFIG_HISI_CCADA_HOST
+#include "arm-r-smmu-v3.h"
+#include <asm/hisi_cca_da.h>
+#endif
+
 static bool disable_msipolling;
 module_param(disable_msipolling, bool, 0444);
 MODULE_PARM_DESC(disable_msipolling,
@@ -964,6 +969,14 @@ int arm_smmu_cmdq_issue_cmdlist(struct arm_smmu_device *smmu,
 	bool owner;
 	struct arm_smmu_ll_queue llq, head;
 	int ret = 0;
+
+#ifdef CONFIG_HISI_CCADA_HOST
+	if (smmu->realm.forward_cmd) {
+		ret = realm_smmu_cmdq_issue_cmdlist(smmu, cmds, n, sync);
+		if (ret)
+			return ret;
+	}
+#endif
 
 #ifdef CONFIG_ARM_SMMU_V3_ECMDQ
 	if (!cmdq->shared)
@@ -2611,6 +2624,12 @@ static struct iommu_domain *arm_smmu_domain_alloc_paging(struct device *dev)
 		struct arm_smmu_master *master = dev_iommu_priv_get(dev);
 		int ret;
 
+#ifdef CONFIG_HISI_CCADA_HOST
+		if (dev_is_pci(dev) && is_hisi_pcipc_ns(dev) &&
+		    arm_smmu_support_rme(master->smmu))
+			smmu_domain->pcipc_ns = true;
+#endif
+
 		ret = arm_smmu_domain_finalise(smmu_domain, master->smmu, 0);
 		if (ret) {
 			kfree(smmu_domain);
@@ -2626,6 +2645,10 @@ static void arm_smmu_domain_free_paging(struct iommu_domain *domain)
 	struct arm_smmu_device *smmu = smmu_domain->smmu;
 
 	free_io_pgtable_ops(smmu_domain->pgtbl_ops);
+
+#ifdef CONFIG_HISI_CCADA_HOST
+	realm_smmu_domain_clear(smmu_domain);
+#endif
 
 	/* Free the ASID or VMID */
 	if (smmu_domain->stage == ARM_SMMU_DOMAIN_S1) {
@@ -2696,6 +2719,10 @@ static int arm_smmu_domain_finalise(struct arm_smmu_domain *smmu_domain,
 	virtcca_smmu_set_stage(domain, smmu_domain);
 #endif
 
+#ifdef CONFIG_HISI_CCADA_HOST
+	realm_smmu_set_stage(smmu_domain);
+#endif
+
 	pgtbl_cfg = (struct io_pgtable_cfg) {
 		.pgsize_bitmap	= smmu->pgsize_bitmap,
 		.coherent_walk	= smmu->features & ARM_SMMU_FEAT_COHERENCY,
@@ -2730,6 +2757,13 @@ static int arm_smmu_domain_finalise(struct arm_smmu_domain *smmu_domain,
 	default:
 		return -EINVAL;
 	}
+
+#ifdef CONFIG_HISI_CCADA_HOST
+	if (smmu_domain->realm)
+		fmt = CCA_REALM_S2;
+	else if (smmu_domain->pcipc_ns)
+		fmt = CCA_REALM_NS_S2;
+#endif
 
 	if (smmu->features & ARM_SMMU_FEAT_HD)
 		pgtbl_cfg.quirks |= IO_PGTABLE_QUIRK_ARM_HD;
@@ -3135,6 +3169,10 @@ static int arm_smmu_attach_dev(struct iommu_domain *domain, struct device *dev)
 		return ret;
 	}
 
+#ifdef CONFIG_HISI_CCADA_HOST
+	realm_smmu_attach_dev(smmu_domain, master, dev);
+#endif
+
 	switch (smmu_domain->stage) {
 	case ARM_SMMU_DOMAIN_S1: {
 		struct arm_smmu_cd target_cd;
@@ -3390,8 +3428,13 @@ arm_smmu_domain_alloc_user(struct device *dev, u32 flags,
 			   const struct iommu_user_data *user_data)
 {
 	struct arm_smmu_master *master = dev_iommu_priv_get(dev);
+#ifdef CONFIG_HISI_CCADA_HOST
+	const u32 PAGING_FLAGS = IOMMU_HWPT_ALLOC_DIRTY_TRACKING |
+				 IOMMU_HWPT_ALLOC_NEST_PARENT | IOMMU_HWPT_RME;
+#else
 	const u32 PAGING_FLAGS = IOMMU_HWPT_ALLOC_DIRTY_TRACKING |
 				 IOMMU_HWPT_ALLOC_NEST_PARENT;
+#endif
 	struct arm_smmu_domain *smmu_domain;
 	int ret;
 
@@ -3412,6 +3455,16 @@ arm_smmu_domain_alloc_user(struct device *dev, u32 flags,
 		smmu_domain->stage = ARM_SMMU_DOMAIN_S2;
 		smmu_domain->nest_parent = true;
 	}
+
+#ifdef CONFIG_HISI_CCADA_HOST
+	if (flags & IOMMU_HWPT_RME) {
+		if (!arm_smmu_support_rme(master->smmu)) {
+			ret = -EOPNOTSUPP;
+			goto err_free;
+		}
+		smmu_domain->realm = true;
+	}
+#endif
 
 	smmu_domain->domain.type = IOMMU_DOMAIN_UNMANAGED;
 	smmu_domain->domain.ops = arm_smmu_ops.default_domain_ops;
@@ -3924,6 +3977,24 @@ static int arm_smmu_clear_dirty_log(struct iommu_domain *domain,
 }
 #endif
 
+#ifdef CONFIG_HISI_CCADA_HOST
+static int arm_smmu_enable_rme(struct iommu_domain *domain)
+{
+	struct arm_smmu_domain *smmu_domain = to_smmu_domain(domain);
+	struct arm_smmu_device *smmu = smmu_domain->smmu;
+	int ret = 0;
+
+	mutex_lock(&smmu_domain->init_mutex);
+	if (arm_smmu_support_rme(smmu))
+		smmu_domain->realm = true;
+	else
+		ret = -EOPNOTSUPP;
+	mutex_unlock(&smmu_domain->init_mutex);
+
+	return ret;
+}
+#endif
+
 static int arm_smmu_of_xlate(struct device *dev, struct of_phandle_args *args)
 {
 	return iommu_fwspec_add_ids(dev, args->args, 1);
@@ -4170,6 +4241,9 @@ static struct iommu_ops arm_smmu_ops = {
 		.iotlb_sync_map         = arm_smmu_iotlb_sync_map,
 #endif
 		.iova_to_phys		= arm_smmu_iova_to_phys,
+#ifdef CONFIG_HISI_CCADA_HOST
+		.enable_rme		= arm_smmu_enable_rme,
+#endif
 #ifdef CONFIG_ARM_SMMU_V3_HTTU
 		.support_dirty_log	= arm_smmu_support_dirty_log,
 		.switch_dirty_log	= arm_smmu_switch_dirty_log,
@@ -5722,6 +5796,10 @@ static int arm_smmu_device_probe(struct platform_device *pdev)
 	virtcca_smmu_device_init(pdev, smmu, ioaddr, false);
 #endif
 
+#ifdef CONFIG_HISI_CCADA_HOST
+	arm_r_smmu_device_init(smmu, ioaddr);
+#endif
+
 	/* And we're up. Go go go! */
 	ret = iommu_device_sysfs_add(&smmu->iommu, dev, NULL,
 				     "smmu3.%pa", &ioaddr);
@@ -5748,6 +5826,10 @@ err_free_iopf:
 static void arm_smmu_device_remove(struct platform_device *pdev)
 {
 	struct arm_smmu_device *smmu = platform_get_drvdata(pdev);
+
+#ifdef CONFIG_HISI_CCADA_HOST
+	arm_r_smmu_device_remove(smmu);
+#endif
 
 	iommu_device_unregister(&smmu->iommu);
 	iommu_device_sysfs_remove(&smmu->iommu);

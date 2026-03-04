@@ -20,7 +20,11 @@ int realm_register_memory_enc_ops(void);
 
 static inline bool force_dma_unencrypted(struct device *dev)
 {
+#ifdef CONFIG_HISI_CCADA_GUEST
+	return false;
+#else
 	return is_realm_world();
+#endif
 }
 
 /*

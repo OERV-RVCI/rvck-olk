@@ -34,6 +34,9 @@
 #ifdef CONFIG_HISI_VIRTCCA_CODA
 #include <asm/kvm_tmi.h>
 #endif
+#ifdef CONFIG_HISI_CCADA_HOST
+#include <asm/hisi_cca_da.h>
+#endif
 
 #include "vfio_pci_priv.h"
 
@@ -713,6 +716,11 @@ void vfio_pci_core_close_device(struct vfio_device *core_vdev)
 		vdev->req_trigger = NULL;
 	}
 	mutex_unlock(&vdev->igate);
+
+#ifdef CONFIG_HISI_CCADA_HOST
+	if (is_support_rme() && vdev->vdev.kvm)
+		kvm_rme_unassign_device(vdev->pdev, vdev->vdev.kvm);
+#endif
 }
 EXPORT_SYMBOL_GPL(vfio_pci_core_close_device);
 

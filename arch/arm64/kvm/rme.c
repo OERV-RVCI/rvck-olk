@@ -13,6 +13,9 @@
 #include <asm/kvm_pgtable.h>
 #include <asm/kvm_rme_hisi_cca.h>
 #include <asm/cca_base.h>
+#ifdef CONFIG_HISI_CCADA_HOST
+#include <asm/hisi_cca_da.h>
+#endif
 
 static unsigned long rmm_feat_reg0;
 
@@ -71,6 +74,7 @@ int rmi_granule_delegate(unsigned long phys)
 	}
 	return _rmi_granule_delegate(phys);
 }
+EXPORT_SYMBOL_GPL(rmi_granule_delegate);
 
 #ifdef CONFIG_HISI_CCA
 bool rme_isolate_hugetlb(struct folio *folio)
@@ -313,10 +317,71 @@ retry:
 	if (WARN_ON(ret))
 		return -ENXIO;
 
+	put_page(phys_to_page(rtt_addr));
 	*out_rtt = rtt_addr;
 
 	return 0;
 }
+
+#ifdef CONFIG_HISI_CCADA_HOST
+static bool realm_is_addr_dev(struct realm *realm, unsigned long addr)
+{
+	phys_addr_t rd = virt_to_phys(realm->rd);
+	struct rtt_entry rtt;
+
+	if (rmi_rtt_read_entry(rd, addr, RMM_RTT_MAX_LEVEL, &rtt))
+		return false;
+
+	if (rtt.ripas == RMI_DEV && rtt.state == RMI_ASSIGNED_DEV)
+		return true;
+
+	return false;
+}
+
+static int realm_destroy_private_dev_granule(struct realm *realm,
+					     unsigned long ipa,
+					     unsigned long *next_addr,
+					     phys_addr_t *out_rtt)
+{
+	unsigned long rd = virt_to_phys(realm->rd);
+	unsigned long rtt_addr;
+	phys_addr_t rtt;
+	int ret;
+
+retry:
+	ret = rmi_dev_unmap(rd, ipa, &rtt_addr, next_addr);
+	if (RMI_RETURN_STATUS(ret) == RMI_ERROR_RTT) {
+		if (*next_addr > ipa)
+			return 0; /* UNASSIGNED */
+		rtt = alloc_delegated_granule(NULL);
+		if (WARN_ON(rtt == PHYS_ADDR_MAX))
+			return -ENOMEM;
+		/*
+		 * ASSIGNED - ipa is mapped as a block, so split. The index
+		 * from the return code should be 2 otherwise it appears
+		 * there's a huge page bigger than KVM currently supports
+		 */
+		WARN_ON(RMI_RETURN_INDEX(ret) != 2);
+		ret = realm_rtt_create(realm, ipa, 3, rtt);
+		if (WARN_ON(ret)) {
+			free_delegated_granule(rtt);
+			return -ENXIO;
+		}
+		goto retry;
+	} else if (WARN_ON(ret)) {
+		return -ENXIO;
+	}
+
+	/*
+	 * Device is not allowed to switch from Realm to NS,
+	 * thus don't need to undelegate device mmio.
+	 */
+
+	*out_rtt = rtt_addr;
+
+	return 0;
+}
+#endif
 
 static int realm_unmap_private_page(struct realm *realm,
 				    unsigned long ipa,
@@ -328,8 +393,18 @@ static int realm_unmap_private_page(struct realm *realm,
 	int ret;
 
 	for (addr = ipa; addr < end; addr = *next_addr) {
+#ifdef CONFIG_HISI_CCADA_HOST
+		if (realm_is_addr_dev(realm, addr))
+			ret = realm_destroy_private_dev_granule(realm, addr,
+								next_addr,
+								&out_rtt);
+		else
+			ret = realm_destroy_private_granule(realm, addr,
+							    next_addr, &out_rtt);
+#else
 		ret = realm_destroy_private_granule(realm, addr, next_addr,
 						    &out_rtt);
+#endif
 		if (ret)
 			return ret;
 	}
@@ -835,6 +910,8 @@ static int realm_create_protected_data_granule(struct realm *realm,
 	if (rmi_granule_delegate(dst_phys))
 		return -ENXIO;
 
+	get_page(phys_to_page(dst_phys));
+
 	ret = rmi_data_create(rd, dst_phys, ipa, src_phys, flags);
 	if (RMI_RETURN_STATUS(ret) == RMI_ERROR_RTT) {
 		/* Create missing RTTs and retry */
@@ -863,7 +940,6 @@ int realm_create_protected_data_page(struct realm *realm,
 {
 	unsigned long rd = virt_to_phys(realm->rd);
 	phys_addr_t dst_phys, src_phys;
-	bool undelegate_failed = false;
 	int ret, offset;
 
 	dst_phys = page_to_phys(dst_page);
@@ -890,8 +966,8 @@ int realm_create_protected_data_page(struct realm *realm,
 err:
 	if (ret == -EIO) {
 		/* current offset needs undelegating */
-		if (WARN_ON(rmi_granule_undelegate(dst_phys)))
-			undelegate_failed = true;
+		if (!WARN_ON(rmi_granule_undelegate(dst_phys)))
+			put_page(dst_page);
 	}
 	while (offset > 0) {
 		ipa -= RMM_PAGE_SIZE;
@@ -900,16 +976,8 @@ err:
 
 		rmi_data_destroy(rd, ipa, NULL, NULL);
 
-		if (WARN_ON(rmi_granule_undelegate(dst_phys)))
-			undelegate_failed = true;
-	}
-
-	if (undelegate_failed) {
-		/*
-		 * A granule could not be undelegated,
-		 * so the page has to be leaked
-		 */
-		get_page(dst_page);
+		if (!WARN_ON(rmi_granule_undelegate(dst_phys)))
+			put_page(dst_page);
 	}
 
 	return -ENXIO;
@@ -929,6 +997,94 @@ int fold_rtt(struct realm *realm, unsigned long addr, int level)
 	return 0;
 }
 
+#ifdef CONFIG_HISI_CCADA_HOST
+int realm_map_mmio_protected(struct realm *realm, unsigned long ipa,
+			     kvm_pfn_t pfn, unsigned long map_size,
+			     struct kvm_mmu_memory_cache *memcache)
+{
+	phys_addr_t phys = __pfn_to_phys(pfn);
+	phys_addr_t rd = virt_to_phys(realm->rd);
+	unsigned long base_ipa = ipa;
+	unsigned long size;
+	unsigned long data;
+	unsigned long top;
+	int map_level;
+	int level;
+	int ret = 0;
+
+	if (WARN_ON(!IS_ALIGNED(map_size, RMM_PAGE_SIZE)))
+		return -EINVAL;
+
+	if (WARN_ON(!IS_ALIGNED(ipa, map_size)))
+		return -EINVAL;
+
+	if (IS_ALIGNED(map_size, RMM_L2_BLOCK_SIZE))
+		map_level = 2;
+	else
+		map_level = 3;
+
+	if (map_level < RMM_RTT_MAX_LEVEL) {
+		/*
+		 * A temporary RTT is needed during the map, precreate it,
+		 * however if there is an error (e.g. missing parent tables)
+		 * this will be handled below.
+		 */
+		realm_create_rtt_levels(realm, ipa, map_level,
+					RMM_RTT_MAX_LEVEL, memcache);
+	}
+
+	for (size = 0; size < map_size; size += RMM_PAGE_SIZE) {
+		ret = rmi_dev_map(rd, phys, ipa);
+		if (ret == RMI_ERROR_DEV_ADDR) {
+			/*
+			 * It's likely we raced with another VCPU on the same
+			 * fault. Assume the other VCPU has handled the fault
+			 * and return to the guest.
+			 */
+			return 0;
+		}
+		if (RMI_RETURN_STATUS(ret) == RMI_ERROR_RTT) {
+			/* Create missing RTTs and retry */
+			level = RMI_RETURN_INDEX(ret);
+
+			WARN_ON(level == RMM_RTT_MAX_LEVEL);
+
+			ret = realm_create_rtt_levels(realm, ipa, level,
+						      RMM_RTT_MAX_LEVEL,
+						      memcache);
+			if (ret)
+				goto err;
+
+			ret = rmi_dev_map(rd, phys, ipa);
+		}
+
+		if (WARN_ON(ret))
+			goto err;
+
+		phys += RMM_PAGE_SIZE;
+		ipa += RMM_PAGE_SIZE;
+	}
+
+	if (map_size == RMM_L2_BLOCK_SIZE) {
+		ret = fold_rtt(realm, base_ipa, map_level + 1);
+		if (WARN_ON(ret))
+			goto err;
+	}
+
+	return 0;
+
+err:
+	while (size > 0) {
+		phys -= RMM_PAGE_SIZE;
+		size -= RMM_PAGE_SIZE;
+		ipa -= RMM_PAGE_SIZE;
+
+		WARN_ON(rmi_dev_unmap(rd, ipa, &data, &top));
+	}
+	return -ENXIO;
+}
+#endif
+
 int realm_map_protected(struct realm *realm,
 			unsigned long ipa,
 			kvm_pfn_t pfn,
@@ -941,6 +1097,13 @@ int realm_map_protected(struct realm *realm,
 	unsigned long size;
 	int map_level;
 	int ret = 0;
+
+#ifdef CONFIG_HISI_CCADA_HOST
+	/* If pfn is not map memory, it is device */
+	if (!pfn_is_map_memory(pfn))
+		return realm_map_mmio_protected(realm, ipa, pfn, map_size,
+						memcache);
+#endif
 
 	if (WARN_ON(!IS_ALIGNED(map_size, RMM_PAGE_SIZE)))
 		return -EINVAL;
@@ -975,6 +1138,7 @@ int realm_map_protected(struct realm *realm,
 			return 0;
 		}
 
+		get_page(phys_to_page(phys));
 		ret = rmi_data_create_unknown(rd, phys, ipa);
 
 		if (RMI_RETURN_STATUS(ret) == RMI_ERROR_RTT) {
@@ -1008,10 +1172,8 @@ int realm_map_protected(struct realm *realm,
 	return 0;
 
 err_undelegate:
-	if (WARN_ON(rmi_granule_undelegate(phys))) {
-		/* Page can't be returned to NS world so is lost */
-		get_page(phys_to_page(phys));
-	}
+	if (!WARN_ON(rmi_granule_undelegate(phys)))
+		put_page(phys_to_page(phys));
 err:
 	while (size > 0) {
 		unsigned long data, top;
@@ -1022,10 +1184,8 @@ err:
 
 		WARN_ON(rmi_data_destroy(rd, ipa, &data, &top));
 
-		if (WARN_ON(rmi_granule_undelegate(phys))) {
-			/* Page can't be returned to NS world so is lost */
-			get_page(phys_to_page(phys));
-		}
+		if (!WARN_ON(rmi_granule_undelegate(phys)))
+			put_page(phys_to_page(phys));
 	}
 	return -ENXIO;
 }
@@ -1417,6 +1577,15 @@ static int kvm_create_realm(struct kvm *kvm)
 	free_page((unsigned long)realm->params);
 	realm->params = NULL;
 
+#ifdef CONFIG_HISI_CCADA_HOST
+	ret = realm_attach_devs(realm);
+	if (ret) {
+		kvm_err("Fail to attach devs\n");
+		kvm_destroy_realm(kvm);
+		return ret;
+	}
+#endif
+
 	return 0;
 }
 
@@ -1536,6 +1705,7 @@ int _kvm_realm_enable_cap(struct kvm *kvm, struct kvm_enable_cap *cap)
 
 void _kvm_destroy_realm(struct kvm *kvm)
 {
+	struct kvm_s2_mmu *mmu = &kvm->arch.mmu;
 	struct realm *realm = &kvm->arch.realm;
 	size_t pgd_size = kvm_pgtable_stage2_pgd_size(kvm->arch.vtcr);
 	int i;
@@ -1547,6 +1717,16 @@ void _kvm_destroy_realm(struct kvm *kvm)
 
 	if (!kvm_realm_is_created(kvm))
 		return;
+
+#ifdef CONFIG_HISI_CCADA_HOST
+	write_lock(&kvm->mmu_lock);
+	unmap_stage2_range(mmu, 0, BIT(realm->ia_bits - 1), true);
+	write_unlock(&kvm->mmu_lock);
+	kvm_realm_destroy_rtts(kvm, mmu->pgt->ia_bits);
+
+	/* undelegate and detach dev from realm */
+	realm_destroy_dev_list(realm);
+#endif
 
 	WRITE_ONCE(realm->state, REALM_STATE_DYING);
 
@@ -1840,6 +2020,10 @@ int _kvm_init_realm_vm(struct kvm *kvm)
 
 	if (!kvm->arch.realm.params)
 		return -ENOMEM;
+
+#ifdef CONFIG_HISI_CCADA_HOST
+	INIT_LIST_HEAD(&kvm->arch.realm.rdev_list);
+#endif
 	return 0;
 }
 

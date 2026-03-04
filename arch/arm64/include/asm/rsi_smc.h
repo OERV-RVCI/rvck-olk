@@ -190,4 +190,19 @@ struct realm_config {
  */
 #define SMC_RSI_HOST_CALL			SMC_RSI_FID(0x199)
 
+#ifdef CONFIG_HISI_CCADA_GUEST
+/*
+ * arg1 == bdf of pci device
+ * ret0 == Status / error
+ * ret1 == True if it device is realm / false
+ */
+#define SMC_RSI_VALIDATE_DEV			SMC_RSI_FID(0x19A)
+
+/*
+ * arg1 == bdf of pci device
+ * ret0 == Status / error
+ */
+#define SMC_RSI_RDEV_START			SMC_RSI_FID(0x1AA)
+#endif
+
 #endif /* __ASM_RSI_SMC_H_ */
