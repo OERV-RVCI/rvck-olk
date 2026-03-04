@@ -199,9 +199,6 @@ static void ummu_detach_dev(struct ummu_master *master)
 		ummu_write_tct_desc(core_to_ummu_device(
 					u_domain->base_domain.core_dev),
 					&u_domain->cfgs, true);
-
-	pr_debug("detach device %s tid %u is called!\n", dev_name(master->dev),
-		 tid);
 }
 
 static int ummu_domain_context_prepare(struct ummu_domain *u_domain)
@@ -457,7 +454,6 @@ static struct iommu_device *ummu_probe_device(struct device *dev)
 	refcount_set(&master->ksva_ref, 1);
 	refcount_set(&master->sva_ref, 1);
 	dev_iommu_priv_set(dev, master);
-	pr_debug("ummu probe device %s successful!\n", dev_name(dev));
 	return &ummu->core_dev.iommu;
 }
 
@@ -825,4 +821,5 @@ const struct ummu_device_helper ummu_helper = {
 	.sync_dom_cfg = ummu_sync_dom_cfg,
 	.alloc_domain_nested = ummu_viommu_alloc_domain_nested,
 	.cache_invalidate_user = ummu_viommu_cache_invalidate_user,
+	.sync_iotlb_all = ummu_flush_iotlb_all,
 };
