@@ -13,6 +13,8 @@
 
 extern bool dfx_switch;
 extern bool cqe_mode;
+extern uint32_t batch_flush_query_freq;
+extern uint32_t batch_flush_query_timeout;
 extern uint32_t jfr_sleep_time;
 extern uint32_t jfc_arm_mode;
 extern bool dump_aux_info;
@@ -165,6 +167,7 @@ struct udma_dev {
 	struct list_head hugepage_list;
 	atomic_t hugepage_seq;
 	struct udma_tp_cmdq_info *wait_cmdq_info;
+	struct udma_sq_reserved_info sq_reserved_info;
 };
 
 #define UDMA_ERR_MSG_LEN	128
