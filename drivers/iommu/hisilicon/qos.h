@@ -30,4 +30,7 @@ int ummu_get_bypass_mpam(struct ummu_device *ummu, int *partid, int *pmg);
 int ummu_set_uotr_mpam(struct ummu_device *ummu, int partid, int pmg);
 int ummu_get_uotr_mpam(struct ummu_device *ummu, int *partid, int *pmg);
 
+int ummu_device_dev_config(struct device *dev, int type, int command, void *data);
+void ummu_release_partid_map(void);
+
 #endif  /* __UMMU_QOS_H__ */

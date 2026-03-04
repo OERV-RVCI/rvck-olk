@@ -817,6 +817,7 @@ const struct ummu_core_ops ummu_ops = {
 	.del_eid = ummu_del_eid,
 	.invalidate_cfg = ummu_invalidate_cfg,
 	.get_hw_cap = ummu_device_get_hw_cap,
+	.dev_config = ummu_device_dev_config,
 };
 
 const struct ummu_device_helper ummu_helper = {

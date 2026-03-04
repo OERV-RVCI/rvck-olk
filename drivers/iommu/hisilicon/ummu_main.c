@@ -26,6 +26,7 @@
 #include "cfg_table.h"
 #include "iommu.h"
 #include "sva.h"
+#include "qos.h"
 
 #define UMMU_DRV_NAME "ummu"
 #define HISI_VENDOR_ID 0xCC08
@@ -813,6 +814,7 @@ static int __init ummu_driver_register(struct platform_driver *drv)
 static void __exit ummu_driver_unregister(struct platform_driver *drv)
 {
 	platform_driver_unregister(drv);
+	ummu_release_partid_map();
 	ummu_free_global_meta();
 	ummu_global_identity_pgtbl_free();
 	logic_ummu_device_exit();
