@@ -1239,6 +1239,13 @@ void kvm_arch_mmu_enable_log_dirty_pt_masked(struct kvm *kvm,
 
 	lockdep_assert_held_write(&kvm->mmu_lock);
 
+#ifdef CONFIG_HISI_VIRTCCA_HOST
+	if (kvm_is_realm(kvm)) {
+		if (virtcca_kvm_adjust_dirty_log_range(kvm, &start, &end))
+			return;
+	}
+#endif
+
 	stage2_wp_range(&kvm->arch.mmu, start, end);
 
 	/*

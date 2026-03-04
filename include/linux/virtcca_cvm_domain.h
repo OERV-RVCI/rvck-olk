@@ -55,6 +55,9 @@ void virtcca_dev_destroy(u64 dev_num, u64 clean);
 bool is_virtcca_pci_cc_dev(struct device *dev);
 int virtcca_create_vdev(struct device *dev);
 bool is_virtcca_secure_vf(struct device *dev, struct device_driver *drv);
+int virtcca_kvm_prepare_dirty_bitmap(struct kvm *kvm, void *new);
+void virtcca_kvm_enable_log_dirty(struct kvm *kvm, void *new, bool *flush);
+bool virtcca_kvm_is_realm(struct kvm *kvm);
 
 #else
 static inline size_t virtcca_pci_get_rom_size(void  *pdev, void __iomem *rom,
@@ -86,6 +89,21 @@ static inline int virtcca_create_vdev(struct device *dev)
 }
 
 static inline bool is_virtcca_secure_vf(struct device *dev, struct device_driver *drv)
+{
+	return false;
+}
+
+static inline int virtcca_kvm_prepare_dirty_bitmap(struct kvm *kvm, void *new)
+{
+	return 0;
+}
+
+static inline void virtcca_kvm_enable_log_dirty(struct kvm *kvm, void *new, bool *flush)
+{
+	;
+}
+
+static inline bool virtcca_kvm_is_realm(struct kvm *kvm)
 {
 	return false;
 }
