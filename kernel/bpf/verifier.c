@@ -10815,6 +10815,14 @@ enum special_kfunc_type {
 	KF_bpf_dynptr_slice,
 	KF_bpf_dynptr_slice_rdwr,
 	KF_bpf_dynptr_clone,
+#ifdef CONFIG_HISOCK
+	KF_bpf_set_ingress_dst,
+	KF_bpf_set_ingress_dev,
+	KF_bpf_set_egress_dev,
+	KF_bpf_get_skb_ethhdr,
+	KF_bpf_handle_ingress_ptype,
+	KF_bpf_handle_egress_ptype,
+#endif
 };
 
 BTF_SET_START(special_kfunc_set)
@@ -10835,6 +10843,14 @@ BTF_ID(func, bpf_dynptr_from_xdp)
 BTF_ID(func, bpf_dynptr_slice)
 BTF_ID(func, bpf_dynptr_slice_rdwr)
 BTF_ID(func, bpf_dynptr_clone)
+#ifdef CONFIG_HISOCK
+BTF_ID(func, bpf_set_ingress_dst)
+BTF_ID(func, bpf_set_ingress_dev)
+BTF_ID(func, bpf_set_egress_dev)
+BTF_ID(func, bpf_get_skb_ethhdr)
+BTF_ID(func, bpf_handle_ingress_ptype)
+BTF_ID(func, bpf_handle_egress_ptype)
+#endif
 BTF_SET_END(special_kfunc_set)
 
 BTF_ID_LIST(special_kfunc_list)
@@ -10857,6 +10873,14 @@ BTF_ID(func, bpf_dynptr_from_xdp)
 BTF_ID(func, bpf_dynptr_slice)
 BTF_ID(func, bpf_dynptr_slice_rdwr)
 BTF_ID(func, bpf_dynptr_clone)
+#ifdef CONFIG_HISOCK
+BTF_ID(func, bpf_set_ingress_dst)
+BTF_ID(func, bpf_set_ingress_dev)
+BTF_ID(func, bpf_set_egress_dev)
+BTF_ID(func, bpf_get_skb_ethhdr)
+BTF_ID(func, bpf_handle_ingress_ptype)
+BTF_ID(func, bpf_handle_egress_ptype)
+#endif
 
 static bool is_kfunc_ret_null(struct bpf_kfunc_call_arg_meta *meta)
 {
@@ -11833,6 +11857,24 @@ static int fetch_kfunc_meta(struct bpf_verifier_env *env,
 	return 0;
 }
 
+static int check_atype_kfunc_compatibility(struct bpf_verifier_env *env, u32 func_id)
+{
+#ifdef CONFIG_HISOCK
+	if ((func_id == special_kfunc_list[KF_bpf_set_ingress_dst] ||
+	     func_id == special_kfunc_list[KF_bpf_set_ingress_dev] ||
+	     func_id == special_kfunc_list[KF_bpf_get_skb_ethhdr] ||
+	     func_id == special_kfunc_list[KF_bpf_handle_ingress_ptype]) &&
+	    env->prog->expected_attach_type != BPF_HISOCK_INGRESS)
+		return -EACCES;
+
+	if ((func_id == special_kfunc_list[KF_bpf_set_egress_dev] ||
+	     func_id == special_kfunc_list[KF_bpf_handle_egress_ptype]) &&
+	    env->prog->expected_attach_type != BPF_HISOCK_EGRESS)
+		return -EACCES;
+#endif
+	return 0;
+}
+
 static int check_kfunc_call(struct bpf_verifier_env *env, struct bpf_insn *insn,
 			    int *insn_idx_p)
 {
@@ -11861,6 +11903,11 @@ static int check_kfunc_call(struct bpf_verifier_env *env, struct bpf_insn *insn,
 	insn_aux = &env->insn_aux_data[insn_idx];
 
 	insn_aux->is_iter_next = is_iter_next_kfunc(&meta);
+
+	if (check_atype_kfunc_compatibility(env, meta.func_id)) {
+		verbose(env, "calling kernel function %s is not allowed\n", func_name);
+		return -EACCES;
+	}
 
 	if (is_kfunc_destructive(&meta) && !capable(CAP_SYS_BOOT)) {
 		verbose(env, "destructive kfunc calls require CAP_SYS_BOOT capability\n");

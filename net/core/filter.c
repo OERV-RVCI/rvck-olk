@@ -8446,6 +8446,10 @@ sock_ops_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog)
 		return &bpf_sock_ops_reserve_hdr_opt_proto;
 	case BPF_FUNC_tcp_sock:
 		return &bpf_tcp_sock_proto;
+#ifdef CONFIG_HISOCK
+	case BPF_FUNC_sk_release:
+		return &bpf_sk_release_proto;
+#endif
 #endif /* CONFIG_INET */
 #if IS_ENABLED(CONFIG_NETACC_BPF)
 	case BPF_FUNC_get_current_comm:
@@ -8792,12 +8796,25 @@ static bool hisock_is_valid_access(int off, int size,
 				   const struct bpf_prog *prog,
 				   struct bpf_insn_access_aux *info)
 {
-	switch (off) {
-	case bpf_ctx_range(struct __sk_buff, tc_classid):
-	case bpf_ctx_range(struct __sk_buff, data_meta):
-	case bpf_ctx_range(struct __sk_buff, tstamp):
-	case bpf_ctx_range(struct __sk_buff, wire_len):
+	if (type == BPF_WRITE)
 		return false;
+
+	if (prog->expected_attach_type == BPF_HISOCK_EGRESS) {
+		switch (off) {
+		case bpf_ctx_range(struct __sk_buff, tc_classid):
+		case bpf_ctx_range(struct __sk_buff, data_meta):
+		case bpf_ctx_range(struct __sk_buff, tstamp):
+		case bpf_ctx_range(struct __sk_buff, wire_len):
+			return false;
+		}
+	} else if (prog->expected_attach_type == BPF_HISOCK_INGRESS) {
+		switch (off) {
+		case bpf_ctx_range_till(struct __sk_buff, mark, queue_mapping):
+		case bpf_ctx_range(struct __sk_buff, priority):
+		case bpf_ctx_range_till(struct __sk_buff, tc_index, tc_classid):
+		case bpf_ctx_range_till(struct __sk_buff, napi_id, gso_size):
+			return false;
+		}
 	}
 
 	switch (off) {
@@ -11274,6 +11291,52 @@ const struct bpf_prog_ops flow_dissector_prog_ops = {
 	.test_run		= bpf_prog_test_run_flow_dissector,
 };
 
+#ifdef CONFIG_HISOCK
+DEFINE_STATIC_KEY_FALSE(hisock_ingress_key);
+
+static int hisock_ingress_prog_install(const union bpf_attr *attr, struct bpf_prog *new)
+{
+	struct net *net = current->nsproxy->net_ns;
+	struct net_device *dev;
+	struct bpf_prog *old;
+	int ret = 0;
+
+	if (attr->attach_type != BPF_HISOCK_INGRESS)
+		return -EINVAL;
+
+	rtnl_lock();
+	dev = __dev_get_by_index(net, attr->target_fd);
+	if (!dev) {
+		ret = -ENODEV;
+		goto out;
+	}
+
+	old = rtnl_dereference(dev->hisock_ingress);
+	rcu_assign_pointer(dev->hisock_ingress, new);
+
+	if (new && !old)
+		static_branch_inc(&hisock_ingress_key);
+	else if (!new && old)
+		static_branch_dec(&hisock_ingress_key);
+
+	if (old)
+		bpf_prog_put(old);
+out:
+	rtnl_unlock();
+	return ret;
+}
+
+int hisock_ingress_prog_attach(const union bpf_attr *attr, struct bpf_prog *prog)
+{
+	return hisock_ingress_prog_install(attr, prog);
+}
+
+int hisock_ingress_prog_detach(const union bpf_attr *attr)
+{
+	return hisock_ingress_prog_install(attr, NULL);
+}
+#endif
+
 int sk_detach_filter(struct sock *sk)
 {
 	int ret = -ENOENT;
@@ -12088,77 +12151,108 @@ __bpf_kfunc int bpf_sock_addr_set_sun_path(struct bpf_sock_addr_kern *sa_kern,
 }
 
 #ifdef CONFIG_HISOCK
-__bpf_kfunc struct dst_entry *
-bpf_skops_get_ingress_dst(struct bpf_sock_ops *skops_ctx)
+__bpf_kfunc int bpf_set_ingress_dst(struct __sk_buff *skb_ctx, unsigned long _sk)
 {
-	struct bpf_sock_ops_kern *skops = (struct bpf_sock_ops_kern *)skops_ctx;
-	struct sock *sk = skops->sk;
+	struct sk_buff *skb = (struct sk_buff *)skb_ctx;
+	struct sock *sk = (struct sock *)_sk;
 	struct dst_entry *dst;
 
 	WARN_ON_ONCE(!rcu_read_lock_held());
 
-	if (!sk || !sk_fullsock(sk))
-		return NULL;
+	if (!sk || !virt_addr_valid(sk))
+		return -EFAULT;
+
+	if (!sk_fullsock(sk))
+		return -EINVAL;
 
 	dst = rcu_dereference(sk->sk_rx_dst);
 	if (dst)
 		dst = dst_check(dst, 0);
+	if (dst && sk->sk_rx_dst_ifindex == skb->skb_iif)
+		skb_dst_set_noref(skb, dst);
 
-	return dst;
-}
-
-__bpf_kfunc int bpf_xdp_set_ingress_dst(struct xdp_md *xdp_ctx, void *dst__ign)
-{
-	struct xdp_buff *xdp = (struct xdp_buff *)xdp_ctx;
-	struct hisock_xdp_buff *hxdp = (struct hisock_xdp_buff *)xdp;
-	struct dst_entry *_dst = (struct dst_entry *)dst__ign;
-
-	if (!hxdp->skb)
-		return -EOPNOTSUPP;
-
-	if (!_dst || !virt_addr_valid(_dst))
-		return -EFAULT;
-
-	/* same as skb_valid_dst */
-	if (_dst->flags & DST_METADATA)
-		return -EINVAL;
-
-	skb_dst_set_noref(hxdp->skb, _dst);
 	return 0;
 }
 
-__bpf_kfunc int bpf_xdp_change_dev(struct xdp_md *xdp_ctx, u32 ifindex)
-{
-	struct xdp_buff *xdp = (struct xdp_buff *)xdp_ctx;
-	struct hisock_xdp_buff *hxdp = (void *)xdp;
-	struct net_device *dev;
-
-	WARN_ON_ONCE(!rcu_read_lock_held());
-
-	if (!hxdp->skb)
-		return -EOPNOTSUPP;
-
-	dev = dev_get_by_index_rcu(&init_net, ifindex);
-	if (!dev)
-		return -ENODEV;
-
-	hxdp->skb->dev = dev;
-	return 0;
-}
-
-__bpf_kfunc int bpf_skb_change_dev(struct __sk_buff *skb_ctx, u32 ifindex)
+__bpf_kfunc int
+bpf_get_skb_ethhdr(struct __sk_buff *skb_ctx, struct ethhdr *peth, int size__sz)
 {
 	struct sk_buff *skb = (struct sk_buff *)skb_ctx;
-	struct net_device *dev;
+	struct ethhdr *eth = eth_hdr(skb);
 
-	WARN_ON_ONCE(!rcu_read_lock_held());
+	if (size__sz != sizeof(struct ethhdr))
+		return -EINVAL;
 
-	dev = dev_get_by_index_rcu(&init_net, ifindex);
-	if (!dev)
-		return -ENODEV;
+	memcpy(peth, eth, size__sz);
+	return 0;
+}
+
+__bpf_kfunc int
+bpf_set_ingress_dev(struct __sk_buff *skb_ctx, unsigned long _dev)
+{
+	struct net_device *dev = (struct net_device *)_dev;
+	struct sk_buff *skb = (struct sk_buff *)skb_ctx;
+
+	if (!dev || !virt_addr_valid(dev))
+		return -EFAULT;
+
+	skb->dev = dev;
+	skb->skb_iif = dev->ifindex;
+	skb->pkt_type = PACKET_HOST;
+	return 0;
+}
+
+__bpf_kfunc int
+bpf_set_egress_dev(struct __sk_buff *skb_ctx, unsigned long _dev)
+{
+	struct net_device *dev = (struct net_device *)_dev;
+	struct sk_buff *skb = (struct sk_buff *)skb_ctx;
+
+	if (!dev || !virt_addr_valid(dev))
+		return -EFAULT;
 
 	skb->dev = dev;
 	return 0;
+}
+
+__bpf_kfunc void bpf_handle_ingress_ptype(struct __sk_buff *skb_ctx)
+{
+	struct sk_buff *skb = (struct sk_buff *)skb_ctx;
+	struct list_head *ptype_list = &ptype_all;
+	struct packet_type *ptype;
+
+	rcu_read_lock();
+again:
+	list_for_each_entry_rcu(ptype, ptype_list, list) {
+		if (likely(!skb_orphan_frags_rx(skb, GFP_ATOMIC))) {
+			refcount_inc(&skb->users);
+			ptype->func(skb, skb->dev, ptype, skb->dev);
+		}
+	}
+
+	if (ptype_list == &ptype_all) {
+		ptype_list = &skb->dev->ptype_all;
+		goto again;
+	}
+
+	rcu_read_unlock();
+}
+
+__bpf_kfunc void bpf_handle_egress_ptype(struct __sk_buff *skb_ctx)
+{
+	struct sk_buff *skb = (struct sk_buff *)skb_ctx;
+	struct net_device *dev, *orig_dev = skb->dev;
+
+	rcu_read_lock();
+	dev = skb_dst_dev_rcu(skb);
+	skb->dev = dev;
+	skb->protocol = htons(ETH_P_IP);
+
+	if (dev_nit_active(skb->dev))
+		dev_queue_xmit_nit(skb, skb->dev);
+
+	skb->dev = orig_dev;
+	rcu_read_unlock();
 }
 #endif
 __diag_pop();
@@ -12183,10 +12277,6 @@ BTF_SET8_END(bpf_kfunc_check_set_skb)
 
 BTF_SET8_START(bpf_kfunc_check_set_xdp)
 BTF_ID_FLAGS(func, bpf_dynptr_from_xdp)
-#ifdef CONFIG_HISOCK
-BTF_ID_FLAGS(func, bpf_xdp_set_ingress_dst)
-BTF_ID_FLAGS(func, bpf_xdp_change_dev)
-#endif
 BTF_SET8_END(bpf_kfunc_check_set_xdp)
 
 BTF_SET8_START(bpf_kfunc_check_set_sock_addr)
@@ -12194,12 +12284,13 @@ BTF_ID_FLAGS(func, bpf_sock_addr_set_sun_path)
 BTF_SET8_END(bpf_kfunc_check_set_sock_addr)
 
 #ifdef CONFIG_HISOCK
-BTF_SET8_START(bpf_kfunc_check_set_sock_ops)
-BTF_ID_FLAGS(func, bpf_skops_get_ingress_dst, KF_RET_NULL)
-BTF_SET8_END(bpf_kfunc_check_set_sock_ops)
-
 BTF_SET8_START(bpf_kfunc_check_set_hisock)
-BTF_ID_FLAGS(func, bpf_skb_change_dev)
+BTF_ID_FLAGS(func, bpf_set_ingress_dst)
+BTF_ID_FLAGS(func, bpf_get_skb_ethhdr)
+BTF_ID_FLAGS(func, bpf_set_ingress_dev)
+BTF_ID_FLAGS(func, bpf_set_egress_dev)
+BTF_ID_FLAGS(func, bpf_handle_ingress_ptype)
+BTF_ID_FLAGS(func, bpf_handle_egress_ptype)
 BTF_SET8_END(bpf_kfunc_check_set_hisock)
 #endif
 
@@ -12219,11 +12310,6 @@ static const struct btf_kfunc_id_set bpf_kfunc_set_sock_addr = {
 };
 
 #ifdef CONFIG_HISOCK
-static const struct btf_kfunc_id_set bpf_kfunc_set_sock_ops = {
-	.owner = THIS_MODULE,
-	.set = &bpf_kfunc_check_set_sock_ops,
-};
-
 static const struct btf_kfunc_id_set bpf_kfunc_set_hisock = {
 	.owner = THIS_MODULE,
 	.set = &bpf_kfunc_check_set_hisock,
@@ -12246,7 +12332,6 @@ static int __init bpf_kfunc_init(void)
 	ret = ret ?: register_btf_kfunc_id_set(BPF_PROG_TYPE_NETFILTER, &bpf_kfunc_set_skb);
 	ret = ret ?: register_btf_kfunc_id_set(BPF_PROG_TYPE_XDP, &bpf_kfunc_set_xdp);
 #ifdef CONFIG_HISOCK
-	ret = ret ?: register_btf_kfunc_id_set(BPF_PROG_TYPE_SOCK_OPS, &bpf_kfunc_set_sock_ops);
 	ret = ret ?: register_btf_kfunc_id_set(BPF_PROG_TYPE_HISOCK, &bpf_kfunc_set_hisock);
 #endif
 	return ret ?: register_btf_kfunc_id_set(BPF_PROG_TYPE_CGROUP_SOCK_ADDR,

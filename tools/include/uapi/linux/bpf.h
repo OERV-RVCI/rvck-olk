@@ -1064,6 +1064,7 @@ enum bpf_attach_type {
 	BPF_SCHED,
 #ifndef __GENKSYMS__
 	BPF_HISOCK_EGRESS,
+	BPF_HISOCK_INGRESS,
 #endif
 	__MAX_BPF_ATTACH_TYPE
 };
@@ -6321,7 +6322,6 @@ enum xdp_action {
 	XDP_PASS,
 	XDP_TX,
 	XDP_REDIRECT,
-	XDP_HISOCK_REDIRECT = 100,
 };
 
 /* user accessible metadata for XDP packet hook
