@@ -612,13 +612,11 @@ int rmi_cca_hisi_delegate_range(unsigned long start_addr, unsigned long size)
 	unsigned long start = start_addr;
 	unsigned long end = start_addr + size;
 	struct folio *folio;
-	unsigned long nr_pages;
 
 	while (start < end) {
 		folio = page_folio(phys_to_page(start));
-		if (!folio || __pfn_to_phys(folio_pfn(folio)) != start)
+		if (!folio)
 			return -EINVAL;
-		nr_pages = folio_nr_pages(folio);
 
 		if (folio_test_hugetlb(folio)) {
 			if (rme_isolate_hugetlb(folio))
@@ -627,7 +625,7 @@ int rmi_cca_hisi_delegate_range(unsigned long start_addr, unsigned long size)
 			if (folio_isolate_lru(folio))
 				folio_put(folio);
 		}
-		start += nr_pages * PAGE_SIZE;
+		start = (folio_pfn(folio) + folio_nr_pages(folio)) * PAGE_SIZE;
 	}
 	return _rmi_cca_hisi_delegate_range(start_addr, size);
 }
