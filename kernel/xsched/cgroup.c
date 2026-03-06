@@ -399,41 +399,43 @@ static void xcu_cancel_attach(struct cgroup_taskset *tset)
 void xcu_move_task(struct task_struct *task, struct xsched_group *old_xcg,
 			struct xsched_group *new_xcg)
 {
-	struct xsched_entity *xse, *tmp;
+	struct xsched_entity *xse;
 	struct xsched_cu *xcu;
+
+	if (!old_xcg || !new_xcg)
+		return;
 
 	spin_lock(&old_xcg->lock);
 
-	list_for_each_entry_safe(xse, tmp, &old_xcg->members, group_node) {
-		if (xse->owner_pid != task_pid_nr(task))
-			continue;
+	list_for_each_entry(xse, &old_xcg->members, group_node) {
+		if (xse->owner_pid == task_pid_nr(task)) {
+			if (WARN_ON_ONCE(xse->parent_grp != old_xcg))
+				break;
 
-		if (old_xcg != xse->parent_grp) {
-			WARN_ON(old_xcg != xse->parent_grp);
-			spin_unlock(&old_xcg->lock);
-			return;
+			/* delete from the old_xcg */
+			list_del(&xse->group_node);
+			xse->parent_grp = NULL;
+			break;
 		}
-
-		xcu = xse->xcu;
-
-		/* delete from the old_xcg */
-		list_del(&xse->group_node);
-
-		spin_unlock(&old_xcg->lock);
-
-		mutex_lock(&xcu->xcu_lock);
-		/* dequeue from the current runqueue */
-		dequeue_ctx(xse);
-		/* attach to the new_xcg */
-		xsched_group_xse_attach(new_xcg, xse);
-		/* enqueue to the runqueue in new_xcg */
-		enqueue_ctx(xse, xcu);
-		mutex_unlock(&xcu->xcu_lock);
-
-		return;
 	}
 
 	spin_unlock(&old_xcg->lock);
+
+	/* xse not found */
+	if (list_entry_is_head(xse, &old_xcg->members, group_node))
+		return;
+
+	xcu = xse->xcu;
+
+	mutex_lock(&xcu->xcu_lock);
+	/* dequeue from the current runqueue */
+	dequeue_ctx(xse);
+	/* attach to the new_xcg */
+	xsched_group_xse_attach(new_xcg, xse);
+	/* enqueue to the runqueue in new_xcg */
+	enqueue_ctx(xse, xcu);
+	wake_up_interruptible(&xcu->wq_xcu_idle);
+	mutex_unlock(&xcu->xcu_lock);
 }
 
 static void xcu_attach(struct cgroup_taskset *tset)
