@@ -168,12 +168,6 @@ static int xcu_cfs_cg_init(struct xsched_group *xcg,
 	return 0;
 }
 
-static void xcu_cfs_cg_deinit(struct xsched_group *xcg)
-{
-	xcg_perxcu_cfs_rq_deinit(xcg, num_active_xcu);
-	xcu_grp_shares_sub(xcg->parent, xcg);
-}
-
 /**
  * xcu_cg_init() - Initialize non-root xsched_group structure.
  * @xcg: new xsched_cgroup
@@ -498,7 +492,8 @@ static int xcu_cg_set_sched_class(struct xsched_group *xg, int type)
 	/* deinit old type if necessary */
 	switch (xg->sched_class) {
 	case XSCHED_TYPE_CFS:
-		xcu_cfs_cg_deinit(xg);
+		xcu_grp_shares_sub(xg->parent, xg);
+		xcg_perxcu_cfs_rq_deinit(xg, num_active_xcu);
 		break;
 	default:
 		break;
