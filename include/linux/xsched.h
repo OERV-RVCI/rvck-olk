@@ -448,7 +448,7 @@ int xsched_vsm_add_tail(struct vstream_info *vs, vstream_args_t *arg);
 struct vstream_metadata *xsched_vsm_fetch_first(struct vstream_info *vs);
 void xsched_rt_prio_set(pid_t tgid, unsigned int prio);
 void enqueue_ctx(struct xsched_entity *xse, struct xsched_cu *xcu);
-void dequeue_ctx(struct xsched_entity *xse, struct xsched_cu *xcu);
+void dequeue_ctx(struct xsched_entity *xse);
 int delete_ctx(struct xsched_context *ctx);
 
 #ifdef CONFIG_CGROUP_XCU

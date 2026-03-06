@@ -106,7 +106,7 @@ static struct xsched_entity *__raw_pick_next_ctx(struct xsched_cu *xcu)
 				class->select_work(xcu, next) : select_work_def(xcu, next);
 
 			if (scheduled == 0) {
-				dequeue_ctx(next, xcu);
+				dequeue_ctx(next);
 				return NULL;
 			}
 
@@ -133,14 +133,14 @@ void enqueue_ctx(struct xsched_entity *xse, struct xsched_cu *xcu)
 	}
 }
 
-void dequeue_ctx(struct xsched_entity *xse, struct xsched_cu *xcu)
+void dequeue_ctx(struct xsched_entity *xse)
 {
-	lockdep_assert_held(&xcu->xcu_lock);
-
 	if (xse_integrity_check(xse)) {
 		XSCHED_ERR("Fail to check xse integrity @ %s\n", __func__);
 		return;
 	}
+
+	lockdep_assert_held(&xse->xcu->xcu_lock);
 
 	if (xse->on_rq) {
 		xse->class->dequeue_ctx(xse);
@@ -172,7 +172,7 @@ int delete_ctx(struct xsched_context *ctx)
 	mutex_lock(&xcu->xcu_lock);
 	if (curr_xse == xse)
 		xcu->xrq.curr_xse = NULL;
-	dequeue_ctx(xse, xcu);
+	dequeue_ctx(xse);
 
 #ifdef CONFIG_CGROUP_XCU
 	xsched_group_xse_detach(xse);
@@ -412,11 +412,11 @@ int xsched_schedule(void *input_xcu)
 		/* if not deleted yet */
 		put_prev_ctx(curr_xse);
 		if (!atomic_read(&curr_xse->kicks_pending_cnt))
-			dequeue_ctx(curr_xse, xcu);
+			dequeue_ctx(curr_xse);
 
 #ifdef CONFIG_CGROUP_XCU
 		if (xsched_quota_exceed(curr_xse->parent_grp)) {
-			dequeue_ctx(&curr_xse->parent_grp->perxcu_priv[xcu->id].xse, xcu);
+			dequeue_ctx(&curr_xse->parent_grp->perxcu_priv[xcu->id].xse);
 			curr_xse->parent_grp->perxcu_priv[xcu->id].nr_throttled++;
 			curr_xse->parent_grp->perxcu_priv[xcu->id].start_throttled_time =
 				ktime_get();

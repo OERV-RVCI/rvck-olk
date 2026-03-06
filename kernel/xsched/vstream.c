@@ -91,7 +91,7 @@ static void xsched_task_free(struct kref *kref)
 	mutex_unlock(&xcu->ctx_list_lock);
 
 	mutex_lock(&xcu->xcu_lock);
-	dequeue_ctx(&ctx->xse, xcu);
+	dequeue_ctx(&ctx->xse);
 	kfree(ctx);
 	mutex_unlock(&xcu->xcu_lock);
 }

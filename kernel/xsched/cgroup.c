@@ -114,7 +114,7 @@ static void xcg_perxcu_cfs_rq_deinit(struct xsched_group *xcg, int max_id)
 	for (i = 0; i < max_id; i++) {
 		xcu = xsched_cu_mgr[i];
 		mutex_lock(&xcu->xcu_lock);
-		dequeue_ctx(&xcg->perxcu_priv[i].xse, xcu);
+		dequeue_ctx(&xcg->perxcu_priv[i].xse);
 		kfree(xcg->perxcu_priv[i].cfs_rq);
 		xcg->perxcu_priv[i].cfs_rq = NULL;
 		mutex_unlock(&xcu->xcu_lock);
@@ -423,7 +423,7 @@ void xcu_move_task(struct task_struct *task, struct xsched_group *old_xcg,
 
 		mutex_lock(&xcu->xcu_lock);
 		/* dequeue from the current runqueue */
-		dequeue_ctx(xse, xcu);
+		dequeue_ctx(xse);
 		/* attach to the new_xcg */
 		xsched_group_xse_attach(new_xcg, xse);
 		/* enqueue to the runqueue in new_xcg */
