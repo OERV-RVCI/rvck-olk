@@ -228,10 +228,14 @@ static void put_prev_ctx_fair(struct xsched_entity *xse)
 #endif
 }
 
-void rq_init_fair(struct xsched_cu *xcu)
+void rq_init_fair(struct xsched_rq *xrq)
 {
-	xcu->xrq.cfs.ctx_timeline = RB_ROOT_CACHED;
-	xcu->xrq.cfs.min_xruntime = XSCHED_TIME_INF;
+	if (!xrq)
+		return;
+
+	xrq->cfs.nr_running = 0;
+	xrq->cfs.ctx_timeline = RB_ROOT_CACHED;
+	xrq->cfs.min_xruntime = XSCHED_TIME_INF;
 }
 
 void xse_init_fair(struct xsched_entity *xse)

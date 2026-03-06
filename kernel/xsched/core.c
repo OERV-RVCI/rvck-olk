@@ -445,7 +445,7 @@ int xsched_xcu_init(struct xsched_cu *xcu, struct xcu_group *group, int xcu_id)
 
 	/* Initialize current XCU's runqueue. */
 	for_each_xsched_class(sched)
-		sched->rq_init(xcu);
+		sched->rq_init(&xcu->xrq);
 
 	/* This worker should set XCU to XSCHED_XCU_WAIT_IDLE.
 	 * If after initialization XCU still has XSCHED_XCU_NONE

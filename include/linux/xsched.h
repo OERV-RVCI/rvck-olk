@@ -96,7 +96,6 @@ struct xsched_rq_cfs {
  */
 struct xsched_rq {
 	struct xsched_entity *curr_xse;
-	const struct xsched_class *class;
 
 	int state;
 	int nr_running;
@@ -418,7 +417,7 @@ struct xsched_class {
 	void (*xse_deinit)(struct xsched_entity *xse);
 
 	/* Initialize a new runqueue per xcu */
-	void (*rq_init)(struct xsched_cu *xcu);
+	void (*rq_init)(struct xsched_rq *xrq);
 
 	/* Removes a given XSE from it's runqueue. */
 	void (*dequeue_ctx)(struct xsched_entity *xse);

@@ -111,14 +111,17 @@ static bool check_preempt_ctx_rt(struct xsched_entity *xse)
 	return true;
 }
 
-void rq_init_rt(struct xsched_cu *xcu)
+void rq_init_rt(struct xsched_rq *xrq)
 {
 	int prio = 0;
 
-	xcu->xrq.rt.nr_running = 0;
+	if (!xrq)
+		return;
+
+	xrq->rt.nr_running = 0;
 
 	for_each_xse_prio(prio) {
-		INIT_LIST_HEAD(&xcu->xrq.rt.rq[prio]);
+		INIT_LIST_HEAD(&xrq->rt.rq[prio]);
 	}
 }
 
