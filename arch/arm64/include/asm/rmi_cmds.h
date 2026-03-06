@@ -534,11 +534,11 @@ static inline int rmi_rtt_unmap_unprotected(unsigned long rd,
 
 #ifdef CONFIG_HISI_CCADA_HOST
 /**
- * rmi_dev_init() - Initilaize the dev info
+ * rmi_dev_init() - Initialize the dev info
  * @dev_bdf: Bdf of the pci dev
  * @pa: Pa of the delegated page
  *
- * Initilaize the dev info with the delegated memory.
+ * Initialize the dev info with the delegated memory.
  *
  * Return: RMI return code
  */

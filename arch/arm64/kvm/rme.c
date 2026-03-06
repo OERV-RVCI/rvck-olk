@@ -1806,6 +1806,9 @@ int _kvm_rec_pre_enter(struct kvm_vcpu *vcpu)
 	case RMI_EXIT_RIPAS_CHANGE:
 		kvm_complete_ripas_change(vcpu);
 		break;
+	case RMI_EXIT_DEV_VALIDATE:
+	case RMI_EXIT_DEV_START:
+		kvm_complete_dev_op(vcpu);
 	}
 
 	return 1;

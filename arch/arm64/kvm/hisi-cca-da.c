@@ -503,8 +503,6 @@ static int rme_root_dev_delegate(phys_addr_t params_addr)
 retry:
 	ret = rmi_root_dev_delegate(params_addr, &out_dev_bdf);
 	if (ret == RMI_ERROR_DEV_INFO) {
-		if (out_dev_bdf == last_dev_bdf)
-			return -ENXIO;
 
 		dev_info = (void *)get_zeroed_page(GFP_ATOMIC);
 		if (!dev_info) {
@@ -518,7 +516,6 @@ retry:
 			free_page((unsigned long)dev_info);
 			return -ENXIO;
 		}
-
 		ret = rmi_dev_init(out_dev_bdf, dev_info_phys);
 		if (ret && ret != RMI_ERROR_DEV_EXISTS) {
 			if (WARN_ON(rmi_granule_undelegate(dev_info_phys))) {
@@ -837,19 +834,14 @@ err_detach:
 	return ret;
 }
 
-int kvm_arm_vcpu_rme_dev_validate(struct kvm_vcpu *vcpu,
-				  struct kvm_arm_rme_dev_validate *args)
+void kvm_complete_dev_op(struct kvm_vcpu *vcpu)
 {
-	if (!vcpu || !args || !_vcpu_is_rec(vcpu))
-		return -EINVAL;
+	struct kvm_run *run = vcpu->run;
+	struct realm_rec *rec = vcpu->arch.rec;
 
-	/* Record host pdev bdf in rec_enter, complete dev validate in rmm */
-	vcpu->arch.rec->run->enter.vfio_dev = args->vfio_dev;
-	vcpu->arch.rec->run->enter.dev_bdf = args->dev_bdf;
-
-	return 0;
+	rec->run->enter.dev_bdf = run->rme_dev.dev_bdf;
+	rec->run->enter.vfio_dev = run->rme_dev.vfio_dev;
 }
-
 
 #define MMIO_REG_32_BIT 32
 static u32 rme_mmio_read32(unsigned long addr, struct pci_dev *pdev)
