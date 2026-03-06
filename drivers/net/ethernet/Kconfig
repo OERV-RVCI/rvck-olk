@@ -197,7 +197,7 @@ source "drivers/net/ethernet/wangxun/Kconfig"
 source "drivers/net/ethernet/wiznet/Kconfig"
 source "drivers/net/ethernet/xilinx/Kconfig"
 source "drivers/net/ethernet/xircom/Kconfig"
-source "drivers/net/ethernet/bzwx/Kconfig"
+source "drivers/net/ethernet/northlink/Kconfig"
 
 source "drivers/net/ethernet/nebula-matrix/Kconfig"
 
