@@ -392,22 +392,6 @@ ctx_find_by_tgid_and_xcu(pid_t tgid, struct xsched_cu *xcu)
 	return ret;
 }
 
-static inline u64 gcd(u64 a, u64 b)
-{
-	u64 rem;
-
-	while (a != 0 && b != 0) {
-		if (a > b) {
-			div64_u64_rem(a, b, &rem);
-			a = rem;
-		} else {
-			div64_u64_rem(b, a, &rem);
-			b = rem;
-		}
-	}
-	return (a) ? a : b;
-}
-
 struct xsched_class {
 	enum xcu_sched_class class_id;
 	size_t kick_slice;

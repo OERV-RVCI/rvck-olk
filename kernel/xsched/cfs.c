@@ -16,9 +16,6 @@
  */
 #include <linux/xsched.h>
 
-#define CFS_INNER_RQ_EMPTY(cfs_xse)                                            \
-	((cfs_xse)->xruntime == XSCHED_TIME_INF)
-
 static void xs_rq_add(struct xsched_entity_cfs *xse)
 {
 	struct xsched_rq_cfs *cfs_rq = xse->cfs_rq;
