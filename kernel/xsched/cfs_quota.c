@@ -137,12 +137,13 @@ void xsched_quota_timeout_init(struct xsched_group *xg)
 
 void xsched_quota_timeout_update(struct xsched_group *xg)
 {
-	struct hrtimer *t = &xg->quota_timeout;
-
-	hrtimer_cancel(t);
+	struct hrtimer *t;
 
 	if (!xg)
 		return;
+
+	t = &xg->quota_timeout;
+	hrtimer_cancel(t);
 
 	if (xg->quota > 0 && xg->period > 0)
 		hrtimer_start(t, ns_to_ktime(xg->period), HRTIMER_MODE_REL_SOFT);
