@@ -70,8 +70,10 @@ static int xcu_cg_set_file_show(struct xsched_group *xg, int sched_class)
  * proper functioning of the xsched_group.
  *
  * @param xcg Pointer to the xsched_group to be initialized.
+ * @param parent_xcg Pointer to the parent xsched_group to be inherited.
  */
-static void xcu_cg_initialize_components(struct xsched_group *xcg)
+static void init_xsched_group(
+	struct xsched_group *xcg, struct xsched_group *parent_xcg)
 {
 	spin_lock_init(&xcg->lock);
 	INIT_LIST_HEAD(&xcg->members);
@@ -79,16 +81,16 @@ static void xcu_cg_initialize_components(struct xsched_group *xcg)
 	xsched_quota_timeout_init(xcg);
 	INIT_WORK(&xcg->refill_work, xsched_quota_refill);
 	WRITE_ONCE(xcg->is_offline, false);
+
+	xcg->sched_class = parent_xcg ? parent_xcg->sched_class : XSCHED_TYPE_DFLT;
+	xcg->parent = parent_xcg;
+	xcg->runtime = 0;
 }
 
 void xcu_cg_subsys_init(void)
 {
-	xcu_cg_initialize_components(root_xcg);
+	init_xsched_group(root_xcg, NULL);
 
-	root_xcg->sched_class = XSCHED_TYPE_DFLT;
-	root_xcg->period = XSCHED_CFS_QUOTA_PERIOD_MS;
-	root_xcg->quota = XSCHED_TIME_INF;
-	root_xcg->runtime = 0;
 	xsched_quota_init();
 
 	xsched_group_cache = KMEM_CACHE(xsched_group, 0);
@@ -158,11 +160,10 @@ static int xcu_cfs_cg_init(struct xsched_group *xcg,
 		xcg->perxcu_priv[id].xse.xcu = xcu;
 	}
 
-	xcg->shares_cfg = XSCHED_CFG_SHARE_DFLT;
-	xcu_grp_shares_add(parent_xg, xcg);
 	xcg->period = XSCHED_CFS_QUOTA_PERIOD_MS;
 	xcg->quota = XSCHED_TIME_INF;
-	xcg->runtime = 0;
+	xcg->shares_cfg = XSCHED_CFG_SHARE_DFLT;
+	xcu_grp_shares_add(parent_xg, xcg);
 
 	return 0;
 }
@@ -181,10 +182,8 @@ static void xcu_cfs_cg_deinit(struct xsched_group *xcg)
 static int xcu_cg_init(struct xsched_group *xcg,
 				struct xsched_group *parent_xg)
 {
-	xcu_cg_initialize_components(xcg);
-	xcg->parent = parent_xg;
+	init_xsched_group(xcg, parent_xg);
 	list_add_tail(&xcg->group_node, &parent_xg->children_groups);
-	xcg->sched_class = parent_xg->sched_class;
 
 	switch (xcg->sched_class) {
 	case XSCHED_TYPE_CFS:
