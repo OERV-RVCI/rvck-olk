@@ -80,7 +80,6 @@ static void init_xsched_group(
 	INIT_LIST_HEAD(&xcg->children_groups);
 	xsched_quota_timeout_init(xcg);
 	INIT_WORK(&xcg->refill_work, xsched_quota_refill);
-	WRITE_ONCE(xcg->is_offline, false);
 
 	xcg->sched_class = parent_xcg ? parent_xcg->sched_class : XSCHED_TYPE_DFLT;
 	xcg->parent = parent_xcg;
@@ -233,19 +232,19 @@ static void xcu_css_free(struct cgroup_subsys_state *css)
 {
 	struct xsched_group *xcg = xcu_cg_from_css(css);
 
+	hrtimer_cancel(&xcg->quota_timeout);
+	cancel_work_sync(&xcg->refill_work);
+	cancel_work_sync(&xcg->file_show_work);
+
+	if (xcg->sched_class == XSCHED_TYPE_CFS)
+		xcg_perxcu_cfs_rq_deinit(xcg, num_active_xcu);
+
 	kmem_cache_free(xsched_group_cache, xcg);
 }
 
 static void delay_xcu_cg_set_file_show_workfn(struct work_struct *work)
 {
-	struct xsched_group *xg;
-
-	xg = container_of(work, struct xsched_group, file_show_work);
-
-	if (!xg) {
-		XSCHED_ERR("xsched_group cannot be null @ %s", __func__);
-		return;
-	}
+	struct xsched_group *xg = container_of(work, struct xsched_group, file_show_work);
 
 	for (int i = 0; i < XCUCG_SET_FILE_RETRY_COUNT; i++) {
 		if (!xcu_cg_set_file_show(xg, xg->sched_class))
@@ -289,23 +288,23 @@ static void xcu_css_offline(struct cgroup_subsys_state *css)
 
 	xcg = xcu_cg_from_css(css);
 
-	WRITE_ONCE(xcg->is_offline, true);
+	if (xcg == root_xcg)
+		return;
 
-	hrtimer_cancel(&xcg->quota_timeout);
-	cancel_work_sync(&xcg->refill_work);
-	cancel_work_sync(&xcg->file_show_work);
-
-	if (xcg != root_xcg) {
-		switch (xcg->sched_class) {
-		case XSCHED_TYPE_CFS:
-			xcu_cfs_cg_deinit(xcg);
-			break;
-		default:
-			XSCHED_INFO("xcu_cgroup: deinit RT group css=0x%lx\n",
-						(uintptr_t)&xcg->css);
-			break;
-		}
+	switch (xcg->sched_class) {
+	case XSCHED_TYPE_CFS:
+		xcu_grp_shares_sub(xcg->parent, xcg);
+		break;
+	default:
+		XSCHED_INFO("xcu_cgroup: deinit RT group css=0x%lx\n",
+					(uintptr_t)&xcg->css);
+		break;
 	}
+}
+
+static void xcu_css_releasd(struct cgroup_subsys_state *css)
+{
+	struct xsched_group *xcg = xcu_cg_from_css(css);
 
 	list_del(&xcg->group_node);
 }
@@ -682,22 +681,31 @@ static int xcu_stat(struct seq_file *sf, void *v)
 	struct cgroup_subsys_state *css = seq_css(sf);
 	struct xsched_group *xcucg = xcu_cg_from_css(css);
 	struct xsched_rq_cfs *cfs_rq;
+	struct xsched_cu *xcu;
 	u64 nr_throttled = 0;
 	u64 throttled_time = 0;
 	u64 exec_runtime = 0;
-	int xcu_id;
+	int id;
 
 	if (xcucg->sched_class == XSCHED_TYPE_RT) {
 		seq_printf(sf, "RT group stat is not supported @ %s.\n", __func__);
 		return 0;
 	}
 
-	for (xcu_id = 0; xcu_id < num_active_xcu; xcu_id++) {
-		cfs_rq = xsched_group_cfs_rq(xcucg, xcu_id);
+	for_each_active_xcu(xcu, id) {
+		mutex_lock(&xcu->xcu_lock);
+
+		cfs_rq = xsched_group_cfs_rq(xcucg, id);
+		if (!cfs_rq) {
+			mutex_unlock(&xcu->xcu_lock);
+			continue;
+		}
 		nr_throttled += cfs_rq->nr_throttled;
 		throttled_time += cfs_rq->throttled_time;
 		exec_runtime +=
-			xcucg->perxcu_priv[xcu_id].xse.cfs.sum_exec_runtime;
+			xcucg->perxcu_priv[id].xse.cfs.sum_exec_runtime;
+
+		mutex_unlock(&xcu->xcu_lock);
 	}
 
 	seq_printf(sf, "exec_runtime:	%llu\n", exec_runtime);
@@ -754,6 +762,7 @@ struct cgroup_subsys xcu_cgrp_subsys = {
 	.css_alloc = xcu_css_alloc,
 	.css_online = xcu_css_online,
 	.css_offline = xcu_css_offline,
+	.css_released = xcu_css_releasd,
 	.css_free = xcu_css_free,
 	.can_attach = xcu_can_attach,
 	.cancel_attach = xcu_cancel_attach,

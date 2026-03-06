@@ -24,9 +24,6 @@ static void xsched_group_throttle(struct xsched_group *xg, struct xsched_cu *xcu
 	int xcu_id = xcu->id;
 	struct xsched_rq_cfs *cfs_rq;
 
-	if (!xg || READ_ONCE(xg->is_offline))
-		return;
-
 	lockdep_assert_held(&xcu->xcu_lock);
 
 	cfs_rq = xsched_group_cfs_rq(xg, xcu_id);
@@ -56,11 +53,6 @@ static void xsched_group_unthrottle(struct xsched_group *xg)
 	for_each_active_xcu(xcu, id) {
 		mutex_lock(&xcu->xcu_lock);
 
-		if (!xg || READ_ONCE(xg->is_offline)) {
-			mutex_unlock(&xcu->xcu_lock);
-			return;
-		}
-
 		cfs_rq = xsched_group_cfs_rq(xg, id);
 		if (!cfs_rq || !cfs_rq->throttled) {
 			mutex_unlock(&xcu->xcu_lock);
@@ -87,9 +79,7 @@ static void xsched_group_unthrottle(struct xsched_group *xg)
 
 void xsched_quota_refill(struct work_struct *work)
 {
-	struct xsched_group *xg;
-
-	xg = container_of(work, struct xsched_group, refill_work);
+	struct xsched_group *xg = container_of(work, struct xsched_group, refill_work);
 
 	spin_lock(&xg->lock);
 	xg->runtime = max((xg->runtime - xg->quota), (s64)0);
@@ -151,8 +141,7 @@ void xsched_quota_timeout_update(struct xsched_group *xg)
 
 	hrtimer_cancel(t);
 
-	if (!xg || READ_ONCE(xg->is_offline) ||
-		READ_ONCE(xg->sched_class) != XSCHED_TYPE_CFS)
+	if (!xg)
 		return;
 
 	if (xg->quota > 0 && xg->period > 0)

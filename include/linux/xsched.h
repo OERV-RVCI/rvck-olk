@@ -293,8 +293,6 @@ struct xsched_group {
 	/* to control the xcu.{period, quota, shares} files shown or not */
 	struct cgroup_file xcu_file[NR_XCU_FILE_TYPES];
 	struct work_struct file_show_work;
-
-	bool is_offline;
 };
 #endif /* CONFIG_CGROUP_XCU */
 
