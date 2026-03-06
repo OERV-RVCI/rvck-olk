@@ -429,6 +429,9 @@ struct xsched_class {
 	/* Check context preemption. */
 	bool (*check_preempt)(struct xsched_entity *xse);
 
+	/* Check if runqueue is not empty */
+	bool (*has_running)(struct xsched_cu *xcu);
+
 	/* Select jobs from XSE to submit on XCU */
 	size_t (*select_work)(struct xsched_cu *xcu, struct xsched_entity *xse);
 };

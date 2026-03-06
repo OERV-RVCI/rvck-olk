@@ -19,7 +19,7 @@
 #define CFS_INNER_RQ_EMPTY(cfs_xse)                                            \
 	((cfs_xse)->xruntime == XSCHED_TIME_INF)
 
-void xs_rq_add(struct xsched_entity_cfs *xse)
+static void xs_rq_add(struct xsched_entity_cfs *xse)
 {
 	struct xsched_rq_cfs *cfs_rq = xse->cfs_rq;
 	struct rb_node **link = &cfs_rq->ctx_timeline.rb_root.rb_node;
@@ -42,7 +42,7 @@ void xs_rq_add(struct xsched_entity_cfs *xse)
 	rb_insert_color_cached(&xse->run_node, &cfs_rq->ctx_timeline, leftmost);
 }
 
-void xs_rq_remove(struct xsched_entity_cfs *xse)
+static void xs_rq_remove(struct xsched_entity_cfs *xse)
 {
 	struct xsched_rq_cfs *cfs_rq = xse->cfs_rq;
 
@@ -195,6 +195,11 @@ static void enqueue_ctx_fair(struct xsched_entity *xse, struct xsched_cu *xcu)
 	xcu->xrq.cfs.min_xruntime = (first) ? first->xruntime : XSCHED_TIME_INF;
 }
 
+static inline bool has_running_fair(struct xsched_cu *xcu)
+{
+	return !!xcu->xrq.cfs.nr_running;
+}
+
 static struct xsched_entity *pick_next_ctx_fair(struct xsched_cu *xcu)
 {
 	struct xsched_entity_cfs *xse;
@@ -256,4 +261,5 @@ struct xsched_class fair_xsched_class = {
 	.pick_next_ctx = pick_next_ctx_fair,
 	.put_prev_ctx = put_prev_ctx_fair,
 	.check_preempt = xs_should_preempt_fair,
+	.has_running = has_running_fair,
 };

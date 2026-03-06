@@ -366,6 +366,19 @@ out_unlock:
 	return vsm;
 }
 
+static bool xcu_has_running(struct xsched_cu *xcu)
+{
+	bool ret = false;
+	struct xsched_class *sched;
+
+	mutex_lock(&xcu->xcu_lock);
+	for_each_xsched_class(sched)
+		ret |= sched->has_running(xcu);
+	mutex_unlock(&xcu->xcu_lock);
+
+	return ret;
+}
+
 int xsched_schedule(void *input_xcu)
 {
 	struct xsched_cu *xcu = input_xcu;
@@ -375,7 +388,7 @@ int xsched_schedule(void *input_xcu)
 	while (!kthread_should_stop()) {
 		mutex_unlock(&xcu->xcu_lock);
 		wait_event_interruptible(xcu->wq_xcu_idle,
-			xcu->xrq.rt.nr_running || xcu->xrq.cfs.nr_running || kthread_should_stop());
+			xcu_has_running(xcu) || kthread_should_stop());
 
 		mutex_lock(&xcu->xcu_lock);
 		if (kthread_should_stop()) {
