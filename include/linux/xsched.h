@@ -51,8 +51,10 @@
 
 extern struct xsched_cu *xsched_cu_mgr[XSCHED_NR_CUS];
 
+extern struct xsched_group *root_xcg;
 extern struct xsched_class rt_xsched_class;
 extern struct xsched_class fair_xsched_class;
+extern struct list_head xsched_class_list;
 
 #define for_each_xsched_class(class)                                           \
 	list_for_each_entry((class), &(xsched_class_list), node)
@@ -462,11 +464,16 @@ void dequeue_ctx(struct xsched_entity *xse);
 int delete_ctx(struct xsched_context *ctx);
 const struct xsched_class *find_xsched_class(int class_id);
 
+#ifdef CONFIG_XCU_SCHED_CFS
+void init_xsched_cfs_rq(struct xsched_rq_cfs *cfs_rq);
+#endif
+
 #ifdef CONFIG_CGROUP_XCU
 /* Xsched group manage functions */
 void xsched_group_inherit(struct task_struct *tsk, struct xsched_entity *xse);
 void xcu_cg_subsys_init(void);
-void xcu_cfs_root_cg_init(struct xsched_cu *xcu);
+void init_fair_xsched_group(struct xsched_group *xg,
+	struct xsched_cu *xcu, struct xsched_rq_cfs *cfs_rq);
 void xcu_grp_shares_update(struct xsched_group *parent,
 	struct xsched_group *child, u32 shares_cfg);
 void xcu_grp_shares_add(struct xsched_group *parent, struct xsched_group *child);

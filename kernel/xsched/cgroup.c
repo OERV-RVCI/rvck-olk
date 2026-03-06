@@ -97,15 +97,23 @@ void xcu_cg_subsys_init(void)
 	xcg_attach_entry_cache = KMEM_CACHE(xcg_attach_entry, 0);
 }
 
-void xcu_cfs_root_cg_init(struct xsched_cu *xcu)
+void init_fair_xsched_group(struct xsched_group *xg,
+	struct xsched_cu *xcu, struct xsched_rq_cfs *cfs_rq)
 {
 	int id = xcu->id;
 
-	root_xcg->perxcu_priv[id].xcu_id = id;
-	root_xcg->perxcu_priv[id].self = root_xcg;
-	root_xcg->perxcu_priv[id].cfs_rq = &xcu->xrq.cfs;
-	root_xcg->perxcu_priv[id].xse.is_group = true;
-	fair_xsched_class.xse_init(&root_xcg->perxcu_priv[id].xse);
+	if (xg != root_xcg && WARN_ON(!xg->parent))
+		return;
+
+	xg->perxcu_priv[id].xcu_id = id;
+	xg->perxcu_priv[id].self = xg;
+	xg->perxcu_priv[id].cfs_rq = cfs_rq;
+	xg->perxcu_priv[id].xse.xcu = xcu;
+	xg->perxcu_priv[id].xse.is_group = true;
+	xg->perxcu_priv[id].xse.parent_grp = xg->parent;
+
+	/* Put new empty groups to the right in parent's rbtree */
+	fair_xsched_class.xse_init(&xg->perxcu_priv[id].xse);
 }
 
 static void xcg_perxcu_cfs_rq_deinit(struct xsched_group *xcg, int max_id)
@@ -140,24 +148,16 @@ static int xcu_cfs_cg_init(struct xsched_group *xcg,
 	struct xsched_rq_cfs *sub_cfs_rq;
 
 	for_each_active_xcu(xcu, id) {
-		xcg->perxcu_priv[id].xcu_id = id;
-		xcg->perxcu_priv[id].self = xcg;
-
 		sub_cfs_rq = kzalloc(sizeof(*sub_cfs_rq), GFP_KERNEL);
 		if (!sub_cfs_rq) {
 			XSCHED_ERR("Fail to alloc cfs runqueue on xcu %d\n", id);
 			xcg_perxcu_cfs_rq_deinit(xcg, id);
 			return -ENOMEM;
 		}
-		xcg->perxcu_priv[id].cfs_rq = sub_cfs_rq;
-		xcg->perxcu_priv[id].cfs_rq->ctx_timeline = RB_ROOT_CACHED;
-		xcg->perxcu_priv[id].cfs_rq->min_xruntime = XSCHED_TIME_INF;
+		init_xsched_cfs_rq(sub_cfs_rq);
 
-		/* Put new empty groups to the right in parent's rbtree: */
-		fair_xsched_class.xse_init(&xcg->perxcu_priv[id].xse);
-		xcg->perxcu_priv[id].xse.is_group = true;
-		xcg->perxcu_priv[id].xse.parent_grp = parent_xg;
-		xcg->perxcu_priv[id].xse.xcu = xcu;
+		/* call init_fair_xsched_group() after init_xsched_group() */
+		init_fair_xsched_group(xcg, xcu, sub_cfs_rq);
 	}
 
 	xcg->period = XSCHED_CFS_QUOTA_PERIOD_MS;
