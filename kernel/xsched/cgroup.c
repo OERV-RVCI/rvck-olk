@@ -686,20 +686,21 @@ static int xcu_stat(struct seq_file *sf, void *v)
 {
 	struct cgroup_subsys_state *css = seq_css(sf);
 	struct xsched_group *xcucg = xcu_cg_from_css(css);
+	struct xsched_rq_cfs *cfs_rq;
 	u64 nr_throttled = 0;
 	u64 throttled_time = 0;
 	u64 exec_runtime = 0;
 	int xcu_id;
-	struct xsched_cu *xcu;
 
 	if (xcucg->sched_class == XSCHED_TYPE_RT) {
 		seq_printf(sf, "RT group stat is not supported @ %s.\n", __func__);
 		return 0;
 	}
 
-	for_each_active_xcu(xcu, xcu_id) {
-		nr_throttled += xcucg->perxcu_priv[xcu_id].nr_throttled;
-		throttled_time += xcucg->perxcu_priv[xcu_id].throttled_time;
+	for (xcu_id = 0; xcu_id < num_active_xcu; xcu_id++) {
+		cfs_rq = xsched_group_cfs_rq(xcucg, xcu_id);
+		nr_throttled += cfs_rq->nr_throttled;
+		throttled_time += cfs_rq->throttled_time;
 		exec_runtime +=
 			xcucg->perxcu_priv[xcu_id].xse.cfs.sum_exec_runtime;
 	}

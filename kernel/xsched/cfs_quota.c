@@ -22,19 +22,20 @@ static struct workqueue_struct *quota_workqueue;
 static void xsched_group_throttle(struct xsched_group *xg, struct xsched_cu *xcu)
 {
 	int xcu_id = xcu->id;
-	ktime_t now = ktime_get();
+	struct xsched_rq_cfs *cfs_rq;
 
 	if (!xg || READ_ONCE(xg->is_offline))
 		return;
 
 	lockdep_assert_held(&xcu->xcu_lock);
 
-	if (xg->perxcu_priv[xcu_id].cfs_rq->throttled)
+	cfs_rq = xsched_group_cfs_rq(xg, xcu_id);
+	if (cfs_rq->throttled)
 		return;
 
-	xg->perxcu_priv[xcu_id].cfs_rq->throttled = true;
-	xg->perxcu_priv[xcu_id].nr_throttled++;
-	xg->perxcu_priv[xcu_id].start_throttled_time = now;
+	cfs_rq->throttled = true;
+	cfs_rq->nr_throttled++;
+	cfs_rq->start_throttled_time = ktime_get();
 
 	/**
 	 * When an xse triggers XCU throttling, only the corresponding gse is
@@ -47,6 +48,7 @@ static void xsched_group_throttle(struct xsched_group *xg, struct xsched_cu *xcu
 
 static void xsched_group_unthrottle(struct xsched_group *xg)
 {
+	struct xsched_rq_cfs *cfs_rq;
 	struct xsched_cu *xcu;
 	ktime_t now = ktime_get();
 	int id;
@@ -59,8 +61,8 @@ static void xsched_group_unthrottle(struct xsched_group *xg)
 			return;
 		}
 
-		if (!xg->perxcu_priv[id].cfs_rq ||
-			!xg->perxcu_priv[id].cfs_rq->throttled) {
+		cfs_rq = xsched_group_cfs_rq(xg, id);
+		if (!cfs_rq || !cfs_rq->throttled) {
 			mutex_unlock(&xcu->xcu_lock);
 			continue;
 		}
@@ -69,13 +71,12 @@ static void xsched_group_unthrottle(struct xsched_group *xg)
 		 * Avoid inserting empty groups into the rbtree;
 		 * only mark them as throttled.
 		 */
-		xg->perxcu_priv[id].cfs_rq->throttled = false;
-		xg->perxcu_priv[id].throttled_time +=
-			ktime_to_ns(ktime_sub(now,
-			xg->perxcu_priv[id].start_throttled_time));
-		xg->perxcu_priv[id].start_throttled_time = 0;
+		cfs_rq->throttled = false;
+		cfs_rq->throttled_time += ktime_to_ns(
+			ktime_sub(now, cfs_rq->start_throttled_time));
+		cfs_rq->start_throttled_time = 0;
 
-		if (xg->perxcu_priv[id].cfs_rq->nr_running > 0) {
+		if (cfs_rq->nr_running > 0) {
 			enqueue_ctx(&xg->perxcu_priv[id].xse, xcu);
 			wake_up_interruptible(&xcu->wq_xcu_idle);
 		}

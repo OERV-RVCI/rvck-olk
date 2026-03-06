@@ -85,6 +85,10 @@ struct xsched_rq_cfs {
 	struct rb_root_cached ctx_timeline;
 
 	bool throttled;
+	/* Statistics */
+	int nr_throttled;
+	u64 throttled_time;
+	ktime_t start_throttled_time;
 };
 
 /* Base XSched runqueue object structure that contains both mutual and
@@ -244,11 +248,6 @@ struct xsched_group_xcu_priv {
 	struct xsched_entity xse; /* xse of this group on runqueue */
 	struct xsched_rq_cfs *cfs_rq; /* cfs runqueue "owned" by this group */
 	struct xsched_rq_rt *rt_rq; /* rt runqueue "owned" by this group */
-
-	/* Statistics */
-	int nr_throttled;
-	u64 throttled_time;
-	ktime_t start_throttled_time;
 };
 
 enum xcu_file_type {
@@ -307,6 +306,8 @@ struct xsched_group {
 #define parent_xse_of(__xse) (&(xse_parent_grp_xcu((__xse))->xse))
 
 #define xsched_cfs_rq_of(xse) (xse_parent_grp_xcu((xse))->cfs_rq)
+
+#define xsched_group_cfs_rq(__xg, __id) ((__xg)->perxcu_priv[(__id)].cfs_rq)
 
 #define for_each_xse(__xse)		\
 	for (; (__xse) && (__xse)->parent_grp;		\
