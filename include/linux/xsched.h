@@ -242,6 +242,7 @@ struct xsched_group_xcu_priv {
 	struct xsched_entity xse; /* xse of this group on runqueue */
 	struct xsched_rq_cfs *cfs_rq; /* cfs runqueue "owned" by this group */
 	struct xsched_rq_rt *rt_rq; /* rt runqueue "owned" by this group */
+
 	/* Statistics */
 	int nr_throttled;
 	u64 throttled_time;
@@ -298,11 +299,12 @@ struct xsched_group {
 #endif /* CONFIG_CGROUP_XCU */
 
 #ifdef CONFIG_CGROUP_XCU
-#define xcg_parent_grp_xcu(xcg)                                                \
-	((xcg)->self->parent->perxcu_priv[(xcg)->xcu_id])
-
 #define xse_parent_grp_xcu(xse)                                            \
 	(&(((xse)->parent_grp->perxcu_priv[(xse)->xcu->id])))
+
+#define parent_xse_of(__xse) (&(xse_parent_grp_xcu((__xse))->xse))
+
+#define xsched_cfs_rq_of(xse) (xse_parent_grp_xcu((xse))->cfs_rq)
 
 #define for_each_xse(__xse)		\
 	for (; (__xse) && (__xse)->parent_grp;		\
@@ -323,6 +325,8 @@ xse_this_grp(struct xsched_entity_cfs *xse_cfs)
 	return xse_cfs ? xse_this_grp_xcu(xse_cfs)->self : NULL;
 }
 #else
+
+#define xsched_cfs_rq_of(xse) (&((xse)->xcu->xrq.cfs))
 
 #define for_each_xse(__xse) for (; (__xse); (__xse) = NULL)
 

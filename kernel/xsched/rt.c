@@ -48,12 +48,14 @@ static void dequeue_ctx_rt(struct xsched_entity *xse)
 	struct xsched_cu *xcu = xse->xcu;
 
 	xse_rt_del(xse);
+	xse->on_rq = false;
 	xcu->xrq.rt.nr_running--;
 }
 
 static void enqueue_ctx_rt(struct xsched_entity *xse, struct xsched_cu *xcu)
 {
 	xse_rt_add(xse, xcu);
+	xse->on_rq = true;
 	xcu->xrq.rt.nr_running++;
 }
 

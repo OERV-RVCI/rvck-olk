@@ -127,7 +127,7 @@ void enqueue_ctx(struct xsched_entity *xse, struct xsched_cu *xcu)
 	}
 
 	if (!xse->on_rq) {
-		xse->on_rq = true;
+		xse->xcu = xcu;
 		xse->class->enqueue_ctx(xse, xcu);
 		XSCHED_DEBUG("Enqueue xse %d @ %s\n", xse->tgid, __func__);
 	}
@@ -144,7 +144,6 @@ void dequeue_ctx(struct xsched_entity *xse, struct xsched_cu *xcu)
 
 	if (xse->on_rq) {
 		xse->class->dequeue_ctx(xse);
-		xse->on_rq = false;
 		XSCHED_DEBUG("Dequeue xse %d @ %s\n", xse->tgid, __func__);
 	}
 }
