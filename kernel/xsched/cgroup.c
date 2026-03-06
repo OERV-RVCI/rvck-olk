@@ -592,24 +592,12 @@ static s64 xcu_read_s64(struct cgroup_subsys_state *css, struct cftype *cft)
 
 void xcu_grp_shares_update(struct xsched_group *parent, struct xsched_group *child, u32 shares_cfg)
 {
-	int id;
-	struct xsched_cu *xcu;
-
 	if (child->sched_class != XSCHED_TYPE_CFS)
 		return;
 
-	parent->children_shares_sum -= child->shares_cfg;
-
+	xcu_grp_shares_sub(parent, child);
 	child->shares_cfg = shares_cfg;
-	child->weight = child->shares_cfg;
-
-	for_each_active_xcu(xcu, id) {
-		mutex_lock(&xcu->xcu_lock);
-		child->perxcu_priv[id].xse.cfs.weight = child->weight;
-		mutex_unlock(&xcu->xcu_lock);
-	}
-
-	parent->children_shares_sum += child->shares_cfg;
+	xcu_grp_shares_add(parent, child);
 }
 
 void xcu_grp_shares_add(struct xsched_group *parent, struct xsched_group *child)
