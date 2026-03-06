@@ -34,7 +34,7 @@ static LIST_HEAD(xcg_attach_list);
 static DEFINE_MUTEX(xcg_mutex);
 static DEFINE_MUTEX(xcu_file_show_mutex);
 
-static const char xcu_sched_name[XSCHED_TYPE_NUM][4] = {
+static const char xcu_sched_name[XSCHED_TYPE_NUM][SCHED_CLASS_MAX_LENGTH] = {
 	[XSCHED_TYPE_RT] = "rt",
 	[XSCHED_TYPE_CFS] = "cfs"
 };

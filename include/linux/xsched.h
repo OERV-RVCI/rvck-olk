@@ -39,6 +39,7 @@
 #define XSCHED_CFS_WEIGHT_DFLT 1024
 #define XSCHED_CFS_QUOTA_PERIOD_MS (100 * NSEC_PER_MSEC)
 #define XSCHED_CFG_SHARE_DFLT 1024
+#define SCHED_CLASS_MAX_LENGTH 4
 
 /*
  * A default kick slice for RT class XSEs.
@@ -493,8 +494,6 @@ void xsched_quota_refill(struct work_struct *work);
 
 #define XCUCG_SET_FILE_RETRY_COUNT 100
 #define XCUCG_SET_FILE_DELAY_MS 10
-
-#define SCHED_CLASS_MAX_LENGTH 4
 
 #endif
 
