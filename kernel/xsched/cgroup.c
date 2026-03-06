@@ -102,6 +102,7 @@ void init_fair_xsched_group(struct xsched_group *xg,
 {
 	int id = xcu->id;
 
+	/* Ensure non-root group has a valid parent */
 	if (xg != root_xcg && WARN_ON(!xg->parent))
 		return;
 
@@ -202,11 +203,6 @@ inline struct xsched_group *xcu_cg_from_css(struct cgroup_subsys_state *css)
 	return css ? container_of(css, struct xsched_group, css) : NULL;
 }
 
-static inline bool xsched_group_is_root(struct xsched_group *xg)
-{
-	return xg && !xg->parent;
-}
-
 /**
  * xcu_css_alloc() - Allocate and init xcu cgroup.
  * @parent_css: css of parent xcu cgroup
@@ -299,7 +295,7 @@ static void xcu_css_offline(struct cgroup_subsys_state *css)
 	cancel_work_sync(&xcg->refill_work);
 	cancel_work_sync(&xcg->file_show_work);
 
-	if (!xsched_group_is_root(xcg)) {
+	if (xcg != root_xcg) {
 		switch (xcg->sched_class) {
 		case XSCHED_TYPE_CFS:
 			xcu_cfs_cg_deinit(xcg);
@@ -548,7 +544,7 @@ static ssize_t xcu_sched_class_write(struct kernfs_open_file *of, char *buf,
 	xg = xcu_cg_from_css(css);
 
 	/* only the first level of root can switch scheduler type */
-	if (!xsched_group_is_root(xg->parent)) {
+	if (xg->parent != root_xcg) {
 		css_put(css);
 		return -EINVAL;
 	}

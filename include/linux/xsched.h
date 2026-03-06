@@ -313,7 +313,7 @@ struct xsched_group {
 		(__xse) = &(xse_parent_grp_xcu((__xse))->xse))
 
 #define for_each_xsched_group(__xg)		\
-	for (; (__xg) && (__xg)->parent; (__xg) = (__xg)->parent)
+	for (; (__xg) != root_xcg; (__xg) = (__xg)->parent)
 
 static inline struct xsched_group_xcu_priv *
 xse_this_grp_xcu(struct xsched_entity_cfs *xse_cfs)
