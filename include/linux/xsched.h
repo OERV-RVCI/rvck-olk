@@ -297,16 +297,16 @@ struct xsched_group {
 };
 #endif /* CONFIG_CGROUP_XCU */
 
-#define XSCHED_SE_OF(cfs_xse)                                                  \
-	(container_of((cfs_xse), struct xsched_entity, cfs))
-
 #ifdef CONFIG_CGROUP_XCU
 #define xcg_parent_grp_xcu(xcg)                                                \
 	((xcg)->self->parent->perxcu_priv[(xcg)->xcu_id])
 
-#define xse_parent_grp_xcu(xse_cfs)                                            \
-	(&((XSCHED_SE_OF(xse_cfs)                                                  \
-			->parent_grp->perxcu_priv[(XSCHED_SE_OF(xse_cfs))->xcu->id])))
+#define xse_parent_grp_xcu(xse)                                            \
+	(&(((xse)->parent_grp->perxcu_priv[(xse)->xcu->id])))
+
+#define for_each_xse(__xse)		\
+	for (; (__xse) && (__xse)->parent_grp;		\
+		(__xse) = &(xse_parent_grp_xcu((__xse))->xse))
 
 static inline struct xsched_group_xcu_priv *
 xse_this_grp_xcu(struct xsched_entity_cfs *xse_cfs)
@@ -322,6 +322,10 @@ xse_this_grp(struct xsched_entity_cfs *xse_cfs)
 {
 	return xse_cfs ? xse_this_grp_xcu(xse_cfs)->self : NULL;
 }
+#else
+
+#define for_each_xse(__xse) for (; (__xse); (__xse) = NULL)
+
 #endif /* CONFIG_CGROUP_XCU */
 
 static inline int xse_integrity_check(struct xsched_entity *xse)

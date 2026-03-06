@@ -154,7 +154,6 @@ static int xcu_cfs_cg_init(struct xsched_group *xcg,
 		xcg->perxcu_priv[id].xse.class = &fair_xsched_class;
 
 		/* Put new empty groups to the right in parent's rbtree: */
-		xcg->perxcu_priv[id].xse.cfs.xruntime = XSCHED_TIME_INF;
 		xcg->perxcu_priv[id].xse.cfs.weight = XSCHED_CFS_WEIGHT_DFLT;
 		xcg->perxcu_priv[id].xse.parent_grp = parent_xg;
 
