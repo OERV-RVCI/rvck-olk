@@ -153,21 +153,15 @@ int delete_ctx(struct xsched_context *ctx)
 	struct xsched_cu *xcu = ctx->xse.xcu;
 	struct xsched_entity *curr_xse = xcu->xrq.curr_xse;
 	struct xsched_entity *xse = &ctx->xse;
+	int pending;
 
-	if (xse_integrity_check(xse)) {
-		XSCHED_ERR("Fail to check xse integrity @ %s\n", __func__);
+	if (xse_integrity_check(xse))
 		return -EINVAL;
-	}
 
-	if (!xse->xcu) {
-		XSCHED_ERR("Try to delete ctx that is not attached to xcu @ %s\n",
-			__func__);
-		return -EINVAL;
-	}
-
-	/* Wait till context has been submitted. */
-	while (atomic_read(&xse->kicks_pending_cnt))
-		usleep_range(100, 200);
+	pending = atomic_read(&xse->kicks_pending_cnt);
+	if (pending > 0)
+		XSCHED_WARN("Delete xse %d on xcu %u with pending %d kicks\n",
+			xse->tgid, xcu->id, pending);
 
 	mutex_lock(&xcu->xcu_lock);
 	if (curr_xse == xse)
