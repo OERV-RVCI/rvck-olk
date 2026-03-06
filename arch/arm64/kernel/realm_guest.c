@@ -64,7 +64,7 @@ static int set_msix_region_shared(struct pci_dev *pdev, int bar)
 	u32 table_offset;
 	u16 control;
 	u8 msix_bir;
-	u8 tsize;
+	size_t tsize;
 
 	pci_read_config_dword(pdev, pdev->msix_cap + PCI_MSIX_TABLE, &table_offset);
 	msix_bir = (u8)(table_offset & PCI_MSIX_TABLE_BIR);
@@ -73,11 +73,18 @@ static int set_msix_region_shared(struct pci_dev *pdev, int bar)
 
 	table_offset &= PCI_MSIX_TABLE_OFFSET;
 	start = pci_resource_start(pdev, msix_bir) + table_offset;
+	if (start <= table_offset) {
+		pci_err(pdev, "pci dev msi start overflow.\n");
+		return -EINVAL;
+	}
 
 	pci_read_config_word(pdev, pdev->msix_cap + PCI_MSIX_FLAGS, &control);
 	tsize = msix_table_size(control);
 	end = ALIGN(start + tsize * PCI_MSIX_ENTRY_SIZE, PAGE_SIZE);
-
+	if (end <= start) {
+		pci_err(pdev, "pci dev msi end overflow.\n");
+		return -EINVAL;
+	}
 	return rsi_set_memory_range_shared(start, end);
 }
 
