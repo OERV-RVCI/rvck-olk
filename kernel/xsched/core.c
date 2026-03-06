@@ -414,21 +414,11 @@ int xsched_schedule(void *input_xcu)
 		if (!atomic_read(&curr_xse->kicks_pending_cnt))
 			dequeue_ctx(curr_xse);
 
-#ifdef CONFIG_CGROUP_XCU
-		if (xsched_quota_exceed(curr_xse->parent_grp)) {
-			dequeue_ctx(&curr_xse->parent_grp->perxcu_priv[xcu->id].xse);
-			curr_xse->parent_grp->perxcu_priv[xcu->id].nr_throttled++;
-			curr_xse->parent_grp->perxcu_priv[xcu->id].start_throttled_time =
-				ktime_get();
-		}
-#endif
-
 		xcu->xrq.curr_xse = NULL;
 	}
 
 	return 0;
 }
-
 
 /* Initializes all xsched XCU objects.
  * Should only be called from xsched_xcu_register function.

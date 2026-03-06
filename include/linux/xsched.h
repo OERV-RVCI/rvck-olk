@@ -310,6 +310,9 @@ struct xsched_group {
 	for (; (__xse) && (__xse)->parent_grp;		\
 		(__xse) = &(xse_parent_grp_xcu((__xse))->xse))
 
+#define for_each_xsched_group(__xg)		\
+	for (; (__xg) && (__xg)->parent; (__xg) = (__xg)->parent)
+
 static inline struct xsched_group_xcu_priv *
 xse_this_grp_xcu(struct xsched_entity_cfs *xse_cfs)
 {
@@ -466,7 +469,7 @@ void xsched_quota_init(void);
 void xsched_quota_timeout_init(struct xsched_group *xg);
 void xsched_quota_timeout_update(struct xsched_group *xg);
 void xsched_quota_account(struct xsched_group *xg, s64 exec_time);
-bool xsched_quota_exceed(struct xsched_group *xg);
+void xsched_quota_check(struct xsched_group *xg, struct xsched_cu *xcu);
 void xsched_quota_refill(struct work_struct *work);
 
 #define XCU_PERIOD_MIN_MS 1

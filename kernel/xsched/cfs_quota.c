@@ -19,6 +19,28 @@
 
 static struct workqueue_struct *quota_workqueue;
 
+static void xsched_group_throttle(struct xsched_group *xg, struct xsched_cu *xcu)
+{
+	int xcu_id = xcu->id;
+	ktime_t now = ktime_get();
+
+	if (!xg || READ_ONCE(xg->is_offline))
+		return;
+
+	lockdep_assert_held(&xcu->xcu_lock);
+
+	xg->perxcu_priv[xcu_id].nr_throttled++;
+	xg->perxcu_priv[xcu_id].start_throttled_time = now;
+
+	/**
+	 * When an xse triggers XCU throttling, only the corresponding gse is
+	 * dequeued from this XCU's group scheduling entity (gse) hierarchy,
+	 * no further propagation or global dequeue occurs, ensuring throttling
+	 * is scoped to the affected XCU.
+	 */
+	dequeue_ctx(&xg->perxcu_priv[xcu_id].xse);
+}
+
 static void xsched_group_unthrottle(struct xsched_group *xg)
 {
 	uint32_t id;
@@ -84,15 +106,16 @@ void xsched_quota_account(struct xsched_group *xg, s64 exec_time)
 	spin_unlock(&xg->lock);
 }
 
-bool xsched_quota_exceed(struct xsched_group *xg)
+void xsched_quota_check(struct xsched_group *xg, struct xsched_cu *xcu)
 {
-	bool ret;
+	bool throttled;
 
 	spin_lock(&xg->lock);
-	ret = (xg->quota > 0) ? (xg->runtime >= xg->quota) : false;
+	throttled = (xg->quota > 0) ? (xg->runtime >= xg->quota) : false;
 	spin_unlock(&xg->lock);
 
-	return ret;
+	if (throttled)
+		xsched_group_throttle(xg, xcu);
 }
 
 void xsched_quota_init(void)

@@ -206,12 +206,18 @@ static void put_prev_ctx_fair(struct xsched_entity *xse)
 {
 	struct xsched_entity *prev = xse;
 
-#ifdef CONFIG_CGROUP_XCU
-	xsched_quota_account(xse->parent_grp, (s64)xse->last_exec_runtime);
-#endif
-
 	for_each_xse(prev)
 		xs_update(&prev->cfs, xse->last_exec_runtime);
+
+#ifdef CONFIG_CGROUP_XCU
+	struct xsched_group *group = xse->parent_grp;
+	struct xsched_cu *xcu = xse->xcu;
+
+	for_each_xsched_group(group) {
+		xsched_quota_account(group, (s64)xse->last_exec_runtime);
+		xsched_quota_check(group, xcu);
+	}
+#endif
 }
 
 void rq_init_fair(struct xsched_cu *xcu)
