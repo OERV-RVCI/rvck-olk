@@ -16,10 +16,7 @@
  */
 #include <linux/xsched.h>
 
-#define CFS_INNER_RQ_EMPTY(cfs_xse)                                            \
-	((cfs_xse)->xruntime == XSCHED_TIME_INF)
-
-void xs_rq_add(struct xsched_entity_cfs *xse)
+static void xs_rq_add(struct xsched_entity_cfs *xse)
 {
 	struct xsched_rq_cfs *cfs_rq = xse->cfs_rq;
 	struct rb_node **link = &cfs_rq->ctx_timeline.rb_root.rb_node;
@@ -42,7 +39,7 @@ void xs_rq_add(struct xsched_entity_cfs *xse)
 	rb_insert_color_cached(&xse->run_node, &cfs_rq->ctx_timeline, leftmost);
 }
 
-void xs_rq_remove(struct xsched_entity_cfs *xse)
+static void xs_rq_remove(struct xsched_entity_cfs *xse)
 {
 	struct xsched_rq_cfs *cfs_rq = xse->cfs_rq;
 
@@ -62,14 +59,7 @@ static void xs_cfs_rq_update(struct xsched_entity_cfs *xse_cfs, u64 new_xrt)
 static inline struct xsched_entity_cfs *
 xs_pick_first(struct xsched_rq_cfs *cfs_rq)
 {
-	struct rb_node *left;
-
-	if (!cfs_rq) {
-		XSCHED_WARN("the rq cannot be NULL @ %s\n", __func__);
-		return NULL;
-	}
-
-	left = rb_first_cached(&cfs_rq->ctx_timeline);
+	struct rb_node *left = rb_first_cached(&cfs_rq->ctx_timeline);
 
 	if (!left)
 		return NULL;
@@ -84,47 +74,20 @@ xs_pick_first(struct xsched_rq_cfs *cfs_rq)
  */
 static void xs_update(struct xsched_entity_cfs *xse_cfs, u64 delta)
 {
-	struct xsched_group_xcu_priv *xg = xse_parent_grp_xcu(xse_cfs);
+	u64 new_xrt;
 
-	for (; xg; xse_cfs = &xg->xse.cfs, xg = &xcg_parent_grp_xcu(xg)) {
-		u64 new_xrt = xse_cfs->xruntime + xs_calc_delta_fair(delta, xse_cfs->weight);
+	new_xrt = xse_cfs->xruntime +
+		xs_calc_delta_fair(delta, xse_cfs->weight);
 
-		xs_cfs_rq_update(xse_cfs, new_xrt);
-		xse_cfs->sum_exec_runtime += delta;
-
-		if (xg->self->parent == NULL)
-			break;
-	}
+	xs_cfs_rq_update(xse_cfs, new_xrt);
+	xse_cfs->sum_exec_runtime += delta;
 }
 
-/**
- * xg_update() - Update container group's xruntime
- * @gxcu: Descendant xsched group's private xcu control structure
- *
- * No locks required to access xsched_group_xcu_priv members,
- * because only one worker thread works for one XCU.
- */
-static void xg_update(struct xsched_group_xcu_priv *xg, int task_delta)
+static void update_min_xruntime(struct xsched_rq_cfs *cfs_rq)
 {
-	u64 new_xrt;
-	struct xsched_entity_cfs *entry;
+	struct xsched_entity_cfs *leftmost = xs_pick_first(cfs_rq);
 
-	for (; xg; xg = &xcg_parent_grp_xcu(xg)) {
-		xg->cfs_rq->nr_running += task_delta;
-		entry = xs_pick_first(xg->cfs_rq);
-		new_xrt = entry ? xs_calc_delta_fair(entry->xruntime, xg->xse.cfs.weight)
-			: XSCHED_TIME_INF;
-
-		xg->cfs_rq->min_xruntime = new_xrt;
-		xg->xse.cfs.xruntime = new_xrt;
-
-		if (!xg->xse.on_rq)
-			break;
-		if (!xg->self->parent)
-			break;
-
-		xs_cfs_rq_update(&xg->xse.cfs, new_xrt);
-	}
+	cfs_rq->min_xruntime = leftmost ? leftmost->xruntime : XSCHED_TIME_INF;
 }
 
 /*
@@ -134,19 +97,42 @@ static void xg_update(struct xsched_group_xcu_priv *xg, int task_delta)
  */
 static void dequeue_ctx_fair(struct xsched_entity *xse)
 {
-	int task_delta;
-	struct xsched_cu *xcu = xse->xcu;
-	struct xsched_entity_cfs *first;
+	struct xsched_entity *child = xse;
+	struct xsched_rq_cfs *rq;
+
+	for_each_xse(child) {
+		if (!child->on_rq)
+			break;
+
+		rq = xsched_cfs_rq_of(child);
+
+		xs_rq_remove(&child->cfs);
+		child->on_rq = false;
+		rq->nr_running--;
+
+		/**
+		 * Dequeue the group's scheduling entity (GSE) from
+		 * its parent runqueue when the group becomes empty,
+		 * so it no longer participates in scheduling until
+		 * new tasks arrive.
+		 */
+		if (rq->nr_running > 0)
+			break;
+	}
+}
+
+static void place_xsched_entity(struct xsched_rq_cfs *rq, struct xsched_entity *xse)
+{
 	struct xsched_entity_cfs *xse_cfs = &xse->cfs;
 
-	task_delta =
-		(xse->is_group) ? -(xse_this_grp_xcu(xse_cfs)->cfs_rq->nr_running) : -1;
+	if (!rq)
+		return;
 
-	xs_rq_remove(xse_cfs);
-	xg_update(xse_parent_grp_xcu(xse_cfs), task_delta);
+	xse_cfs->cfs_rq = rq;
+	if (rq->min_xruntime != XSCHED_TIME_INF)
+		xse_cfs->xruntime = max(xse_cfs->xruntime, rq->min_xruntime);
 
-	first = xs_pick_first(&xcu->xrq.cfs);
-	xcu->xrq.cfs.min_xruntime = (first) ? first->xruntime : XSCHED_TIME_INF;
+	xs_rq_add(xse_cfs);
 }
 
 /**
@@ -160,57 +146,59 @@ static void dequeue_ctx_fair(struct xsched_entity *xse)
  */
 static void enqueue_ctx_fair(struct xsched_entity *xse, struct xsched_cu *xcu)
 {
-	int task_delta;
-	struct xsched_entity_cfs *first;
-	struct xsched_rq_cfs *rq, *sub_rq;
-	struct xsched_entity_cfs *xse_cfs = &xse->cfs;
+	struct xsched_rq_cfs *rq;
+	struct xsched_entity *child = xse;
 
-	rq = xse_cfs->cfs_rq = xse_parent_grp_xcu(xse_cfs)->cfs_rq;
-	if (!rq) {
-		XSCHED_WARN("the parent rq this xse [%d] attached cannot be NULL @ %s\n",
-			xse->tgid, __func__);
-		return;
+	for_each_xse(child) {
+		/*
+		 * Terminate upward traversal of parent groups if
+		 * Xse is already enqueued or Group is throttled.
+		 */
+		if (child->on_rq)
+			break;
+
+#ifdef CONFIG_CGROUP_XCU
+		if (child->is_group && xsched_entity_throttled(child))
+			break;
+#endif
+
+		rq = xsched_cfs_rq_of(child);
+		place_xsched_entity(rq, child);
+		child->on_rq = true;
+		rq->nr_running++;
+		update_min_xruntime(rq);
 	}
+}
 
-	sub_rq = xse_this_grp_xcu(xse_cfs)->cfs_rq;
-	if (xse->is_group && !sub_rq) {
-		XSCHED_WARN("the sub_rq this cgroup-type xse [%d] owned cannot be NULL @ %s\n",
-			xse->tgid, __func__);
-		return;
-	}
+static inline bool has_running_fair(struct xsched_cu *xcu)
+{
+	return !!xcu->xrq.cfs.nr_running;
+}
 
-	task_delta =
-		(xse->is_group) ? sub_rq->nr_running : 1;
+static inline struct xsched_rq_cfs *
+next_cfs_rq_of(struct xsched_entity_cfs *xse)
+{
+#ifdef CONFIG_CGROUP_XCU
+	struct xsched_entity *se = container_of(xse, struct xsched_entity, cfs);
 
-	/* If no XSE or only empty groups */
-	if (xs_pick_first(rq) == NULL || rq->min_xruntime == XSCHED_TIME_INF)
-		rq->min_xruntime = xse_cfs->xruntime;
-	else
-		xse_cfs->xruntime = max(xse_cfs->xruntime, rq->min_xruntime);
-
-	xs_rq_add(xse_cfs);
-	xg_update(xse_parent_grp_xcu(xse_cfs), task_delta);
-
-	first = xs_pick_first(&xcu->xrq.cfs);
-	xcu->xrq.cfs.min_xruntime = (first) ? first->xruntime : XSCHED_TIME_INF;
+	if (se->is_group)
+		return xse_this_grp_xcu(xse)->cfs_rq;
+#endif
+	return NULL;
 }
 
 static struct xsched_entity *pick_next_ctx_fair(struct xsched_cu *xcu)
 {
 	struct xsched_entity_cfs *xse;
 	struct xsched_rq_cfs *rq = &xcu->xrq.cfs;
+	u64 now = ktime_get_ns();
 
-	xse = xs_pick_first(rq);
-	if (!xse)
-		return NULL;
+	for (; rq; rq = next_cfs_rq_of(xse)) {
+		xse = xs_pick_first(rq);
+		if (!xse)
+			return NULL;
 
-	for (; xse && XSCHED_SE_OF(xse)->is_group; xse = xs_pick_first(rq))
-		rq = xse_this_grp_xcu(xse)->cfs_rq;
-
-	if (!xse) {
-		XSCHED_DEBUG("the xse this xcu [%u] is trying to pick is NULL @ %s\n",
-			xcu->id, __func__);
-		return NULL;
+		xse->exec_start = now;
 	}
 
 	return container_of(xse, struct xsched_entity, cfs);
@@ -224,19 +212,40 @@ xs_should_preempt_fair(struct xsched_entity *xse)
 
 static void put_prev_ctx_fair(struct xsched_entity *xse)
 {
-	struct xsched_entity_cfs *prev = &xse->cfs;
+	struct xsched_entity *prev = xse;
 
-	xsched_quota_account(xse->parent_grp, (s64)xse->last_exec_runtime);
-	xs_update(prev, xse->last_exec_runtime);
+	for_each_xse(prev)
+		xs_update(&prev->cfs, xse->last_exec_runtime);
+
+#ifdef CONFIG_CGROUP_XCU
+	struct xsched_group *group = xse->parent_grp;
+	struct xsched_cu *xcu = xse->xcu;
+
+	for_each_xsched_group(group) {
+		xsched_quota_account(group, (s64)xse->last_exec_runtime);
+		xsched_quota_check(group, xcu);
+	}
+#endif
 }
 
-void rq_init_fair(struct xsched_cu *xcu)
+void init_xsched_cfs_rq(struct xsched_rq_cfs *cfs_rq)
 {
-	xcu->xrq.cfs.ctx_timeline = RB_ROOT_CACHED;
+	cfs_rq->nr_running = 0;
+	cfs_rq->ctx_timeline = RB_ROOT_CACHED;
+	cfs_rq->min_xruntime = XSCHED_TIME_INF;
+}
+
+void rq_init_fair(struct xsched_rq *xrq)
+{
+	if (!xrq)
+		return;
+
+	init_xsched_cfs_rq(&xrq->cfs);
 }
 
 void xse_init_fair(struct xsched_entity *xse)
 {
+	xse->class = &fair_xsched_class;
 	xse->cfs.weight = XSCHED_CFS_WEIGHT_DFLT;
 }
 
@@ -256,4 +265,5 @@ struct xsched_class fair_xsched_class = {
 	.pick_next_ctx = pick_next_ctx_fair,
 	.put_prev_ctx = put_prev_ctx_fair,
 	.check_preempt = xs_should_preempt_fair,
+	.has_running = has_running_fair,
 };

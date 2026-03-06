@@ -69,29 +69,36 @@ static int vstream_file_create(struct vstream_info *vs)
 static void xsched_task_free(struct kref *kref)
 {
 	struct xsched_context *ctx;
-	vstream_info_t *vs, *tmp;
+	vstream_info_t *vs, *tmp_vs;
+	vstream_metadata_t *vsm, *tmp_vsm;
 	struct xsched_cu *xcu;
 
 	ctx = container_of(kref, struct xsched_context, kref);
 	xcu = ctx->xse.xcu;
 
-	/* Wait utill xse dequeues */
-	while (READ_ONCE(ctx->xse.on_rq))
-		usleep_range(100, 200);
-
 	mutex_lock(&xcu->ctx_list_lock);
-	list_for_each_entry_safe(vs, tmp, &ctx->vstream_list, ctx_node) {
+	delete_ctx(ctx);
+	list_for_each_entry_safe(vs, tmp_vs, &ctx->vstream_list, ctx_node) {
 		list_del(&vs->ctx_node);
+
+		/* delete pending kicks */
+		mutex_lock(&xcu->xcu_lock);
+		spin_lock(&vs->stream_lock);
+		list_for_each_entry_safe(vsm, tmp_vsm, &vs->metadata_list, node) {
+			list_del(&vsm->node);
+			kfree(vsm);
+		}
+		spin_unlock(&vs->stream_lock);
+		mutex_unlock(&xcu->xcu_lock);
 		kfree(vs);
 	}
 
-	delete_ctx(ctx);
 	list_del(&ctx->ctx_node);
 	--xcu->nr_ctx;
 	mutex_unlock(&xcu->ctx_list_lock);
 
 	mutex_lock(&xcu->xcu_lock);
-	dequeue_ctx(&ctx->xse, xcu);
+	dequeue_ctx(&ctx->xse);
 	kfree(ctx);
 	mutex_unlock(&xcu->xcu_lock);
 }
@@ -229,7 +236,7 @@ static int alloc_ctx_from_vstream(struct vstream_info *vstream_info,
 
 	init_xsched_ctx(*ctx, vstream_info);
 
-	ret = xsched_init_entity(*ctx, vstream_info);
+	ret = init_xsched_entity(*ctx, vstream_info);
 	if (ret) {
 		XSCHED_ERR("Fail to initialize XSE for context @ %s\n",
 			__func__);

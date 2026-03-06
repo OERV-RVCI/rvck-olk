@@ -43,33 +43,25 @@ static inline void xse_rt_move_tail(struct xsched_entity *xse)
 	list_move_tail(&xse->rt.list_node, &xcu->xrq.rt.rq[xse->rt.prio]);
 }
 
-/* Increase RT runqueue total and per prio nr_running stat. */
-static inline void xrq_inc_nr_running(struct xsched_entity *xse,
-					struct xsched_cu *xcu)
-{
-	xcu->xrq.rt.nr_running++;
-}
-
-/* Decrease RT runqueue total and per prio nr_running stat
- * and raise a bug if nr_running decrease beyond zero.
- */
-static inline void xrq_dec_nr_running(struct xsched_entity *xse)
+static void dequeue_ctx_rt(struct xsched_entity *xse)
 {
 	struct xsched_cu *xcu = xse->xcu;
 
-	xcu->xrq.rt.nr_running--;
-}
-
-static void dequeue_ctx_rt(struct xsched_entity *xse)
-{
 	xse_rt_del(xse);
-	xrq_dec_nr_running(xse);
+	xse->on_rq = false;
+	xcu->xrq.rt.nr_running--;
 }
 
 static void enqueue_ctx_rt(struct xsched_entity *xse, struct xsched_cu *xcu)
 {
 	xse_rt_add(xse, xcu);
-	xrq_inc_nr_running(xse, xcu);
+	xse->on_rq = true;
+	xcu->xrq.rt.nr_running++;
+}
+
+static inline bool has_running_rt(struct xsched_cu *xcu)
+{
+	return !!xcu->xrq.rt.nr_running;
 }
 
 static inline struct xsched_entity *xrq_next_xse(struct xsched_cu *xcu,
@@ -119,14 +111,17 @@ static bool check_preempt_ctx_rt(struct xsched_entity *xse)
 	return true;
 }
 
-void rq_init_rt(struct xsched_cu *xcu)
+void rq_init_rt(struct xsched_rq *xrq)
 {
 	int prio = 0;
 
-	xcu->xrq.rt.nr_running = 0;
+	if (!xrq)
+		return;
+
+	xrq->rt.nr_running = 0;
 
 	for_each_xse_prio(prio) {
-		INIT_LIST_HEAD(&xcu->xrq.rt.rq[prio]);
+		INIT_LIST_HEAD(&xrq->rt.rq[prio]);
 	}
 }
 
@@ -135,8 +130,10 @@ void xse_init_rt(struct xsched_entity *xse)
 	struct task_struct *p;
 
 	p = find_task_by_vpid(xse->tgid);
-	xse->rt.prio = p->_resvd->xse_attr.xsched_priority;
-	XSCHED_DEBUG("Xse init: set priority=%d.\n", xse->rt.prio);
+	if (p)
+		xse->rt.prio = p->_resvd->xse_attr.xsched_priority;
+
+	xse->class = &rt_xsched_class;
 	xse->rt.timeslice = XSCHED_RT_TIMESLICE;
 	INIT_LIST_HEAD(&xse->rt.list_node);
 }
@@ -153,7 +150,8 @@ struct xsched_class rt_xsched_class = {
 	.enqueue_ctx = enqueue_ctx_rt,
 	.pick_next_ctx = pick_next_ctx_rt,
 	.put_prev_ctx = put_prev_ctx_rt,
-	.check_preempt = check_preempt_ctx_rt
+	.check_preempt = check_preempt_ctx_rt,
+	.has_running = has_running_rt,
 };
 
 void xsched_rt_prio_set(pid_t tgid, unsigned int prio)

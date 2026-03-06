@@ -39,6 +39,7 @@
 #define XSCHED_CFS_WEIGHT_DFLT 1024
 #define XSCHED_CFS_QUOTA_PERIOD_MS (100 * NSEC_PER_MSEC)
 #define XSCHED_CFG_SHARE_DFLT 1024
+#define SCHED_CLASS_MAX_LENGTH 4
 
 /*
  * A default kick slice for RT class XSEs.
@@ -51,11 +52,10 @@
 
 extern struct xsched_cu *xsched_cu_mgr[XSCHED_NR_CUS];
 
+extern struct xsched_group *root_xcg;
 extern struct xsched_class rt_xsched_class;
 extern struct xsched_class fair_xsched_class;
-
-#define xsched_first_class \
-	list_first_entry(&(xsched_class_list), struct xsched_class, node)
+extern struct list_head xsched_class_list;
 
 #define for_each_xsched_class(class)                                           \
 	list_for_each_entry((class), &(xsched_class_list), node)
@@ -83,6 +83,12 @@ struct xsched_rq_cfs {
 	unsigned int load;
 	u64 min_xruntime;
 	struct rb_root_cached ctx_timeline;
+
+	bool throttled;
+	/* Statistics */
+	int nr_throttled;
+	u64 throttled_time;
+	ktime_t start_throttled_time;
 };
 
 /* Base XSched runqueue object structure that contains both mutual and
@@ -90,7 +96,6 @@ struct xsched_rq_cfs {
  */
 struct xsched_rq {
 	struct xsched_entity *curr_xse;
-	const struct xsched_class *class;
 
 	int state;
 	int nr_running;
@@ -242,10 +247,6 @@ struct xsched_group_xcu_priv {
 	struct xsched_entity xse; /* xse of this group on runqueue */
 	struct xsched_rq_cfs *cfs_rq; /* cfs runqueue "owned" by this group */
 	struct xsched_rq_rt *rt_rq; /* rt runqueue "owned" by this group */
-	/* Statistics */
-	int nr_throttled;
-	u64 throttled_time;
-	ktime_t start_throttled_time;
 };
 
 enum xcu_file_type {
@@ -292,21 +293,25 @@ struct xsched_group {
 	/* to control the xcu.{period, quota, shares} files shown or not */
 	struct cgroup_file xcu_file[NR_XCU_FILE_TYPES];
 	struct work_struct file_show_work;
-
-	bool is_offline;
 };
 #endif /* CONFIG_CGROUP_XCU */
 
-#define XSCHED_SE_OF(cfs_xse)                                                  \
-	(container_of((cfs_xse), struct xsched_entity, cfs))
-
 #ifdef CONFIG_CGROUP_XCU
-#define xcg_parent_grp_xcu(xcg)                                                \
-	((xcg)->self->parent->perxcu_priv[(xcg)->xcu_id])
+#define xse_parent_grp_xcu(xse)                                            \
+	(&(((xse)->parent_grp->perxcu_priv[(xse)->xcu->id])))
 
-#define xse_parent_grp_xcu(xse_cfs)                                            \
-	(&((XSCHED_SE_OF(xse_cfs)                                                  \
-			->parent_grp->perxcu_priv[(XSCHED_SE_OF(xse_cfs))->xcu->id])))
+#define parent_xse_of(__xse) (&(xse_parent_grp_xcu((__xse))->xse))
+
+#define xsched_cfs_rq_of(xse) (xse_parent_grp_xcu((xse))->cfs_rq)
+
+#define xsched_group_cfs_rq(__xg, __id) ((__xg)->perxcu_priv[(__id)].cfs_rq)
+
+#define for_each_xse(__xse)		\
+	for (; (__xse) && (__xse)->parent_grp;		\
+		(__xse) = &(xse_parent_grp_xcu((__xse))->xse))
+
+#define for_each_xsched_group(__xg)		\
+	for (; (__xg) != root_xcg; (__xg) = (__xg)->parent)
 
 static inline struct xsched_group_xcu_priv *
 xse_this_grp_xcu(struct xsched_entity_cfs *xse_cfs)
@@ -322,6 +327,20 @@ xse_this_grp(struct xsched_entity_cfs *xse_cfs)
 {
 	return xse_cfs ? xse_this_grp_xcu(xse_cfs)->self : NULL;
 }
+
+static inline bool xsched_entity_throttled(struct xsched_entity *xse)
+{
+	struct xsched_group_xcu_priv *grp_xcu =
+		container_of(xse, struct xsched_group_xcu_priv, xse);
+
+	return grp_xcu->cfs_rq->throttled;
+}
+#else
+
+#define xsched_cfs_rq_of(xse) (&((xse)->xcu->xrq.cfs))
+
+#define for_each_xse(__xse) for (; (__xse); (__xse) = NULL)
+
 #endif /* CONFIG_CGROUP_XCU */
 
 static inline int xse_integrity_check(struct xsched_entity *xse)
@@ -384,22 +403,6 @@ ctx_find_by_tgid_and_xcu(pid_t tgid, struct xsched_cu *xcu)
 	return ret;
 }
 
-static inline u64 gcd(u64 a, u64 b)
-{
-	u64 rem;
-
-	while (a != 0 && b != 0) {
-		if (a > b) {
-			div64_u64_rem(a, b, &rem);
-			a = rem;
-		} else {
-			div64_u64_rem(b, a, &rem);
-			b = rem;
-		}
-	}
-	return (a) ? a : b;
-}
-
 struct xsched_class {
 	enum xcu_sched_class class_id;
 	size_t kick_slice;
@@ -412,7 +415,7 @@ struct xsched_class {
 	void (*xse_deinit)(struct xsched_entity *xse);
 
 	/* Initialize a new runqueue per xcu */
-	void (*rq_init)(struct xsched_cu *xcu);
+	void (*rq_init)(struct xsched_rq *xrq);
 
 	/* Removes a given XSE from it's runqueue. */
 	void (*dequeue_ctx)(struct xsched_entity *xse);
@@ -428,6 +431,9 @@ struct xsched_class {
 
 	/* Check context preemption. */
 	bool (*check_preempt)(struct xsched_entity *xse);
+
+	/* Check if runqueue is not empty */
+	bool (*has_running)(struct xsched_cu *xcu);
 
 	/* Select jobs from XSE to submit on XCU */
 	size_t (*select_work)(struct xsched_cu *xcu, struct xsched_entity *xse);
@@ -447,20 +453,26 @@ static inline void xsched_init_vsm(struct vstream_metadata *vsm,
 
 int xsched_xcu_init(struct xsched_cu *xcu, struct xcu_group *group, int xcu_id);
 int xsched_schedule(void *input_xcu);
-int xsched_init_entity(struct xsched_context *ctx, struct vstream_info *vs);
+int init_xsched_entity(struct xsched_context *ctx, struct vstream_info *vs);
 int ctx_bind_to_xcu(vstream_info_t *vstream_info, struct xsched_context *ctx);
 int xsched_vsm_add_tail(struct vstream_info *vs, vstream_args_t *arg);
 struct vstream_metadata *xsched_vsm_fetch_first(struct vstream_info *vs);
 void xsched_rt_prio_set(pid_t tgid, unsigned int prio);
 void enqueue_ctx(struct xsched_entity *xse, struct xsched_cu *xcu);
-void dequeue_ctx(struct xsched_entity *xse, struct xsched_cu *xcu);
+void dequeue_ctx(struct xsched_entity *xse);
 int delete_ctx(struct xsched_context *ctx);
+const struct xsched_class *find_xsched_class(int class_id);
+
+#ifdef CONFIG_XCU_SCHED_CFS
+void init_xsched_cfs_rq(struct xsched_rq_cfs *cfs_rq);
+#endif
 
 #ifdef CONFIG_CGROUP_XCU
 /* Xsched group manage functions */
 void xsched_group_inherit(struct task_struct *tsk, struct xsched_entity *xse);
 void xcu_cg_subsys_init(void);
-void xcu_cfs_root_cg_init(struct xsched_cu *xcu);
+void init_fair_xsched_group(struct xsched_group *xg,
+	struct xsched_cu *xcu, struct xsched_rq_cfs *cfs_rq);
 void xcu_grp_shares_update(struct xsched_group *parent,
 	struct xsched_group *child, u32 shares_cfg);
 void xcu_grp_shares_add(struct xsched_group *parent, struct xsched_group *child);
@@ -471,7 +483,7 @@ void xsched_quota_init(void);
 void xsched_quota_timeout_init(struct xsched_group *xg);
 void xsched_quota_timeout_update(struct xsched_group *xg);
 void xsched_quota_account(struct xsched_group *xg, s64 exec_time);
-bool xsched_quota_exceed(struct xsched_group *xg);
+void xsched_quota_check(struct xsched_group *xg, struct xsched_cu *xcu);
 void xsched_quota_refill(struct work_struct *work);
 
 #define XCU_PERIOD_MIN_MS 1
@@ -480,8 +492,6 @@ void xsched_quota_refill(struct work_struct *work);
 
 #define XCUCG_SET_FILE_RETRY_COUNT 100
 #define XCUCG_SET_FILE_DELAY_MS 10
-
-#define SCHED_CLASS_MAX_LENGTH 4
 
 #endif
 

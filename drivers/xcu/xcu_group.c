@@ -328,7 +328,7 @@ int xsched_xcu_register(struct xcu_group *group, uint32_t phys_id)
 	}
 
 #ifdef CONFIG_CGROUP_XCU
-	xcu_cfs_root_cg_init(xcu);
+	init_fair_xsched_group(root_xcg, xcu, &xcu->xrq.cfs);
 #endif /* CONFIG_CGROUP_XCU */
 
 	return 0;

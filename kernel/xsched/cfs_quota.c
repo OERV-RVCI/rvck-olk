@@ -19,39 +19,67 @@
 
 static struct workqueue_struct *quota_workqueue;
 
+static void xsched_group_throttle(struct xsched_group *xg, struct xsched_cu *xcu)
+{
+	int xcu_id = xcu->id;
+	struct xsched_rq_cfs *cfs_rq;
+
+	lockdep_assert_held(&xcu->xcu_lock);
+
+	cfs_rq = xsched_group_cfs_rq(xg, xcu_id);
+	if (cfs_rq->throttled)
+		return;
+
+	cfs_rq->throttled = true;
+	cfs_rq->nr_throttled++;
+	cfs_rq->start_throttled_time = ktime_get();
+
+	/**
+	 * When an xse triggers XCU throttling, only the corresponding gse is
+	 * dequeued from this XCU's group scheduling entity (gse) hierarchy,
+	 * no further propagation or global dequeue occurs, ensuring throttling
+	 * is scoped to the affected XCU.
+	 */
+	dequeue_ctx(&xg->perxcu_priv[xcu_id].xse);
+}
+
 static void xsched_group_unthrottle(struct xsched_group *xg)
 {
-	uint32_t id;
+	struct xsched_rq_cfs *cfs_rq;
 	struct xsched_cu *xcu;
+	ktime_t now = ktime_get();
+	int id;
 
 	for_each_active_xcu(xcu, id) {
 		mutex_lock(&xcu->xcu_lock);
-		if (!xg || READ_ONCE(xg->is_offline) ||
-			READ_ONCE(xg->sched_class) != XSCHED_TYPE_CFS) {
+
+		cfs_rq = xsched_group_cfs_rq(xg, id);
+		if (!cfs_rq || !cfs_rq->throttled) {
 			mutex_unlock(&xcu->xcu_lock);
-			return;
+			continue;
 		}
-		if (!READ_ONCE(xg->perxcu_priv[id].xse.on_rq)) {
+
+		/*
+		 * Avoid inserting empty groups into the rbtree;
+		 * only mark them as throttled.
+		 */
+		cfs_rq->throttled = false;
+		cfs_rq->throttled_time += ktime_to_ns(
+			ktime_sub(now, cfs_rq->start_throttled_time));
+		cfs_rq->start_throttled_time = 0;
+
+		if (cfs_rq->nr_running > 0) {
 			enqueue_ctx(&xg->perxcu_priv[id].xse, xcu);
 			wake_up_interruptible(&xcu->wq_xcu_idle);
-
-			if (xg->perxcu_priv[id].start_throttled_time != 0) {
-				xg->perxcu_priv[id].throttled_time +=
-					ktime_to_ns(ktime_sub(ktime_get(),
-					xg->perxcu_priv[id].start_throttled_time));
-
-				xg->perxcu_priv[id].start_throttled_time = 0;
-			}
 		}
+
 		mutex_unlock(&xcu->xcu_lock);
 	}
 }
 
 void xsched_quota_refill(struct work_struct *work)
 {
-	struct xsched_group *xg;
-
-	xg = container_of(work, struct xsched_group, refill_work);
+	struct xsched_group *xg = container_of(work, struct xsched_group, refill_work);
 
 	spin_lock(&xg->lock);
 	xg->runtime = max((xg->runtime - xg->quota), (s64)0);
@@ -84,15 +112,16 @@ void xsched_quota_account(struct xsched_group *xg, s64 exec_time)
 	spin_unlock(&xg->lock);
 }
 
-bool xsched_quota_exceed(struct xsched_group *xg)
+void xsched_quota_check(struct xsched_group *xg, struct xsched_cu *xcu)
 {
-	bool ret;
+	bool throttled;
 
 	spin_lock(&xg->lock);
-	ret = (xg->quota > 0) ? (xg->runtime >= xg->quota) : false;
+	throttled = (xg->quota > 0) ? (xg->runtime >= xg->quota) : false;
 	spin_unlock(&xg->lock);
 
-	return ret;
+	if (throttled)
+		xsched_group_throttle(xg, xcu);
 }
 
 void xsched_quota_init(void)
@@ -108,13 +137,13 @@ void xsched_quota_timeout_init(struct xsched_group *xg)
 
 void xsched_quota_timeout_update(struct xsched_group *xg)
 {
-	struct hrtimer *t = &xg->quota_timeout;
+	struct hrtimer *t;
 
-	hrtimer_cancel(t);
-
-	if (!xg || READ_ONCE(xg->is_offline) ||
-		READ_ONCE(xg->sched_class) != XSCHED_TYPE_CFS)
+	if (!xg)
 		return;
+
+	t = &xg->quota_timeout;
+	hrtimer_cancel(t);
 
 	if (xg->quota > 0 && xg->period > 0)
 		hrtimer_start(t, ns_to_ktime(xg->period), HRTIMER_MODE_REL_SOFT);

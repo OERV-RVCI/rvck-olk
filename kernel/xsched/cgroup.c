@@ -34,7 +34,7 @@ static LIST_HEAD(xcg_attach_list);
 static DEFINE_MUTEX(xcg_mutex);
 static DEFINE_MUTEX(xcu_file_show_mutex);
 
-static const char xcu_sched_name[XSCHED_TYPE_NUM][4] = {
+static const char xcu_sched_name[XSCHED_TYPE_NUM][SCHED_CLASS_MAX_LENGTH] = {
 	[XSCHED_TYPE_RT] = "rt",
 	[XSCHED_TYPE_CFS] = "cfs"
 };
@@ -70,39 +70,50 @@ static int xcu_cg_set_file_show(struct xsched_group *xg, int sched_class)
  * proper functioning of the xsched_group.
  *
  * @param xcg Pointer to the xsched_group to be initialized.
+ * @param parent_xcg Pointer to the parent xsched_group to be inherited.
  */
-static void xcu_cg_initialize_components(struct xsched_group *xcg)
+static void init_xsched_group(
+	struct xsched_group *xcg, struct xsched_group *parent_xcg)
 {
 	spin_lock_init(&xcg->lock);
 	INIT_LIST_HEAD(&xcg->members);
 	INIT_LIST_HEAD(&xcg->children_groups);
 	xsched_quota_timeout_init(xcg);
 	INIT_WORK(&xcg->refill_work, xsched_quota_refill);
-	WRITE_ONCE(xcg->is_offline, false);
+
+	xcg->sched_class = parent_xcg ? parent_xcg->sched_class : XSCHED_TYPE_DFLT;
+	xcg->parent = parent_xcg;
+	xcg->runtime = 0;
 }
 
 void xcu_cg_subsys_init(void)
 {
-	xcu_cg_initialize_components(root_xcg);
+	init_xsched_group(root_xcg, NULL);
 
-	root_xcg->sched_class = XSCHED_TYPE_DFLT;
-	root_xcg->period = XSCHED_CFS_QUOTA_PERIOD_MS;
-	root_xcg->quota = XSCHED_TIME_INF;
-	root_xcg->runtime = 0;
 	xsched_quota_init();
 
 	xsched_group_cache = KMEM_CACHE(xsched_group, 0);
 	xcg_attach_entry_cache = KMEM_CACHE(xcg_attach_entry, 0);
 }
 
-void xcu_cfs_root_cg_init(struct xsched_cu *xcu)
+void init_fair_xsched_group(struct xsched_group *xg,
+	struct xsched_cu *xcu, struct xsched_rq_cfs *cfs_rq)
 {
 	int id = xcu->id;
 
-	root_xcg->perxcu_priv[id].xcu_id = id;
-	root_xcg->perxcu_priv[id].self = root_xcg;
-	root_xcg->perxcu_priv[id].cfs_rq = &xcu->xrq.cfs;
-	root_xcg->perxcu_priv[id].xse.cfs.weight = XSCHED_CFS_WEIGHT_DFLT;
+	/* Ensure non-root group has a valid parent */
+	if (xg != root_xcg && WARN_ON(!xg->parent))
+		return;
+
+	xg->perxcu_priv[id].xcu_id = id;
+	xg->perxcu_priv[id].self = xg;
+	xg->perxcu_priv[id].cfs_rq = cfs_rq;
+	xg->perxcu_priv[id].xse.xcu = xcu;
+	xg->perxcu_priv[id].xse.is_group = true;
+	xg->perxcu_priv[id].xse.parent_grp = xg->parent;
+
+	/* Put new empty groups to the right in parent's rbtree */
+	fair_xsched_class.xse_init(&xg->perxcu_priv[id].xse);
 }
 
 static void xcg_perxcu_cfs_rq_deinit(struct xsched_group *xcg, int max_id)
@@ -113,7 +124,7 @@ static void xcg_perxcu_cfs_rq_deinit(struct xsched_group *xcg, int max_id)
 	for (i = 0; i < max_id; i++) {
 		xcu = xsched_cu_mgr[i];
 		mutex_lock(&xcu->xcu_lock);
-		dequeue_ctx(&xcg->perxcu_priv[i].xse, xcu);
+		dequeue_ctx(&xcg->perxcu_priv[i].xse);
 		kfree(xcg->perxcu_priv[i].cfs_rq);
 		xcg->perxcu_priv[i].cfs_rq = NULL;
 		mutex_unlock(&xcu->xcu_lock);
@@ -137,45 +148,24 @@ static int xcu_cfs_cg_init(struct xsched_group *xcg,
 	struct xsched_rq_cfs *sub_cfs_rq;
 
 	for_each_active_xcu(xcu, id) {
-		xcg->perxcu_priv[id].xcu_id = id;
-		xcg->perxcu_priv[id].self = xcg;
-
 		sub_cfs_rq = kzalloc(sizeof(*sub_cfs_rq), GFP_KERNEL);
 		if (!sub_cfs_rq) {
 			XSCHED_ERR("Fail to alloc cfs runqueue on xcu %d\n", id);
 			xcg_perxcu_cfs_rq_deinit(xcg, id);
 			return -ENOMEM;
 		}
-		xcg->perxcu_priv[id].cfs_rq = sub_cfs_rq;
-		xcg->perxcu_priv[id].cfs_rq->ctx_timeline = RB_ROOT_CACHED;
+		init_xsched_cfs_rq(sub_cfs_rq);
 
-		xcg->perxcu_priv[id].xse.is_group = true;
-		xcg->perxcu_priv[id].xse.xcu = xcu;
-		xcg->perxcu_priv[id].xse.class = &fair_xsched_class;
-
-		/* Put new empty groups to the right in parent's rbtree: */
-		xcg->perxcu_priv[id].xse.cfs.xruntime = XSCHED_TIME_INF;
-		xcg->perxcu_priv[id].xse.cfs.weight = XSCHED_CFS_WEIGHT_DFLT;
-		xcg->perxcu_priv[id].xse.parent_grp = parent_xg;
-
-		mutex_lock(&xcu->xcu_lock);
-		enqueue_ctx(&xcg->perxcu_priv[id].xse, xcu);
-		mutex_unlock(&xcu->xcu_lock);
+		/* call init_fair_xsched_group() after init_xsched_group() */
+		init_fair_xsched_group(xcg, xcu, sub_cfs_rq);
 	}
 
-	xcg->shares_cfg = XSCHED_CFG_SHARE_DFLT;
-	xcu_grp_shares_add(parent_xg, xcg);
 	xcg->period = XSCHED_CFS_QUOTA_PERIOD_MS;
 	xcg->quota = XSCHED_TIME_INF;
-	xcg->runtime = 0;
+	xcg->shares_cfg = XSCHED_CFG_SHARE_DFLT;
+	xcu_grp_shares_add(parent_xg, xcg);
 
 	return 0;
-}
-
-static void xcu_cfs_cg_deinit(struct xsched_group *xcg)
-{
-	xcg_perxcu_cfs_rq_deinit(xcg, num_active_xcu);
-	xcu_grp_shares_sub(xcg->parent, xcg);
 }
 
 /**
@@ -186,10 +176,8 @@ static void xcu_cfs_cg_deinit(struct xsched_group *xcg)
 static int xcu_cg_init(struct xsched_group *xcg,
 				struct xsched_group *parent_xg)
 {
-	xcu_cg_initialize_components(xcg);
-	xcg->parent = parent_xg;
+	init_xsched_group(xcg, parent_xg);
 	list_add_tail(&xcg->group_node, &parent_xg->children_groups);
-	xcg->sched_class = parent_xg->sched_class;
 
 	switch (xcg->sched_class) {
 	case XSCHED_TYPE_CFS:
@@ -206,11 +194,6 @@ static int xcu_cg_init(struct xsched_group *xcg,
 inline struct xsched_group *xcu_cg_from_css(struct cgroup_subsys_state *css)
 {
 	return css ? container_of(css, struct xsched_group, css) : NULL;
-}
-
-static inline bool xsched_group_is_root(struct xsched_group *xg)
-{
-	return xg && !xg->parent;
 }
 
 /**
@@ -243,19 +226,19 @@ static void xcu_css_free(struct cgroup_subsys_state *css)
 {
 	struct xsched_group *xcg = xcu_cg_from_css(css);
 
+	hrtimer_cancel(&xcg->quota_timeout);
+	cancel_work_sync(&xcg->refill_work);
+	cancel_work_sync(&xcg->file_show_work);
+
+	if (xcg->sched_class == XSCHED_TYPE_CFS)
+		xcg_perxcu_cfs_rq_deinit(xcg, num_active_xcu);
+
 	kmem_cache_free(xsched_group_cache, xcg);
 }
 
 static void delay_xcu_cg_set_file_show_workfn(struct work_struct *work)
 {
-	struct xsched_group *xg;
-
-	xg = container_of(work, struct xsched_group, file_show_work);
-
-	if (!xg) {
-		XSCHED_ERR("xsched_group cannot be null @ %s", __func__);
-		return;
-	}
+	struct xsched_group *xg = container_of(work, struct xsched_group, file_show_work);
 
 	for (int i = 0; i < XCUCG_SET_FILE_RETRY_COUNT; i++) {
 		if (!xcu_cg_set_file_show(xg, xg->sched_class))
@@ -299,23 +282,23 @@ static void xcu_css_offline(struct cgroup_subsys_state *css)
 
 	xcg = xcu_cg_from_css(css);
 
-	WRITE_ONCE(xcg->is_offline, true);
+	if (xcg == root_xcg)
+		return;
 
-	hrtimer_cancel(&xcg->quota_timeout);
-	cancel_work_sync(&xcg->refill_work);
-	cancel_work_sync(&xcg->file_show_work);
-
-	if (!xsched_group_is_root(xcg)) {
-		switch (xcg->sched_class) {
-		case XSCHED_TYPE_CFS:
-			xcu_cfs_cg_deinit(xcg);
-			break;
-		default:
-			XSCHED_INFO("xcu_cgroup: deinit RT group css=0x%lx\n",
-						(uintptr_t)&xcg->css);
-			break;
-		}
+	switch (xcg->sched_class) {
+	case XSCHED_TYPE_CFS:
+		xcu_grp_shares_sub(xcg->parent, xcg);
+		break;
+	default:
+		XSCHED_INFO("xcu_cgroup: deinit RT group css=0x%lx\n",
+					(uintptr_t)&xcg->css);
+		break;
 	}
+}
+
+static void xcu_css_releasd(struct cgroup_subsys_state *css)
+{
+	struct xsched_group *xcg = xcu_cg_from_css(css);
 
 	list_del(&xcg->group_node);
 }
@@ -402,41 +385,43 @@ static void xcu_cancel_attach(struct cgroup_taskset *tset)
 void xcu_move_task(struct task_struct *task, struct xsched_group *old_xcg,
 			struct xsched_group *new_xcg)
 {
-	struct xsched_entity *xse, *tmp;
+	struct xsched_entity *xse;
 	struct xsched_cu *xcu;
+
+	if (!old_xcg || !new_xcg)
+		return;
 
 	spin_lock(&old_xcg->lock);
 
-	list_for_each_entry_safe(xse, tmp, &old_xcg->members, group_node) {
-		if (xse->owner_pid != task_pid_nr(task))
-			continue;
+	list_for_each_entry(xse, &old_xcg->members, group_node) {
+		if (xse->owner_pid == task_pid_nr(task)) {
+			if (WARN_ON_ONCE(xse->parent_grp != old_xcg))
+				break;
 
-		if (old_xcg != xse->parent_grp) {
-			WARN_ON(old_xcg != xse->parent_grp);
-			spin_unlock(&old_xcg->lock);
-			return;
+			/* delete from the old_xcg */
+			list_del(&xse->group_node);
+			xse->parent_grp = NULL;
+			break;
 		}
-
-		xcu = xse->xcu;
-
-		/* delete from the old_xcg */
-		list_del(&xse->group_node);
-
-		spin_unlock(&old_xcg->lock);
-
-		mutex_lock(&xcu->xcu_lock);
-		/* dequeue from the current runqueue */
-		dequeue_ctx(xse, xcu);
-		/* attach to the new_xcg */
-		xsched_group_xse_attach(new_xcg, xse);
-		/* enqueue to the runqueue in new_xcg */
-		enqueue_ctx(xse, xcu);
-		mutex_unlock(&xcu->xcu_lock);
-
-		return;
 	}
 
 	spin_unlock(&old_xcg->lock);
+
+	/* xse not found */
+	if (list_entry_is_head(xse, &old_xcg->members, group_node))
+		return;
+
+	xcu = xse->xcu;
+
+	mutex_lock(&xcu->xcu_lock);
+	/* dequeue from the current runqueue */
+	dequeue_ctx(xse);
+	/* attach to the new_xcg */
+	xsched_group_xse_attach(new_xcg, xse);
+	/* enqueue to the runqueue in new_xcg */
+	enqueue_ctx(xse, xcu);
+	wake_up_interruptible(&xcu->wq_xcu_idle);
+	mutex_unlock(&xcu->xcu_lock);
 }
 
 static void xcu_attach(struct cgroup_taskset *tset)
@@ -507,7 +492,8 @@ static int xcu_cg_set_sched_class(struct xsched_group *xg, int type)
 	/* deinit old type if necessary */
 	switch (xg->sched_class) {
 	case XSCHED_TYPE_CFS:
-		xcu_cfs_cg_deinit(xg);
+		xcu_grp_shares_sub(xg->parent, xg);
+		xcg_perxcu_cfs_rq_deinit(xg, num_active_xcu);
 		break;
 	default:
 		break;
@@ -552,7 +538,7 @@ static ssize_t xcu_sched_class_write(struct kernfs_open_file *of, char *buf,
 	xg = xcu_cg_from_css(css);
 
 	/* only the first level of root can switch scheduler type */
-	if (!xsched_group_is_root(xg->parent)) {
+	if (xg->parent != root_xcg) {
 		css_put(css);
 		return -EINVAL;
 	}
@@ -595,24 +581,12 @@ static s64 xcu_read_s64(struct cgroup_subsys_state *css, struct cftype *cft)
 
 void xcu_grp_shares_update(struct xsched_group *parent, struct xsched_group *child, u32 shares_cfg)
 {
-	int id;
-	struct xsched_cu *xcu;
-
 	if (child->sched_class != XSCHED_TYPE_CFS)
 		return;
 
-	parent->children_shares_sum -= child->shares_cfg;
-
+	xcu_grp_shares_sub(parent, child);
 	child->shares_cfg = shares_cfg;
-	child->weight = child->shares_cfg;
-
-	for_each_active_xcu(xcu, id) {
-		mutex_lock(&xcu->xcu_lock);
-		child->perxcu_priv[id].xse.cfs.weight = child->weight;
-		mutex_unlock(&xcu->xcu_lock);
-	}
-
-	parent->children_shares_sum += child->shares_cfg;
+	xcu_grp_shares_add(parent, child);
 }
 
 void xcu_grp_shares_add(struct xsched_group *parent, struct xsched_group *child)
@@ -701,22 +675,32 @@ static int xcu_stat(struct seq_file *sf, void *v)
 {
 	struct cgroup_subsys_state *css = seq_css(sf);
 	struct xsched_group *xcucg = xcu_cg_from_css(css);
+	struct xsched_rq_cfs *cfs_rq;
+	struct xsched_cu *xcu;
 	u64 nr_throttled = 0;
 	u64 throttled_time = 0;
 	u64 exec_runtime = 0;
-	int xcu_id;
-	struct xsched_cu *xcu;
+	int id;
 
 	if (xcucg->sched_class == XSCHED_TYPE_RT) {
 		seq_printf(sf, "RT group stat is not supported @ %s.\n", __func__);
 		return 0;
 	}
 
-	for_each_active_xcu(xcu, xcu_id) {
-		nr_throttled += xcucg->perxcu_priv[xcu_id].nr_throttled;
-		throttled_time += xcucg->perxcu_priv[xcu_id].throttled_time;
+	for_each_active_xcu(xcu, id) {
+		mutex_lock(&xcu->xcu_lock);
+
+		cfs_rq = xsched_group_cfs_rq(xcucg, id);
+		if (!cfs_rq) {
+			mutex_unlock(&xcu->xcu_lock);
+			continue;
+		}
+		nr_throttled += cfs_rq->nr_throttled;
+		throttled_time += cfs_rq->throttled_time;
 		exec_runtime +=
-			xcucg->perxcu_priv[xcu_id].xse.cfs.sum_exec_runtime;
+			xcucg->perxcu_priv[id].xse.cfs.sum_exec_runtime;
+
+		mutex_unlock(&xcu->xcu_lock);
 	}
 
 	seq_printf(sf, "exec_runtime:	%llu\n", exec_runtime);
@@ -773,6 +757,7 @@ struct cgroup_subsys xcu_cgrp_subsys = {
 	.css_alloc = xcu_css_alloc,
 	.css_online = xcu_css_online,
 	.css_offline = xcu_css_offline,
+	.css_released = xcu_css_releasd,
 	.css_free = xcu_css_free,
 	.can_attach = xcu_can_attach,
 	.cancel_attach = xcu_cancel_attach,
