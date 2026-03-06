@@ -62,9 +62,20 @@ bool rme_dev_pci_msix_write_vector_ctrl(struct msi_desc *desc, u32 ctrl);
 bool rme_dev_pci_msix_mask(struct msi_desc *desc);
 bool rme_dev_msix_mask_all(struct pci_dev *dev, int tsize);
 
-u32 readl_hook(void __iomem *addr, struct pci_dev *pdev);
-void writel_hook(u32 val, void __iomem *addr, struct pci_dev *pdev);
-void __raw_writel_hook(u32 val, void __iomem *addr, struct pci_dev *pdev);
+u32 rme_readl_hook(void __iomem *addr, struct pci_dev *pdev);
+u32 rme_read32be_hook(void __iomem *addr, struct pci_dev *pdev);
+u16 rme_read16be_hook(void __iomem *addr, struct pci_dev *pdev);
+u8 rme_read8_hook(void __iomem *addr, struct pci_dev *pdev);
+void rme_writel_hook(u32 val, void __iomem *addr, struct pci_dev *pdev);
+
+int rme_writeq_hook(u64 val, void __iomem *addr, struct pci_dev *pdev);
+void rme_write32be_hook(u32 val, void __iomem *addr, struct pci_dev *pdev);
+void rme_lo_hi_writeq_hook(__u64 val, void __iomem *addr, struct pci_dev *pdev);
+void rme_hi_lo_writeq_hook(__u64 val, void __iomem *addr, struct pci_dev *pdev);
+u64 rme_lo_hi_readq_hook(void __iomem *addr, struct pci_dev *pdev);
+void __rme_raw_writel_hook(u32 val, void __iomem *addr, struct pci_dev *pdev);
+int __rme_iowrite64_copy_hook(void __iomem *to, const void *from,
+	size_t count, struct pci_dev *pdev);
 
 bool is_realm_device(struct device *dev, struct device_driver *drv);
 #endif

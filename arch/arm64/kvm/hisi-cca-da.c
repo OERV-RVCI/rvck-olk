@@ -5,6 +5,8 @@
 #include <linux/hashtable.h>
 #include <linux/pci.h>
 #include <linux/vfio.h>
+#include <linux/io-64-nonatomic-lo-hi.h>
+#include <linux/io-64-nonatomic-hi-lo.h>
 #include <asm/rmi_cmds.h>
 #include <asm/kvm_emulate.h>
 #include <asm/hisi_cca_da.h>
@@ -937,7 +939,39 @@ void kvm_complete_dev_op(struct kvm_vcpu *vcpu)
 	rec->run->enter.vfio_dev = run->rme_dev.vfio_dev;
 }
 
+#define MMIO_REG_8_BIT 8
+#define MMIO_REG_16_BIT 16
 #define MMIO_REG_32_BIT 32
+#define MMIO_REG_64_BIT 64
+
+static u8 rme_mmio_read8(unsigned long addr, struct pci_dev *pdev)
+{
+	unsigned long value;
+	int ret;
+
+	ret = rmi_dev_mmio_read(addr, MMIO_REG_8_BIT, &value, pci_dev_id(pdev));
+	if (ret) {
+		pr_err("rmi_dev_mmio_read error, ret = %d\n", ret);
+		return 0;
+	}
+
+	return value;
+}
+
+static u16 rme_mmio_read16(unsigned long addr, struct pci_dev *pdev)
+{
+	unsigned long value;
+	int ret;
+
+	ret = rmi_dev_mmio_read(addr, MMIO_REG_16_BIT, &value, pci_dev_id(pdev));
+	if (ret) {
+		pr_err("rmi_dev_mmio_read error, ret = %d\n", ret);
+		return 0;
+	}
+
+	return value;
+}
+
 static u32 rme_mmio_read32(unsigned long addr, struct pci_dev *pdev)
 {
 	unsigned long value;
@@ -960,6 +994,32 @@ static void rme_mmio_write32(unsigned long addr, unsigned long value,
 	ret = rmi_dev_mmio_write(addr, MMIO_REG_32_BIT, value, pci_dev_id(pdev));
 	if (ret)
 		pr_err("rmi_dev_mmio_write error, ret = %d\n", ret);
+}
+
+static u64 rme_mmio_read64(unsigned long addr, struct pci_dev *pdev)
+{
+	unsigned long value;
+	int ret;
+
+	ret = rmi_dev_mmio_read(addr, MMIO_REG_64_BIT, &value, pci_dev_id(pdev));
+	if (ret) {
+		pr_err("rmi_dev_mmio_read error, ret = %d\n", ret);
+		return 0;
+	}
+
+	return value;
+}
+
+
+static int rme_mmio_write64(unsigned long addr, unsigned long value,
+			     struct pci_dev *pdev)
+{
+	int ret;
+
+	ret = rmi_dev_mmio_write(addr, MMIO_REG_64_BIT, value, pci_dev_id(pdev));
+	if (ret)
+		pr_err("rmi_dev_mmio_write error, ret = %d\n", ret);
+	return ret;
 }
 
 static inline u64 get_pci_desc_pbase(struct pci_dev *dev, u16 msi_index)
@@ -1162,33 +1222,139 @@ static u64 rme_mmio_va_to_pa(const void *addr)
 		return pa;
 }
 
-u32 readl_hook(void __iomem *addr, struct pci_dev *pdev)
+u32 rme_readl_hook(void __iomem *addr, struct pci_dev *pdev)
 {
 	if (is_support_rme() && is_dev_delegated(pdev))
 		return rme_mmio_read32(rme_mmio_va_to_pa(addr), pdev);
 
 	return readl(addr);
 }
-EXPORT_SYMBOL_GPL(readl_hook);
+EXPORT_SYMBOL_GPL(rme_readl_hook);
 
-void writel_hook(u32 val, void __iomem *addr, struct pci_dev *pdev)
+int rme_writeq_hook(u64 val, void __iomem *addr, struct pci_dev *pdev)
 {
 	if (is_support_rme() && is_dev_delegated(pdev))
-		rme_mmio_write32(rme_mmio_va_to_pa(addr), val, pdev);
+		return rme_mmio_write64(rme_mmio_va_to_pa(addr), val, pdev);
+
+	writeq(val, addr);
+	return 0;
+}
+EXPORT_SYMBOL_GPL(rme_writeq_hook);
+
+u32 rme_read32be_hook(void __iomem *addr, struct pci_dev *pdev)
+{
+	if (is_support_rme() && is_dev_delegated(pdev)) {
+		u32 t = rme_mmio_read32(rme_mmio_va_to_pa(addr), pdev);
+
+		return cpu_to_be32(t);
+	}
+
+	return ioread32be(addr);
+}
+EXPORT_SYMBOL_GPL(rme_read32be_hook);
+
+u16 rme_read16be_hook(void __iomem *addr, struct pci_dev *pdev)
+{
+	if (is_support_rme() && is_dev_delegated(pdev)) {
+		u16 t = rme_mmio_read16(rme_mmio_va_to_pa(addr), pdev);
+
+		return cpu_to_be16(t);
+	}
+
+	return ioread16be(addr);
+}
+EXPORT_SYMBOL_GPL(rme_read16be_hook);
+
+u8 rme_read8_hook(void __iomem *addr, struct pci_dev *pdev)
+{
+	if (is_support_rme() && is_dev_delegated(pdev))
+		return rme_mmio_read8(rme_mmio_va_to_pa(addr), pdev);
+
+	return ioread8(addr);
+}
+EXPORT_SYMBOL_GPL(rme_read8_hook);
+
+void rme_writel_hook(u32 val, void __iomem *addr, struct pci_dev *pdev)
+{
+	if (is_support_rme() && is_dev_delegated(pdev))
+		return rme_mmio_write32(rme_mmio_va_to_pa(addr),
+			   (u32 __force)__cpu_to_le32(val), pdev);
 
 	writel(val, addr);
 }
-EXPORT_SYMBOL_GPL(writel_hook);
+EXPORT_SYMBOL_GPL(rme_writel_hook);
 
-void __raw_writel_hook(u32 val, void __iomem *addr,
-		       struct pci_dev *pdev)
+void __rme_raw_writel_hook(u32 val, void __iomem *addr, struct pci_dev *pdev)
 {
-	if (is_support_rme() && is_dev_delegated(pdev))
+	if (is_support_rme() && is_dev_delegated(pdev)) {
 		rme_mmio_write32(rme_mmio_va_to_pa(addr), val, pdev);
-
+		return;
+	}
 	__raw_writel(val, addr);
 }
-EXPORT_SYMBOL_GPL(__raw_writel_hook);
+EXPORT_SYMBOL_GPL(__rme_raw_writel_hook);
+
+void rme_write32be_hook(u32 val, void __iomem *addr, struct pci_dev *pdev)
+{
+	if (is_support_rme() && is_dev_delegated(pdev))
+		return rme_mmio_write32(rme_mmio_va_to_pa(addr), cpu_to_be32(val), pdev);
+
+	iowrite32be(val, addr);
+}
+EXPORT_SYMBOL_GPL(rme_write32be_hook);
+
+void rme_lo_hi_writeq_hook(__u64 val, void __iomem *addr, struct pci_dev *pdev)
+{
+	if (is_support_rme() && is_dev_delegated(pdev)) {
+		rme_mmio_write32(rme_mmio_va_to_pa(addr), (u32)val, pdev);
+		rme_mmio_write32(rme_mmio_va_to_pa(addr + 4), (u32)(val >> 32), pdev);
+		return;
+	}
+	lo_hi_writeq(val, addr);
+}
+EXPORT_SYMBOL_GPL(rme_lo_hi_writeq_hook);
+
+void rme_hi_lo_writeq_hook(__u64 val, void __iomem *addr, struct pci_dev *pdev)
+{
+	if (is_support_rme() && is_dev_delegated(pdev)) {
+		rme_mmio_write32(rme_mmio_va_to_pa(addr + 4), (u32)(val >> 32), pdev);
+		rme_mmio_write32(rme_mmio_va_to_pa(addr), (u32)val, pdev);
+		return;
+	}
+	hi_lo_writeq(val, addr);
+}
+EXPORT_SYMBOL_GPL(rme_hi_lo_writeq_hook);
+
+u64 rme_lo_hi_readq_hook(void __iomem *addr, struct pci_dev *pdev)
+{
+	if (is_support_rme() && is_dev_delegated(pdev))
+		return rme_mmio_read64(rme_mmio_va_to_pa(addr), pdev);
+
+	return lo_hi_readq(addr);
+}
+EXPORT_SYMBOL_GPL(rme_lo_hi_readq_hook);
+
+int __rme_iowrite64_copy_hook(void __iomem *to, const void *from,
+	size_t count, struct pci_dev *pdev)
+{
+	int ret = 0;
+
+	if (is_support_rme() && is_dev_delegated(pdev)) {
+		u64 __iomem *dst = to;
+		const u64 *src = from;
+		const u64 *end = src + count;
+
+		while (src < end) {
+			ret = rme_mmio_write64(rme_mmio_va_to_pa(dst++), *src++, pdev);
+			if (ret)
+				break;
+		}
+		return ret;
+	}
+	__iowrite64_copy(to, from, count);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(__rme_iowrite64_copy_hook);
 
 bool is_realm_device(struct device *dev, struct device_driver *drv)
 {
