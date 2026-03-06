@@ -229,7 +229,7 @@ static int alloc_ctx_from_vstream(struct vstream_info *vstream_info,
 
 	init_xsched_ctx(*ctx, vstream_info);
 
-	ret = xsched_init_entity(*ctx, vstream_info);
+	ret = init_xsched_entity(*ctx, vstream_info);
 	if (ret) {
 		XSCHED_ERR("Fail to initialize XSE for context @ %s\n",
 			__func__);

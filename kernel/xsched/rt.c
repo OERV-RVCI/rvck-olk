@@ -130,8 +130,10 @@ void xse_init_rt(struct xsched_entity *xse)
 	struct task_struct *p;
 
 	p = find_task_by_vpid(xse->tgid);
-	xse->rt.prio = p->_resvd->xse_attr.xsched_priority;
-	XSCHED_DEBUG("Xse init: set priority=%d.\n", xse->rt.prio);
+	if (p)
+		xse->rt.prio = p->_resvd->xse_attr.xsched_priority;
+
+	xse->class = &rt_xsched_class;
 	xse->rt.timeslice = XSCHED_RT_TIMESLICE;
 	INIT_LIST_HEAD(&xse->rt.list_node);
 }

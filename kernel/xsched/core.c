@@ -184,25 +184,19 @@ int delete_ctx(struct xsched_context *ctx)
 	return 0;
 }
 
-int xsched_xse_set_class(struct xsched_entity *xse)
+const struct xsched_class *find_xsched_class(int class_id)
 {
-	struct xsched_class *sched = xsched_first_class;
+	struct xsched_class *sched;
 
-	if (!sched) {
-		XSCHED_ERR("No xsched classes registered @ %s\n", __func__);
-		return -EINVAL;
-	}
+	if (class_id >= XSCHED_TYPE_NUM)
+		return NULL;
 
-#ifdef CONFIG_CGROUP_XCU
-	xsched_group_inherit(current, xse);
 	for_each_xsched_class(sched) {
-		if (sched->class_id == xse->parent_grp->sched_class)
-			break;
+		if (sched->class_id == class_id)
+			return sched;
 	}
-#endif
 
-	xse->class = sched;
-	return 0;
+	return NULL;
 }
 
 static void submit_kick(struct vstream_metadata *vsm)
@@ -463,10 +457,28 @@ int xsched_xcu_init(struct xsched_cu *xcu, struct xcu_group *group, int xcu_id)
 	return 0;
 }
 
-int xsched_init_entity(struct xsched_context *ctx, struct vstream_info *vs)
+int init_xsched_entity(struct xsched_context *ctx, struct vstream_info *vs)
 {
-	int err = 0;
-	struct xsched_entity *xse = &ctx->xse;
+	int err = 0, class_id = XSCHED_TYPE_DFLT;
+	struct xsched_entity *xse;
+	const struct xsched_class *sched;
+
+	if (!ctx || !vs || WARN_ON(vs->xcu == NULL))
+		return -EINVAL;
+
+	xse = &ctx->xse;
+
+#ifdef CONFIG_CGROUP_XCU
+	xsched_group_inherit(current, xse);
+	/* inherit the scheduler class from the parent group */
+	class_id = xse->parent_grp->sched_class;
+#endif
+
+	sched = find_xsched_class(class_id);
+	if (!sched)
+		return -ENOENT;
+
+	sched->xse_init(xse);
 
 	atomic_set(&xse->kicks_pending_cnt, 0);
 	atomic_set(&xse->submitted_one_kick, 0);
@@ -483,28 +495,15 @@ int xsched_init_entity(struct xsched_context *ctx, struct vstream_info *vs)
 		XSCHED_ERR(
 			"Couldn't find valid xcu for vstream %u dev_id %u @ %s\n",
 			vs->id, vs->dev_id, __func__);
-		return -EINVAL;
+		return err;
 	}
 
 	xse->ctx = ctx;
-
-	if (vs->xcu == NULL) {
-		WARN_ON(vs->xcu == NULL);
-		return -EINVAL;
-	}
-
 	xse->xcu = vs->xcu;
 
-	err = xsched_xse_set_class(xse);
-	if (err) {
-		XSCHED_ERR("Fail to set xse class @ %s\n", __func__);
-		return err;
-	}
-	xse->class->xse_init(xse);
-
 	WRITE_ONCE(xse->on_rq, false);
-
 	spin_lock_init(&xse->xse_lock);
+
 	return err;
 }
 

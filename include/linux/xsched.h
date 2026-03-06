@@ -54,9 +54,6 @@ extern struct xsched_cu *xsched_cu_mgr[XSCHED_NR_CUS];
 extern struct xsched_class rt_xsched_class;
 extern struct xsched_class fair_xsched_class;
 
-#define xsched_first_class \
-	list_first_entry(&(xsched_class_list), struct xsched_class, node)
-
 #define for_each_xsched_class(class)                                           \
 	list_for_each_entry((class), &(xsched_class_list), node)
 
@@ -455,7 +452,7 @@ static inline void xsched_init_vsm(struct vstream_metadata *vsm,
 
 int xsched_xcu_init(struct xsched_cu *xcu, struct xcu_group *group, int xcu_id);
 int xsched_schedule(void *input_xcu);
-int xsched_init_entity(struct xsched_context *ctx, struct vstream_info *vs);
+int init_xsched_entity(struct xsched_context *ctx, struct vstream_info *vs);
 int ctx_bind_to_xcu(vstream_info_t *vstream_info, struct xsched_context *ctx);
 int xsched_vsm_add_tail(struct vstream_info *vs, vstream_args_t *arg);
 struct vstream_metadata *xsched_vsm_fetch_first(struct vstream_info *vs);
@@ -463,6 +460,7 @@ void xsched_rt_prio_set(pid_t tgid, unsigned int prio);
 void enqueue_ctx(struct xsched_entity *xse, struct xsched_cu *xcu);
 void dequeue_ctx(struct xsched_entity *xse);
 int delete_ctx(struct xsched_context *ctx);
+const struct xsched_class *find_xsched_class(int class_id);
 
 #ifdef CONFIG_CGROUP_XCU
 /* Xsched group manage functions */

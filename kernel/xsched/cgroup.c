@@ -103,7 +103,7 @@ void xcu_cfs_root_cg_init(struct xsched_cu *xcu)
 	root_xcg->perxcu_priv[id].self = root_xcg;
 	root_xcg->perxcu_priv[id].cfs_rq = &xcu->xrq.cfs;
 	root_xcg->perxcu_priv[id].xse.is_group = true;
-	root_xcg->perxcu_priv[id].xse.cfs.weight = XSCHED_CFS_WEIGHT_DFLT;
+	fair_xsched_class.xse_init(&root_xcg->perxcu_priv[id].xse);
 }
 
 static void xcg_perxcu_cfs_rq_deinit(struct xsched_group *xcg, int max_id)
@@ -151,13 +151,11 @@ static int xcu_cfs_cg_init(struct xsched_group *xcg,
 		xcg->perxcu_priv[id].cfs_rq->ctx_timeline = RB_ROOT_CACHED;
 		xcg->perxcu_priv[id].cfs_rq->min_xruntime = XSCHED_TIME_INF;
 
-		xcg->perxcu_priv[id].xse.is_group = true;
-		xcg->perxcu_priv[id].xse.xcu = xcu;
-		xcg->perxcu_priv[id].xse.class = &fair_xsched_class;
-
 		/* Put new empty groups to the right in parent's rbtree: */
-		xcg->perxcu_priv[id].xse.cfs.weight = XSCHED_CFS_WEIGHT_DFLT;
+		fair_xsched_class.xse_init(&xcg->perxcu_priv[id].xse);
+		xcg->perxcu_priv[id].xse.is_group = true;
 		xcg->perxcu_priv[id].xse.parent_grp = parent_xg;
+		xcg->perxcu_priv[id].xse.xcu = xcu;
 	}
 
 	xcg->shares_cfg = XSCHED_CFG_SHARE_DFLT;

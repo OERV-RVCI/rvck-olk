@@ -240,6 +240,7 @@ void rq_init_fair(struct xsched_rq *xrq)
 
 void xse_init_fair(struct xsched_entity *xse)
 {
+	xse->class = &fair_xsched_class;
 	xse->cfs.weight = XSCHED_CFS_WEIGHT_DFLT;
 }
 
