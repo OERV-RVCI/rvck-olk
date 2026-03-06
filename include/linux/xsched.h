@@ -83,6 +83,8 @@ struct xsched_rq_cfs {
 	unsigned int load;
 	u64 min_xruntime;
 	struct rb_root_cached ctx_timeline;
+
+	bool throttled;
 };
 
 /* Base XSched runqueue object structure that contains both mutual and
@@ -326,6 +328,14 @@ static inline struct xsched_group *
 xse_this_grp(struct xsched_entity_cfs *xse_cfs)
 {
 	return xse_cfs ? xse_this_grp_xcu(xse_cfs)->self : NULL;
+}
+
+static inline bool xsched_entity_throttled(struct xsched_entity *xse)
+{
+	struct xsched_group_xcu_priv *grp_xcu =
+		container_of(xse, struct xsched_group_xcu_priv, xse);
+
+	return grp_xcu->cfs_rq->throttled;
 }
 #else
 

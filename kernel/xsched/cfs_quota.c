@@ -29,6 +29,10 @@ static void xsched_group_throttle(struct xsched_group *xg, struct xsched_cu *xcu
 
 	lockdep_assert_held(&xcu->xcu_lock);
 
+	if (xg->perxcu_priv[xcu_id].cfs_rq->throttled)
+		return;
+
+	xg->perxcu_priv[xcu_id].cfs_rq->throttled = true;
 	xg->perxcu_priv[xcu_id].nr_throttled++;
 	xg->perxcu_priv[xcu_id].start_throttled_time = now;
 
@@ -43,28 +47,39 @@ static void xsched_group_throttle(struct xsched_group *xg, struct xsched_cu *xcu
 
 static void xsched_group_unthrottle(struct xsched_group *xg)
 {
-	uint32_t id;
 	struct xsched_cu *xcu;
+	ktime_t now = ktime_get();
+	int id;
 
 	for_each_active_xcu(xcu, id) {
 		mutex_lock(&xcu->xcu_lock);
-		if (!xg || READ_ONCE(xg->is_offline) ||
-			READ_ONCE(xg->sched_class) != XSCHED_TYPE_CFS) {
+
+		if (!xg || READ_ONCE(xg->is_offline)) {
 			mutex_unlock(&xcu->xcu_lock);
 			return;
 		}
-		if (!READ_ONCE(xg->perxcu_priv[id].xse.on_rq)) {
+
+		if (!xg->perxcu_priv[id].cfs_rq ||
+			!xg->perxcu_priv[id].cfs_rq->throttled) {
+			mutex_unlock(&xcu->xcu_lock);
+			continue;
+		}
+
+		/*
+		 * Avoid inserting empty groups into the rbtree;
+		 * only mark them as throttled.
+		 */
+		xg->perxcu_priv[id].cfs_rq->throttled = false;
+		xg->perxcu_priv[id].throttled_time +=
+			ktime_to_ns(ktime_sub(now,
+			xg->perxcu_priv[id].start_throttled_time));
+		xg->perxcu_priv[id].start_throttled_time = 0;
+
+		if (xg->perxcu_priv[id].cfs_rq->nr_running > 0) {
 			enqueue_ctx(&xg->perxcu_priv[id].xse, xcu);
 			wake_up_interruptible(&xcu->wq_xcu_idle);
-
-			if (xg->perxcu_priv[id].start_throttled_time != 0) {
-				xg->perxcu_priv[id].throttled_time +=
-					ktime_to_ns(ktime_sub(ktime_get(),
-					xg->perxcu_priv[id].start_throttled_time));
-
-				xg->perxcu_priv[id].start_throttled_time = 0;
-			}
 		}
+
 		mutex_unlock(&xcu->xcu_lock);
 	}
 }

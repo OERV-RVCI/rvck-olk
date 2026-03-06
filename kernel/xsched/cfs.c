@@ -150,11 +150,19 @@ static void enqueue_ctx_fair(struct xsched_entity *xse, struct xsched_cu *xcu)
 	struct xsched_entity *child = xse;
 
 	for_each_xse(child) {
+		/*
+		 * Terminate upward traversal of parent groups if
+		 * Xse is already enqueued or Group is throttled.
+		 */
 		if (child->on_rq)
 			break;
 
-		rq = xsched_cfs_rq_of(child);
+#ifdef CONFIG_CGROUP_XCU
+		if (child->is_group && xsched_entity_throttled(child))
+			break;
+#endif
 
+		rq = xsched_cfs_rq_of(child);
 		place_xsched_entity(rq, child);
 		child->on_rq = true;
 		rq->nr_running++;
