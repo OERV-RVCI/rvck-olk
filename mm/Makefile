@@ -151,3 +151,4 @@ obj-$(CONFIG_RECLAIM_NOTIFY)	+= reclaim_notify.o
 obj-$(CONFIG_DYNAMIC_POOL)	+= dynamic_pool.o
 obj-$(CONFIG_MEM_SAMPLING) += mem_sampling.o
 obj-$(CONFIG_THP_CONTROL) += thp_ctl.o
+obj-$(CONFIG_FILEMAP_LOCAL_ALLOC) += filemap_local.o
