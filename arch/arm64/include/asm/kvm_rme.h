@@ -45,6 +45,15 @@ enum realm_state {
 	REALM_STATE_DEAD
 };
 
+#define REALM_HUGETLB_FOLIO_NUM 509
+
+/* Collect realm mapped folios */
+struct realm_hugetlb_folios {
+	struct list_head page_node;
+	unsigned long folio_num;
+	unsigned long folio_addr[REALM_HUGETLB_FOLIO_NUM];
+};
+
 /**
  * struct realm - Additional per VM data for a Realm
  *
@@ -64,14 +73,17 @@ struct realm {
 	unsigned long num_aux;
 	unsigned int vmid;
 	unsigned int ia_bits;
-#ifndef __GENKSYMS__
+
 #ifdef CONFIG_HISI_CCA
-	bool hisi_cca_enable;
+	KABI_EXTEND(bool hisi_cca_enable)
 #endif
 #ifdef CONFIG_HISI_CCADA_HOST
-	struct list_head rdev_list;
+	KABI_EXTEND(struct list_head rdev_list)
 #endif
-#endif
+	KABI_EXTEND(spinlock_t realm_lock)
+	KABI_EXTEND(struct list_head page_list)
+	KABI_EXTEND(struct list_head hugetlb_page_list)
+	KABI_EXTEND(struct realm_hugetlb_folios *cur_rhf)
 };
 
 /**
@@ -157,6 +169,8 @@ static inline bool kvm_realm_is_private_address(struct realm *realm,
 {
 	return !(addr & BIT(realm->ia_bits - 1));
 }
+
+int realm_add_hugetlb_folios(struct realm *realm, struct folio *folio);
 
 #ifdef CONFIG_HISI_CCA
 static inline bool kvm_realm_supports_hisi_cca(struct realm *realm)

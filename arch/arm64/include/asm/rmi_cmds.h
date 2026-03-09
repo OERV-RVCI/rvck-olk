@@ -115,6 +115,8 @@ static inline int rmi_features(unsigned long index, unsigned long *out)
 
 int rmi_granule_delegate(unsigned long phys);
 
+int rmi_granule_delegate_get(unsigned long phys, void *realm_p);
+
 /**
  * rmi_granule_undelegate() - Undelegate a granule
  * @phys: PA of the granule

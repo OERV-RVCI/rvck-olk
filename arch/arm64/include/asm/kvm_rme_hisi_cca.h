@@ -10,7 +10,7 @@
 #include <asm/kvm_host.h>
 #include <linux/kvm_host.h>
 
-int rmi_cca_hisi_delegate_range(unsigned long start_addr, unsigned long size);
+int rmi_cca_hisi_delegate_range_get(unsigned long start_addr, unsigned long size, void *realm_p);
 
 static inline int rmi_cca_hisi_undelegate_range(unsigned long start_addr,
 						unsigned long size)

@@ -908,7 +908,7 @@ static int realm_create_protected_data_granule(struct realm *realm,
 	phys_addr_t rd = virt_to_phys(realm->rd);
 	int ret;
 
-	if (rmi_granule_delegate(dst_phys))
+	if (rmi_granule_delegate_get(dst_phys, realm))
 		return -ENXIO;
 
 	ret = rmi_data_create(rd, dst_phys, ipa, src_phys, flags);
@@ -1137,7 +1137,7 @@ int realm_map_protected(struct realm *realm,
 	}
 
 	for (size = 0; size < map_size; size += RMM_PAGE_SIZE) {
-		if (rmi_granule_delegate(phys)) {
+		if (rmi_granule_delegate_get(phys, realm)) {
 			/*
 			 * It's likely we raced with another VCPU on the same
 			 * fault. Assume the other VCPU has handled the fault
@@ -1583,7 +1583,9 @@ static int kvm_create_realm(struct kvm *kvm)
 	}
 
 	WRITE_ONCE(realm->state, REALM_STATE_NEW);
-
+	INIT_LIST_HEAD(&realm->page_list);
+	INIT_LIST_HEAD(&realm->hugetlb_page_list);
+	realm->cur_rhf = NULL;
 	/* The realm is up, free the parameters.  */
 	free_page((unsigned long)realm->params);
 	realm->params = NULL;
@@ -1714,8 +1716,108 @@ int _kvm_realm_enable_cap(struct kvm *kvm, struct kvm_enable_cap *cap)
 	return r;
 }
 
+int realm_add_hugetlb_folios(struct realm *realm, struct folio *folio)
+{
+	int ret = 0;
+	unsigned long flags;
+	struct realm_hugetlb_folios *rhf;
+	struct realm_hugetlb_folios *free_rhf = NULL;
+
+	spin_lock_irqsave(&realm->realm_lock, flags);
+	rhf = realm->cur_rhf;
+	if (!rhf || rhf->folio_num >= REALM_HUGETLB_FOLIO_NUM) {
+		realm->cur_rhf = NULL;
+		spin_unlock_irqrestore(&realm->realm_lock, flags);
+		free_rhf = (struct realm_hugetlb_folios *)get_zeroed_page(GFP_KERNEL);
+		if (!free_rhf)
+			return -ENOMEM;
+		pr_info("Alloc new hugetlb_folio page.\n");
+		INIT_LIST_HEAD(&free_rhf->page_node);
+
+		spin_lock_irqsave(&realm->realm_lock, flags);
+		if (!realm->cur_rhf) {
+			realm->cur_rhf = free_rhf;
+			list_add(&free_rhf->page_node, &realm->hugetlb_page_list);
+			free_rhf = NULL;
+		}
+		rhf = realm->cur_rhf;
+		if (rhf->folio_num >= REALM_HUGETLB_FOLIO_NUM) {
+			ret = -ENOMEM;
+			goto out;
+		}
+	}
+	rhf->folio_addr[rhf->folio_num] = (unsigned long)folio;
+	rhf->folio_num++;
+
+out:
+	spin_unlock_irqrestore(&realm->realm_lock, flags);
+	if (free_rhf)
+		free_page((unsigned long)free_rhf);
+	return ret;
+}
+
+int rmi_granule_delegate_get(unsigned long phys, void *realm_p)
+{
+	int ret;
+	struct realm *realm = (struct realm *)realm_p;
+	struct folio *folio = page_folio(phys_to_page(phys));
+
+	if (folio_test_hugetlb(folio)) {
+		if (rme_isolate_hugetlb(folio)) {
+			folio_put(folio);
+			if (realm) {
+				ret = realm_add_hugetlb_folios(realm, folio);
+				if (ret)
+					return ret;
+			}
+		}
+	} else if (folio_test_lru(folio)) {
+		if (folio_isolate_lru(folio)) {
+			folio_put(folio);
+			if (realm) {
+				unsigned long flags;
+
+				spin_lock_irqsave(&realm->realm_lock, flags);
+				folio_get(folio);
+				list_add(&folio->lru, &realm->page_list);
+				spin_unlock_irqrestore(&realm->realm_lock, flags);
+			}
+		}
+	}
+	return _rmi_granule_delegate(phys);
+}
+
+static void realm_put_folios(struct realm *realm)
+{
+	unsigned long flags;
+	struct folio *folio, *next;
+	struct realm_hugetlb_folios *rhf, *node;
+	unsigned long i;
+	LIST_HEAD(free_list);
+
+	spin_lock_irqsave(&realm->realm_lock, flags);
+	list_for_each_entry_safe(folio, next, &realm->page_list, lru) {
+		list_del(&folio->lru);
+		folio_put(folio);
+	}
+
+	list_for_each_entry_safe(rhf, node, &realm->hugetlb_page_list, page_node) {
+		for (i = 0; i < rhf->folio_num; i++)
+			folio_put((struct folio *)rhf->folio_addr[i]);
+		list_move(&rhf->page_node, &free_list);
+	}
+	realm->cur_rhf = NULL;
+	spin_unlock_irqrestore(&realm->realm_lock, flags);
+
+	list_for_each_entry_safe(rhf, node, &free_list, page_node) {
+		list_del(&rhf->page_node);
+		free_page((unsigned long)rhf);
+	}
+}
+
 void _kvm_destroy_realm(struct kvm *kvm)
 {
+	struct kvm_s2_mmu *mmu = &kvm->arch.mmu;
 	struct realm *realm = &kvm->arch.realm;
 	size_t pgd_size = kvm_pgtable_stage2_pgd_size(kvm->arch.vtcr);
 	int i;
@@ -1729,9 +1831,14 @@ void _kvm_destroy_realm(struct kvm *kvm)
 		return;
 
 #ifdef CONFIG_HISI_CCADA_HOST
+	write_lock(&kvm->mmu_lock);
+	unmap_stage2_range(mmu, 0, BIT(realm->ia_bits - 1), true);
+	write_unlock(&kvm->mmu_lock);
+	kvm_realm_destroy_rtts(kvm, mmu->pgt->ia_bits);
 	/* undelegate and detach dev from realm */
 	realm_destroy_dev_list(realm);
 #endif
+	realm_put_folios(realm);
 
 	WRITE_ONCE(realm->state, REALM_STATE_DYING);
 
