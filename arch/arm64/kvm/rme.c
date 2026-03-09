@@ -65,6 +65,7 @@ int rmi_granule_delegate(unsigned long phys)
 {
 	struct folio *folio = page_folio(phys_to_page(phys));
 
+#ifdef CONFIG_HISI_CCA
 	if (folio_test_hugetlb(folio)) {
 		if (rme_isolate_hugetlb(folio))
 			folio_put(folio);
@@ -72,6 +73,7 @@ int rmi_granule_delegate(unsigned long phys)
 		if (folio_isolate_lru(folio))
 			folio_put(folio);
 	}
+#endif
 	return _rmi_granule_delegate(phys);
 }
 EXPORT_SYMBOL_GPL(rmi_granule_delegate);
