@@ -303,7 +303,7 @@ EXPORT_SYMBOL_GPL(realm_smmu_init_l2_strtab);
  * @ndev: Num of child devices
  */
 static int get_child_devices_rec(struct pci_dev *dev, uint16_t *devs,
-				  int max_devs, int *ndev)
+				  int max_devs, int *ndev, struct pci_dev **pdevs)
 {
 	struct pci_bus *bus = dev->subordinate;
 
@@ -312,7 +312,7 @@ static int get_child_devices_rec(struct pci_dev *dev, uint16_t *devs,
 		int ret = 0;
 
 		list_for_each_entry(child, &bus->devices, bus_list) {
-			ret = get_child_devices_rec(child, devs, max_devs, ndev);
+			ret = get_child_devices_rec(child, devs, max_devs, ndev, pdevs);
 			if (ret < 0)
 				return ret;
 		}
@@ -329,6 +329,8 @@ static int get_child_devices_rec(struct pci_dev *dev, uint16_t *devs,
 			return -EINVAL;
 
 		devs[*ndev] = bdf;
+		if (pdevs)
+			pdevs[*ndev] = dev;
 		*ndev = *ndev + 1;
 	}
 
@@ -355,7 +357,8 @@ static bool is_hisi_acc_dev(struct pci_dev *pdev)
 	}
 }
 
-static int get_vf_devices(struct pci_dev *pf_dev, uint16_t *devs, int max_devs)
+static int get_vf_devices(struct pci_dev *pf_dev, uint16_t *devs,
+				    int max_devs, struct pci_dev **pdevs)
 {
 	struct pci_dev *vf_dev;
 	unsigned short vf_device_id;
@@ -363,6 +366,8 @@ static int get_vf_devices(struct pci_dev *pf_dev, uint16_t *devs, int max_devs)
 
 	/* Add PF device */
 	devs[ndev] = pci_dev_id(pf_dev);
+	if (pdevs)
+		pdevs[ndev] = pf_dev;
 	ndev++;
 
 	/* Get VF device id */
@@ -381,6 +386,8 @@ static int get_vf_devices(struct pci_dev *pf_dev, uint16_t *devs, int max_devs)
 				return -EINVAL;
 
 			devs[ndev] = pci_dev_id(vf_dev);
+			if (pdevs)
+				pdevs[ndev] = vf_dev;
 			ndev++;
 		}
 		vf_dev = pci_get_device(pf_dev->vendor, vf_device_id, vf_dev);
@@ -398,7 +405,8 @@ static int get_vf_devices(struct pci_dev *pf_dev, uint16_t *devs, int max_devs)
  * %-EINVAL if the total number of devices under the root port exceeds the maximum
  */
 static int rme_get_all_dev_info(struct pci_dev *rp_dev,
-				struct rmi_dev_delegate_params *params)
+				struct rmi_dev_delegate_params *params,
+				struct pci_dev **pdevs)
 {
 	int ret;
 
@@ -410,12 +418,13 @@ static int rme_get_all_dev_info(struct pci_dev *rp_dev,
 			return -EINVAL;
 		}
 
-		ret = get_vf_devices(rp_dev, params->devs, MAX_DEV_PER_PORT);
+		ret = get_vf_devices(rp_dev, params->devs, MAX_DEV_PER_PORT, pdevs);
 	} else {
 		int ndev = 0;
 
 		ret = get_child_devices_rec(rp_dev, params->devs,
-					    MAX_DEV_PER_PORT, &ndev);
+					    MAX_DEV_PER_PORT, &ndev,
+					    pdevs);
 	}
 
 	if (ret < 0) {
@@ -534,6 +543,55 @@ retry:
 	return 0;
 }
 
+/* Unbind the drivers before switching to secure state.
+ * In SR-IOV scenaios： Unbind all VFs' native drivers.
+ * Otherwise: Unbind the PF's native drivers.
+ */
+static int _realm_unbind_drivers(struct pci_dev **pdevs, uint16_t nr)
+{
+	bool is_sriov = false;
+	bool is_pcipc_ns_driver = false;
+
+	for (uint16_t i = 0; i < nr; i++) {
+		if (!pdevs[i] || pdevs[i] == pci_physfn(pdevs[i]))
+			continue;
+		is_sriov = true;
+		/* Only unbind the VF with its own driver */
+		if (!pdevs[i]->driver || !strcmp(pdevs[i]->driver->name, "vfio-pci"))
+			continue;
+		pci_info(pdevs[i], "rme unbind VF driver for device: %x\n", pci_dev_id(pdevs[i]));
+		device_release_driver(&pdevs[i]->dev);
+		cond_resched();
+	}
+
+	if (is_sriov)
+		return 0;
+
+	for (uint16_t i = 0; i < nr; i++) {
+		if (!pdevs[i] || !pdevs[i]->driver)
+			continue;
+		if (is_hisi_pcipc_ns(&pdevs[i]->dev)) {
+			is_pcipc_ns_driver = true;
+			break;
+		}
+	}
+
+	if (is_pcipc_ns_driver)
+		return 0;
+
+	for (uint16_t i = 0; i < nr; i++) {
+		if (!pdevs[i] || !pdevs[i]->driver)
+			continue;
+		if (pdevs[i] == pci_physfn(pdevs[i]) &&
+			strcmp(pdevs[i]->driver->name, "vfio-pci")) {
+			pci_info(pdevs[i], "rme unbind PF driver for device: %x\n",
+				     pci_dev_id(pdevs[i]));
+			device_release_driver(&pdevs[i]->dev);
+		}
+	}
+	return 0;
+}
+
 static int delegate_root_dev(struct pci_dev *root_dev)
 {
 	struct rmi_dev_delegate_params *params = NULL;
@@ -543,7 +601,7 @@ static int delegate_root_dev(struct pci_dev *root_dev)
 	if (!params)
 		return -ENOMEM;
 
-	ret = rme_get_all_dev_info(root_dev, params);
+	ret = rme_get_all_dev_info(root_dev, params, NULL);
 	if (ret) {
 		free_page((unsigned long)params);
 		return ret;
@@ -715,6 +773,34 @@ static int rme_dev_delegate(struct pci_dev *pdev, struct pci_dev *root_dev)
 	return 0;
 }
 
+static int realm_unbind_drivers(struct pci_dev *root_dev)
+{
+	struct rmi_dev_delegate_params *params = NULL;
+	struct pci_dev **pdevs;
+	int ret;
+
+	params = (struct rmi_dev_delegate_params *)get_zeroed_page(GFP_ATOMIC);
+	if (!params)
+		return -ENOMEM;
+
+	pdevs = kcalloc(MAX_DEV_PER_PORT, sizeof(struct pci_dev *), GFP_KERNEL);
+	if (!pdevs) {
+		free_page((unsigned long)params);
+		return -ENOMEM;
+	}
+
+	ret = rme_get_all_dev_info(root_dev, params, pdevs);
+	if (ret)
+		goto out;
+
+	ret = _realm_unbind_drivers(pdevs, params->num_dev);
+
+out:
+	kfree(pdevs);
+	free_page((unsigned long)params);
+	return ret;
+}
+
 int kvm_rme_assign_device(struct pci_dev *pdev, struct kvm *kvm)
 {
 	struct pci_dev *root_dev;
@@ -730,6 +816,14 @@ int kvm_rme_assign_device(struct pci_dev *pdev, struct kvm *kvm)
 			return -EINVAL;
 		else
 			return 0;
+	}
+
+	if (kvm_is_realm(kvm)) {
+		ret = realm_unbind_drivers(root_dev);
+		if (ret) {
+			pci_err(pdev, "Failed to unbind drivers\n");
+			return ret;
+		}
 	}
 
 	ret = rme_dev_assign(root_dev, kvm);
@@ -1095,3 +1189,14 @@ void __raw_writel_hook(u32 val, void __iomem *addr,
 	__raw_writel(val, addr);
 }
 EXPORT_SYMBOL_GPL(__raw_writel_hook);
+
+bool is_realm_device(struct device *dev, struct device_driver *drv)
+{
+	if (dev_is_pci(dev) && is_support_rme() &&
+		is_dev_delegated(to_pci_dev(dev)) &&
+		strcmp(drv->name, "vfio-pci"))
+		return true;
+
+	return false;
+}
+EXPORT_SYMBOL_GPL(is_realm_device);

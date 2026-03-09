@@ -65,4 +65,6 @@ bool rme_dev_msix_mask_all(struct pci_dev *dev, int tsize);
 u32 readl_hook(void __iomem *addr, struct pci_dev *pdev);
 void writel_hook(u32 val, void __iomem *addr, struct pci_dev *pdev);
 void __raw_writel_hook(u32 val, void __iomem *addr, struct pci_dev *pdev);
+
+bool is_realm_device(struct device *dev, struct device_driver *drv);
 #endif
