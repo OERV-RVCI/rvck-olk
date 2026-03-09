@@ -1752,6 +1752,10 @@ static void arm_smmu_write_ste(struct arm_smmu_master *master, u32 sid,
 		.sid = sid,
 	};
 
+#ifdef CONFIG_HISI_CCADA_HOST
+	realm_smmu_write_ste(master, sid, target);
+#endif
+
 	arm_smmu_write_entry(&ste_writer.writer, ste->data, target->data);
 
 	/* It's likely that we'll want to use the new STE soon */
