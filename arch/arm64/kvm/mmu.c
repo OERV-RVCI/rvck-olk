@@ -336,8 +336,8 @@ static void __unmap_stage2_range(struct kvm_s2_mmu *mmu, phys_addr_t start, u64 
 					   may_block));
 }
 
-void unmap_stage2_range(struct kvm_s2_mmu *mmu, phys_addr_t start, u64 size,
-			bool may_block)
+static void unmap_stage2_range(struct kvm_s2_mmu *mmu, phys_addr_t start, u64 size,
+			       bool may_block)
 {
 	__unmap_stage2_range(mmu, start, size, may_block, false);
 }
@@ -1045,13 +1045,11 @@ void kvm_free_stage2_pgd(struct kvm_s2_mmu *mmu)
 	if (_kvm_is_realm(kvm) &&
 	    (kvm_realm_state(kvm) != REALM_STATE_DEAD &&
 	     kvm_realm_state(kvm) != REALM_STATE_NONE)) {
-#ifdef CONFIG_HISI_CCADA_HOST
-		write_unlock(&kvm->mmu_lock);
-#else
-		unmap_stage2_range(mmu, 0, BIT(kvm->arch.realm.ia_bits - 1), true);
+		struct realm *realm = &kvm->arch.realm;
+
+		unmap_stage2_range(mmu, 0, BIT(realm->ia_bits - 1), true);
 		write_unlock(&kvm->mmu_lock);
 		kvm_realm_destroy_rtts(kvm, pgt->ia_bits);
-#endif
 
 		/*
 		 * The physical PGD pages are delegated to the RMM, so cannot
