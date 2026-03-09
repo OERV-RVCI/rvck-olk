@@ -57,7 +57,8 @@ struct pps_device {
 	unsigned int id;			/* PPS source unique ID */
 	KABI_FILL_HOLE(unsigned int last_fetched_ev)    /* last fetched PPS event id */
 	void const *lookup_cookie;		/* For pps_lookup_dev() only */
-	struct device dev;
+	struct cdev cdev;
+	struct device *dev;
 	struct fasync_struct *async_queue;	/* fasync method */
 	spinlock_t lock;
 };
