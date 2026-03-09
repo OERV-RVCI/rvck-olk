@@ -1449,6 +1449,12 @@ int hns_roce_init(struct hns_roce_dev *hr_dev)
 		dev_err(hr_dev->dev, "alloc scc param failed, ret = %d!\n",
 			ret);
 
+	ret = hns_roce_alloc_cnp_pri_param(hr_dev);
+	if (ret) {
+		dev_err(hr_dev->dev, "alloc cnp pri param failed, ret = %d!\n",
+			ret);
+	}
+
 	ret = hns_roce_register_device(hr_dev);
 	if (ret)
 		goto error_failed_register_device;
@@ -1458,6 +1464,7 @@ int hns_roce_init(struct hns_roce_dev *hr_dev)
 	return 0;
 
 error_failed_register_device:
+	hns_roce_dealloc_cnp_param(hr_dev);
 	hns_roce_dealloc_scc_param(hr_dev);
 	if (hr_dev->hw->hw_exit)
 		hr_dev->hw->hw_exit(hr_dev);

@@ -205,6 +205,7 @@ enum hns_roce_opcode_type {
 	HNS_ROCE_OPC_CFG_LDCP_PARAM			= 0x1A81,
 	HNS_ROCE_OPC_CFG_HC3_PARAM			= 0x1A82,
 	HNS_ROCE_OPC_CFG_DIP_PARAM			= 0x1A83,
+	HNS_ROCE_OPC_QUERY_HW_ID			= 0x7032,
 	HNS_ROCE_OPC_QUERY_HW_VER			= 0x8000,
 	HNS_ROCE_OPC_CFG_GLOBAL_PARAM			= 0x8001,
 	HNS_ROCE_OPC_ALLOC_PF_RES			= 0x8004,
@@ -232,6 +233,7 @@ enum hns_roce_opcode_type {
 	HNS_ROCE_OPC_CFG_GMV_BT				= 0x8510,
 	HNS_ROCE_OPC_SYNC_MB				= 0x8511,
 	HNS_ROCE_QUERY_RAM_ECC				= 0x8513,
+	HNS_ROCE_OPC_CFG_CNP_PRI			= 0x8514,
 	HNS_SWITCH_PARAMETER_CFG			= 0x1033,
 	HNS_ROCE_OPC_SET_BOND_INFO			= 0x8601,
 	HNS_ROCE_OPC_CLEAR_BOND_INFO			= 0x8602,
@@ -974,6 +976,15 @@ struct hns_roce_v2_wqe_data_seg {
 	__le64    addr;
 };
 
+struct hns_roce_hw_id_query_cmq {
+	__u8 chip_id;
+	__u8 die_id;
+	__u8 mac_id;
+	__u8 reserved;
+	__le32 func_id;
+	__le32 rsv[4];
+};
+
 struct hns_roce_query_version {
 	__le16 rocee_vendor_id;
 	__le16 rocee_hw_version;
@@ -982,7 +993,9 @@ struct hns_roce_query_version {
 
 struct hns_roce_query_fw_info {
 	__le32 fw_ver;
-	__le32 rsv[5];
+	__le32 rsv[3];
+	__le32 fw_cap;
+	__le32 rsv1[1];
 };
 
 struct hns_roce_func_clear {
@@ -1480,6 +1493,17 @@ struct hns_roce_wqe_atomic_seg {
 	__le64          fetchadd_swap_data;
 	__le64          cmp_data;
 };
+
+#define HNS_ROCE_CNP_PRI_ENABLE_BIT_OFS 0
+#define HNS_ROCE_CNP_PRI_ENABLE_BIT_SZ 1
+#define HNS_ROCE_CNP_PRI_ENABLE_BIT_MASK GENMASK(0, 0)
+#define HNS_ROCE_CNP_PRI_ENABLE_MAX 1
+
+#define HNS_ROCE_CNP_PRI_DSCP_BIT_OFS (HNS_ROCE_CNP_PRI_ENABLE_BIT_OFS + \
+					HNS_ROCE_CNP_PRI_ENABLE_BIT_SZ)
+#define HNS_ROCE_CNP_PRI_DSCP_BIT_SZ 6
+#define HNS_ROCE_CNP_PRI_DSCP_BIT_MASK GENMASK(6, 1)
+#define HNS_ROCE_CNP_PRI_DSCP_MAX 63
 
 #define HNS_ROCE_DCQCN_AI_OFS 0
 #define HNS_ROCE_DCQCN_AI_SZ sizeof(u16)

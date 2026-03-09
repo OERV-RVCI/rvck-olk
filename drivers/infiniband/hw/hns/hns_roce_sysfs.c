@@ -17,6 +17,38 @@ static void scc_param_config_work(struct work_struct *work)
 	hr_dev->hw->config_scc_param(hr_dev, scc_param->algo_type);
 }
 
+static void get_default_cnp_pri_param(struct hns_roce_dev *hr_dev)
+{
+	if (hr_dev->is_vf || hr_dev->pci_dev->revision <= PCI_REVISION_ID_HIP08)
+		return;
+
+	if (hr_dev->mac_type != HNAE3_MAC_ROH ||
+	    hr_dev->func_id != MAIN_PF_FUNC_ID)
+		return;
+
+	if (!(hr_dev->caps.flags & HNS_ROCE_CAP_FLAG_QP_FLOW_CTRL) ||
+	    !(hr_dev->caps.fw_cap & FW_CAP_FLAG_CNP_PRI))
+		return;
+
+	hr_dev->hw->query_cnp_pri_param(hr_dev);
+}
+
+int hns_roce_alloc_cnp_pri_param(struct hns_roce_dev *hr_dev)
+{
+	struct hns_roce_cnp_pri_param *cnp_pri_param;
+
+	cnp_pri_param = kvzalloc(sizeof(*cnp_pri_param), GFP_KERNEL);
+	if (!cnp_pri_param)
+		return -ENOMEM;
+
+	cnp_pri_param->hr_dev = hr_dev;
+	hr_dev->cnp_pri_param = cnp_pri_param;
+
+	get_default_cnp_pri_param(hr_dev);
+
+	return 0;
+}
+
 static void get_default_scc_param(struct hns_roce_dev *hr_dev)
 {
 	int ret;
@@ -72,6 +104,14 @@ void hns_roce_dealloc_scc_param(struct hns_roce_dev *hr_dev)
 	hr_dev->scc_param = NULL;
 }
 
+void hns_roce_dealloc_cnp_param(struct hns_roce_dev *hr_dev)
+{
+	if (!hr_dev->cnp_pri_param)
+		return;
+
+	kvfree(hr_dev->cnp_pri_param);
+}
+
 struct hns_port_cc_attr {
 	struct ib_port_attribute port_attr;
 	enum hns_roce_scc_algo algo_type;
@@ -79,6 +119,14 @@ struct hns_port_cc_attr {
 	u32 size;
 	u32 max;
 	u32 min;
+};
+
+struct hns_port_cnp_pri_attr {
+	struct ib_port_attribute port_attr;
+	u32 bit_offset;
+	u32 bit_size;
+	u32 bit_mask;
+	u32 max;
 };
 
 static int scc_attr_check(struct hns_roce_dev *hr_dev,
@@ -94,6 +142,76 @@ static int scc_attr_check(struct hns_roce_dev *hr_dev,
 		return -EINVAL;
 
 	return 0;
+}
+
+static ssize_t cnp_pri_attr_show(struct ib_device *ibdev, u32 port_num,
+				 struct ib_port_attribute *attr, char *buf)
+{
+	struct hns_port_cnp_pri_attr *cnp_pri_attr =
+		container_of(attr, struct hns_port_cnp_pri_attr, port_attr);
+	struct hns_roce_dev *hr_dev = to_hr_dev(ibdev);
+	struct hns_roce_cnp_pri_param *cnp_pri_param;
+	u32 param;
+	u32 val;
+
+	if (port_num > hr_dev->caps.num_ports)
+		return -ENODEV;
+
+	if (WARN_ON(cnp_pri_attr->bit_size > sizeof(u32)))
+		return -EINVAL;
+
+	cnp_pri_param = hr_dev->cnp_pri_param;
+	param = le32_to_cpu(cnp_pri_param->param);
+	val = (param & cnp_pri_attr->bit_mask) >> cnp_pri_attr->bit_offset;
+
+	return sysfs_emit(buf, "%u\n", val);
+}
+
+static ssize_t cnp_pri_attr_store(struct ib_device *ibdev, u32 port_num,
+				  struct ib_port_attribute *attr,
+				  const char *buf, size_t count)
+{
+	struct hns_port_cnp_pri_attr *cnp_pri_attr =
+		container_of(attr, struct hns_port_cnp_pri_attr, port_attr);
+	struct hns_roce_dev *hr_dev = to_hr_dev(ibdev);
+	struct hns_roce_cnp_pri_param *cnp_pri_param;
+	__le32 param_bak;
+	u32 param;
+	u32 val;
+	int ret;
+
+	if (port_num > hr_dev->caps.num_ports)
+		return -ENODEV;
+
+	if (WARN_ON(cnp_pri_attr->bit_size > sizeof(u32)))
+		return -EINVAL;
+
+	ret = kstrtou32(buf, 0, &val);
+	if (ret)
+		return ret;
+
+	if (val > cnp_pri_attr->max)
+		return -EINVAL;
+
+	cnp_pri_param = hr_dev->cnp_pri_param;
+	param = le32_to_cpu(cnp_pri_param->param);
+	if (cnp_pri_attr->bit_offset != HNS_ROCE_CNP_PRI_ENABLE_BIT_OFS &&
+	    !(param & HNS_ROCE_CNP_PRI_ENABLE_BIT_MASK))
+		return -EPERM;
+
+	param = param & (~cnp_pri_attr->bit_mask);
+	val = (val << cnp_pri_attr->bit_offset) | param;
+	param_bak = cnp_pri_param->param;
+	cnp_pri_param->param = cpu_to_le32(val);
+	hr_dev = cnp_pri_param->hr_dev;
+
+	ret = hr_dev->hw->config_cnp_pri_param(hr_dev);
+	if (ret) {
+		cnp_pri_param->param = param_bak;
+		return ret;
+	}
+
+	return count;
 }
 
 static ssize_t scc_attr_show(struct ib_device *ibdev, u32 port_num,
@@ -170,6 +288,30 @@ static ssize_t scc_attr_store(struct ib_device *ibdev, u32 port_num,
 	return count;
 }
 
+static umode_t cnp_pri_param_is_visible(struct kobject *kobj,
+				   struct attribute *attr, int i)
+{
+	u32 port_num;
+	struct ib_device *ibdev = ib_port_sysfs_get_ibdev_kobj(kobj, &port_num);
+	struct hns_roce_dev *hr_dev = to_hr_dev(ibdev);
+
+	if (!hr_dev->cnp_pri_param)
+		return 0;
+
+	if (hr_dev->is_vf || hr_dev->pci_dev->revision <= PCI_REVISION_ID_HIP08)
+		return 0;
+
+	if (hr_dev->mac_type != HNAE3_MAC_ROH ||
+	    hr_dev->func_id != MAIN_PF_FUNC_ID)
+		return 0;
+
+	if (!(hr_dev->caps.flags & HNS_ROCE_CAP_FLAG_QP_FLOW_CTRL) ||
+	    !(hr_dev->caps.fw_cap & FW_CAP_FLAG_CNP_PRI))
+		return 0;
+
+	return 0644;
+}
+
 static umode_t scc_attr_is_visible(struct kobject *kobj,
 				   struct attribute *attr, int i)
 {
@@ -193,6 +335,37 @@ static umode_t scc_attr_is_visible(struct kobject *kobj,
 
 	return 0644;
 }
+
+#define __HNS_CNP_PRI_ATTR(_name, _offset, _size, _mask, _max) {		\
+	.port_attr = __ATTR(_name, 0644, cnp_pri_attr_show,  cnp_pri_attr_store),	\
+	.bit_offset = _offset,							\
+	.bit_size = _size,								\
+	.bit_mask = _mask,								\
+	.max = _max,								\
+}
+
+#define HNS_PORT_CNP_PRI_ATTR_RW(_name, NAME)			\
+	struct hns_port_cnp_pri_attr hns_roce_port_attr_cnp_pri_##_name =	\
+	__HNS_CNP_PRI_ATTR(_name,		\
+			HNS_ROCE_CNP_PRI_##NAME##_BIT_OFS,			\
+			HNS_ROCE_CNP_PRI_##NAME##_BIT_SZ,			\
+			HNS_ROCE_CNP_PRI_##NAME##_BIT_MASK,			\
+			HNS_ROCE_CNP_PRI_##NAME##_MAX)
+
+HNS_PORT_CNP_PRI_ATTR_RW(enable, ENABLE);
+HNS_PORT_CNP_PRI_ATTR_RW(dscp, DSCP);
+
+static struct attribute *cnp_pri_param_attrs[] = {
+	&hns_roce_port_attr_cnp_pri_enable.port_attr.attr,
+	&hns_roce_port_attr_cnp_pri_dscp.port_attr.attr,
+	NULL,
+};
+
+static const struct attribute_group cnp_pri_param_group = {
+	.name = "cnp_pri_param",
+	.attrs = cnp_pri_param_attrs,
+	.is_visible = cnp_pri_param_is_visible,
+};
 
 #define __HNS_SCC_ATTR(_name, _type, _offset, _size, _min, _max) {		\
 	.port_attr = __ATTR(_name, 0644, scc_attr_show,  scc_attr_store),	\
@@ -353,5 +526,6 @@ const struct attribute_group *hns_attr_port_groups[] = {
 	&ldcp_cc_param_group,
 	&hc3_cc_param_group,
 	&dip_cc_param_group,
+	&cnp_pri_param_group,
 	NULL,
 };

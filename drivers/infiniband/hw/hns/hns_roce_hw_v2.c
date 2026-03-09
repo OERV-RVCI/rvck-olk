@@ -1622,6 +1622,41 @@ static int hns_roce_cmq_query_hw_info(struct hns_roce_dev *hr_dev)
 	return 0;
 }
 
+static void hns_roce_cmq_query_hw_id(struct hns_roce_dev *hr_dev)
+{
+	#define HNS_IB_INVALID_ID 0XFFFF
+
+	struct hns_roce_hw_id_query_cmq *resp;
+	struct hns_roce_cmq_desc desc;
+	int ret;
+
+	if (hr_dev->is_vf || hr_dev->pci_dev->revision <= PCI_REVISION_ID_HIP08)
+		goto invalid_val;
+
+	hns_roce_cmq_setup_basic_desc(&desc, HNS_ROCE_OPC_QUERY_HW_ID, true);
+	ret = hns_roce_cmq_send(hr_dev, &desc, 1);
+	if (ret) {
+		if (desc.retval != CMD_NOT_EXIST)
+			ibdev_warn(&hr_dev->ib_dev,
+				   "failed to query hw id, ret = %d.\n", ret);
+
+		goto invalid_val;
+	}
+
+	resp = (struct hns_roce_hw_id_query_cmq *)desc.data;
+	hr_dev->chip_id = resp->chip_id;
+	hr_dev->die_id = resp->die_id;
+	hr_dev->mac_id = resp->mac_id;
+	hr_dev->func_id = (u16)le32_to_cpu(resp->func_id);
+	return;
+
+invalid_val:
+	hr_dev->func_id = HNS_IB_INVALID_ID;
+	hr_dev->mac_id = HNS_IB_INVALID_ID;
+	hr_dev->die_id = HNS_IB_INVALID_ID;
+	hr_dev->chip_id = HNS_IB_INVALID_ID;
+}
+
 static void func_clr_hw_resetting_state(struct hns_roce_dev *hr_dev,
 					struct hnae3_handle *handle)
 {
@@ -1821,6 +1856,7 @@ static int hns_roce_query_fw_ver(struct hns_roce_dev *hr_dev)
 
 	resp = (struct hns_roce_query_fw_info *)desc.data;
 	hr_dev->caps.fw_ver = (u64)(le32_to_cpu(resp->fw_ver));
+	hr_dev->caps.fw_cap = le32_to_cpu(resp->fw_cap);
 
 	return 0;
 }
@@ -2630,6 +2666,8 @@ static int hns_roce_v2_profile(struct hns_roce_dev *hr_dev)
 		dev_err(dev, "failed to query firmware info, ret = %d.\n", ret);
 		return ret;
 	}
+
+	hns_roce_cmq_query_hw_id(hr_dev);
 
 	hr_dev->vendor_part_id = hr_dev->pci_dev->device;
 	hr_dev->sys_image_guid = be64_to_cpu(hr_dev->ib_dev.node_guid);
@@ -7385,6 +7423,45 @@ static const enum hns_roce_opcode_type scc_opcode[] = {
 	HNS_ROCE_OPC_CFG_DIP_PARAM,
 };
 
+static int hns_roce_v2_config_cnp_pri_param(struct hns_roce_dev *hr_dev)
+{
+	struct hns_roce_cnp_pri_param *cnp_pri_param;
+	struct hns_roce_cmq_desc desc;
+	int ret;
+
+	hns_roce_cmq_setup_basic_desc(&desc, HNS_ROCE_OPC_CFG_CNP_PRI, false);
+	cnp_pri_param = hr_dev->cnp_pri_param;
+	desc.data[0] = cnp_pri_param->param;
+
+	ret = hns_roce_cmq_send(hr_dev, &desc, 1);
+	if (ret)
+		ibdev_err_ratelimited(&hr_dev->ib_dev,
+				      "failed to configure cnp pri param, opcode: 0x%x, ret = %d.\n",
+				      le16_to_cpu(desc.opcode), ret);
+	return ret;
+}
+
+static int hns_roce_v2_query_cnp_pri_param(struct hns_roce_dev *hr_dev)
+{
+	struct hns_roce_cnp_pri_param *cnp_pri_param;
+	struct hns_roce_cmq_desc desc;
+	int ret;
+
+	hns_roce_cmq_setup_basic_desc(&desc, HNS_ROCE_OPC_CFG_CNP_PRI, true);
+	ret = hns_roce_cmq_send(hr_dev, &desc, 1);
+	if (ret) {
+		ibdev_err_ratelimited(&hr_dev->ib_dev,
+				      "failed to query cnp pri param, opcode: 0x%x, ret = %d.\n",
+				      le16_to_cpu(desc.opcode), ret);
+		return ret;
+	}
+
+	cnp_pri_param = hr_dev->cnp_pri_param;
+	cnp_pri_param->param = desc.data[0];
+
+	return 0;
+}
+
 static int hns_roce_v2_config_scc_param(struct hns_roce_dev *hr_dev,
 					enum hns_roce_scc_algo algo)
 {
@@ -7510,6 +7587,8 @@ static const struct hns_roce_hw hns_roce_hw_v2 = {
 	.bond_init = hns_roce_bond_init,
 	.bond_is_active = hns_roce_bond_is_active,
 	.get_bond_netdev = hns_roce_get_bond_netdev,
+	.config_cnp_pri_param = hns_roce_v2_config_cnp_pri_param,
+	.query_cnp_pri_param = hns_roce_v2_query_cnp_pri_param,
 };
 
 static const struct pci_device_id hns_roce_hw_v2_pci_tbl[] = {

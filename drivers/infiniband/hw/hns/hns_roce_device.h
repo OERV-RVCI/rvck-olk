@@ -114,6 +114,8 @@
 #define HNS_ROCE_MAX_CQ_COUNT 0xFFFF
 #define HNS_ROCE_MAX_CQ_PERIOD 0xFFFF
 
+#define MAIN_PF_FUNC_ID 0
+
 enum {
 	SERV_TYPE_RC,
 	SERV_TYPE_UC,
@@ -174,6 +176,10 @@ enum {
 	HNS_ROCE_CAP_FLAG_BOND			= BIT(21),
 	HNS_ROCE_CAP_FLAG_SRQ_RECORD_DB         = BIT(22),
 	HNS_ROCE_CAP_FLAG_LIMIT_BANK            = BIT(23),
+};
+
+enum {
+	FW_CAP_FLAG_CNP_PRI = BIT(3),
 };
 
 #define HNS_ROCE_DB_TYPE_COUNT			2
@@ -953,6 +959,7 @@ struct hns_roce_caps {
 	u8		cong_cap;
 	enum hns_roce_cong_type default_cong_type;
 	u32 max_ack_req_msg_len;
+	u32 fw_cap;
 };
 
 enum hns_roce_device_state {
@@ -1070,6 +1077,13 @@ struct hns_roce_hw {
 	int (*bond_init)(struct hns_roce_dev *hr_dev);
 	bool (*bond_is_active)(struct hns_roce_dev *hr_dev);
 	struct net_device *(*get_bond_netdev)(struct hns_roce_dev *hr_dev);
+	int (*config_cnp_pri_param)(struct hns_roce_dev *hr_dev);
+	int (*query_cnp_pri_param)(struct hns_roce_dev *hr_dev);
+};
+
+struct hns_roce_cnp_pri_param {
+	__le32 param;
+	struct hns_roce_dev *hr_dev;
 };
 
 #define HNS_ROCE_SCC_PARAM_SIZE 4
@@ -1119,6 +1133,10 @@ struct hns_roce_dev {
 	u32                     vendor_id;
 	u32                     vendor_part_id;
 	u32                     hw_rev;
+	u16 chip_id;
+	u16 die_id;
+	u16 mac_id;
+	u16 func_id;
 	void __iomem            *priv_addr;
 
 	struct hns_roce_cmdq	cmd;
@@ -1164,6 +1182,7 @@ struct hns_roce_dev {
 	void *dca_safe_buf;
 	dma_addr_t dca_safe_page;
 	siphash_key_t dca_safe_hash_key;
+	struct hns_roce_cnp_pri_param *cnp_pri_param;
 };
 
 enum hns_roce_trace_type {
@@ -1497,4 +1516,6 @@ int hns_roce_alloc_scc_param(struct hns_roce_dev *hr_dev);
 void hns_roce_dealloc_scc_param(struct hns_roce_dev *hr_dev);
 void hns_roce_put_cq_bankid_for_uctx(struct hns_roce_ucontext *uctx);
 void hns_roce_get_cq_bankid_for_uctx(struct hns_roce_ucontext *uctx);
+int hns_roce_alloc_cnp_pri_param(struct hns_roce_dev *hr_dev);
+void hns_roce_dealloc_cnp_param(struct hns_roce_dev *hr_dev);
 #endif /* _HNS_ROCE_DEVICE_H */
