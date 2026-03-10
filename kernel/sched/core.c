@@ -12292,6 +12292,25 @@ static struct cftype cpu_files[] = {
 		.write = cpu_uclamp_max_write,
 	},
 #endif
+#ifdef CONFIG_SCHED_SOFT_DOMAIN
+	{
+		.name = "soft_domain",
+		.flags = CFTYPE_NOT_ON_ROOT,
+		.read_s64 = cpu_soft_domain_read_s64,
+		.write_s64 = cpu_soft_domain_write_s64,
+	},
+	{
+		.name = "soft_domain_nr_cpu",
+		.flags = CFTYPE_NOT_ON_ROOT,
+		.read_u64 = cpu_soft_domain_quota_read_u64,
+		.write_u64 = cpu_soft_domain_quota_write_u64,
+	},
+	{
+		.name = "soft_domain_cpu_list",
+		.flags = CFTYPE_NOT_ON_ROOT,
+		.seq_show = soft_domain_cpu_list_seq_show,
+	},
+#endif
 #ifdef CONFIG_SCHED_SOFT_QUOTA
 	{
 		.name = "soft_quota",
