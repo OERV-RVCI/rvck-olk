@@ -36,6 +36,9 @@ static DEFINE_SPINLOCK(g_realm_dev_lock);
 static DECLARE_BITMAP(g_pcipc_ns, (PCI_BDF_MASK + 1));
 static DEFINE_SPINLOCK(g_pcipc_ns_lock);
 
+static DECLARE_BITMAP(g_dev_protected, (PCI_BDF_MASK + 1));
+static DEFINE_SPINLOCK(g_dev_protected_lock);
+
 bool is_support_rme(void)
 {
 	return static_branch_unlikely(&kvm_rme_is_available);
@@ -424,6 +427,9 @@ static int rme_get_all_dev_info(struct pci_dev *rp_dev,
 	} else {
 		int ndev = 0;
 
+		params->devs[ndev] = pci_dev_id(rp_dev);
+		ndev++;
+
 		ret = get_child_devices_rec(rp_dev, params->devs,
 					    MAX_DEV_PER_PORT, &ndev,
 					    pdevs);
@@ -608,6 +614,11 @@ static int delegate_root_dev(struct pci_dev *root_dev)
 		free_page((unsigned long)params);
 		return ret;
 	}
+
+	spin_lock(&g_dev_protected_lock);
+	for (int i = 0; i < params->num_dev; i++)
+		bitmap_set(g_dev_protected, params->devs[i], 1);
+	spin_unlock(&g_dev_protected_lock);
 
 	ret = rme_root_dev_delegate(virt_to_phys(params));
 	if (ret)
@@ -1010,7 +1021,6 @@ static u64 rme_mmio_read64(unsigned long addr, struct pci_dev *pdev)
 	return value;
 }
 
-
 static int rme_mmio_write64(unsigned long addr, unsigned long value,
 			     struct pci_dev *pdev)
 {
@@ -1366,3 +1376,40 @@ bool is_realm_device(struct device *dev, struct device_driver *drv)
 	return false;
 }
 EXPORT_SYMBOL_GPL(is_realm_device);
+
+bool is_dev_ecam_protected(u16 dev_bdf)
+{
+	bool is_dev_ecam_protected = false;
+
+	spin_lock(&g_dev_protected_lock);
+	is_dev_ecam_protected = bitmap_read(g_dev_protected, dev_bdf, 1);
+	spin_unlock(&g_dev_protected_lock);
+
+	return is_dev_ecam_protected;
+}
+
+/* If device is realm dev, read config need transfer to rmm */
+int ccada_pci_generic_config_read(void __iomem *addr, unsigned char bus_num,
+				   unsigned int devfn, u32 size, u32 *val)
+{
+	u16 dev_bdf = PCI_DEVID(bus_num, devfn);
+	u64 bits = MMIO_RW_32BITS;
+
+	if (MMIO_RW_8BITS * size <= MMIO_RW_16BITS)
+		bits = MMIO_RW_8BITS * size;
+
+	return rmi_dev_mmio_read(rme_mmio_va_to_pa(addr), bits, (unsigned long *)val, dev_bdf);
+}
+
+/* If device is realm dev, write config need transfer to rmm */
+int ccada_pci_generic_config_write(void __iomem *addr, unsigned char bus_num,
+				    unsigned int devfn, u32 size, u32 val)
+{
+	u16 dev_bdf = PCI_DEVID(bus_num, devfn);
+	u64 bits = MMIO_RW_32BITS;
+
+	if (MMIO_RW_8BITS * size <= MMIO_RW_16BITS)
+		bits = MMIO_RW_8BITS * size;
+
+	return rmi_dev_mmio_write(rme_mmio_va_to_pa(addr), bits, val, dev_bdf);
+}

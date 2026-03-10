@@ -337,7 +337,7 @@ static void __unmap_stage2_range(struct kvm_s2_mmu *mmu, phys_addr_t start, u64 
 }
 
 void unmap_stage2_range(struct kvm_s2_mmu *mmu, phys_addr_t start, u64 size,
-			       bool may_block)
+			bool may_block)
 {
 	__unmap_stage2_range(mmu, start, size, may_block, false);
 }

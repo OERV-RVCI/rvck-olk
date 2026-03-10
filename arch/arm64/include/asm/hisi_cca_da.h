@@ -2,6 +2,7 @@
 #ifndef __ASM_HISI_CCA_DA_H
 #define __ASM_HISI_CCA_DA_H
 
+#include <linux/cca_cvm_domain.h>
 #include <asm/kvm_host.h>
 #include "../../../../drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.h"
 
@@ -30,8 +31,9 @@ struct realm_dev_entry {
 };
 
 #define REALM_MSI_ORIG_IOVA		0x8000000
-
-bool is_support_rme(void);
+#define MMIO_RW_8BITS			0x8
+#define MMIO_RW_16BITS			0x10
+#define MMIO_RW_32BITS			0x20
 
 int realm_attach_devs(struct realm *realm);
 void realm_destroy_dev_list(struct realm *realm);
@@ -77,5 +79,4 @@ void __rme_raw_writel_hook(u32 val, void __iomem *addr, struct pci_dev *pdev);
 int __rme_iowrite64_copy_hook(void __iomem *to, const void *from,
 	size_t count, struct pci_dev *pdev);
 
-bool is_realm_device(struct device *dev, struct device_driver *drv);
 #endif

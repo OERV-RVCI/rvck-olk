@@ -56,7 +56,6 @@ bool realm_free_swiotlb_shared_pages(void *addr, unsigned int order)
 }
 
 #ifdef CONFIG_HISI_CCADA_GUEST
-#define msix_table_size(flags)	((flags & PCI_MSIX_FLAGS_QSIZE) + 1)
 static int set_msix_region_shared(struct pci_dev *pdev, int bar)
 {
 	resource_size_t start;
@@ -79,7 +78,7 @@ static int set_msix_region_shared(struct pci_dev *pdev, int bar)
 	}
 
 	pci_read_config_word(pdev, pdev->msix_cap + PCI_MSIX_FLAGS, &control);
-	tsize = msix_table_size(control);
+	tsize = (control & PCI_MSIX_FLAGS_QSIZE) + 1;
 	end = ALIGN(start + tsize * PCI_MSIX_ENTRY_SIZE, PAGE_SIZE);
 	if (end <= start) {
 		pci_err(pdev, "pci dev msi end overflow.\n");

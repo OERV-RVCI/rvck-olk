@@ -29,11 +29,7 @@
 #include <linux/pinctrl/devinfo.h>
 #include <linux/slab.h>
 #include <linux/virtcca_cvm_domain.h>
-#ifndef __GENKSYMS__
-#ifdef CONFIG_HISI_CCADA_HOST
-#include <asm/hisi_cca_da.h>
-#endif
-#endif
+#include <linux/cca_cvm_domain.h>
 
 #include "base.h"
 #include "power/power.h"
@@ -616,10 +612,8 @@ static int really_probe(struct device *dev, struct device_driver *drv)
 	if (is_virtcca_secure_vf(dev, drv))
 		return 0;
 
-#ifdef CONFIG_HISI_CCADA_HOST
 	if (is_realm_device(dev, drv))
 		return 0;
-#endif
 
 	if (defer_all_probes) {
 		/*

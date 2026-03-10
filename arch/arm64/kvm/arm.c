@@ -46,9 +46,6 @@
 #include <kvm/arm_hypercalls.h>
 #include <kvm/arm_pmu.h>
 #include <kvm/arm_psci.h>
-#ifdef CONFIG_HISI_CCADA_HOST
-#include <asm/hisi_cca_da.h>
-#endif
 
 static enum kvm_mode kvm_mode = KVM_MODE_DEFAULT;
 

@@ -434,8 +434,10 @@ static int hisi_cca_realm_unmap_private(struct realm *realm,
 	ret = rmi_cca_hisi_data_destroy_level(rd, ipa, &rtt_addr, next_addr, &map_level);
 	if (RMI_RETURN_STATUS(ret) == RMI_ERROR_RTT)
 		return 0;
-	else if (WARN_ON(ret))
+	else if (ret) {
+		pr_warn("CCA data destroy with level fail:%d.\n", ret);
 		return -ENXIO;
+	}
 
 	if (map_level > RMM_RTT_MAX_LEVEL)
 		return -ENXIO;
