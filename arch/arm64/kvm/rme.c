@@ -65,6 +65,7 @@ int rmi_granule_delegate(unsigned long phys)
 {
 	struct folio *folio = page_folio(phys_to_page(phys));
 
+#ifdef CONFIG_HISI_CCA
 	if (folio_test_hugetlb(folio)) {
 		if (rme_isolate_hugetlb(folio))
 			folio_put(folio);
@@ -72,6 +73,7 @@ int rmi_granule_delegate(unsigned long phys)
 		if (folio_isolate_lru(folio))
 			folio_put(folio);
 	}
+#endif
 	return _rmi_granule_delegate(phys);
 }
 EXPORT_SYMBOL_GPL(rmi_granule_delegate);
@@ -317,7 +319,6 @@ retry:
 	if (WARN_ON(ret))
 		return -ENXIO;
 
-	put_page(phys_to_page(rtt_addr));
 	*out_rtt = rtt_addr;
 
 	return 0;
@@ -433,8 +434,10 @@ static int hisi_cca_realm_unmap_private(struct realm *realm,
 	ret = rmi_cca_hisi_data_destroy_level(rd, ipa, &rtt_addr, next_addr, &map_level);
 	if (RMI_RETURN_STATUS(ret) == RMI_ERROR_RTT)
 		return 0;
-	else if (WARN_ON(ret))
+	else if (ret) {
+		pr_warn("CCA data destroy with level fail:%d.\n", ret);
 		return -ENXIO;
+	}
 
 	if (map_level > RMM_RTT_MAX_LEVEL)
 		return -ENXIO;
@@ -907,10 +910,8 @@ static int realm_create_protected_data_granule(struct realm *realm,
 	phys_addr_t rd = virt_to_phys(realm->rd);
 	int ret;
 
-	if (rmi_granule_delegate(dst_phys))
+	if (rmi_granule_delegate_get(dst_phys, realm))
 		return -ENXIO;
-
-	get_page(phys_to_page(dst_phys));
 
 	ret = rmi_data_create(rd, dst_phys, ipa, src_phys, flags);
 	if (RMI_RETURN_STATUS(ret) == RMI_ERROR_RTT) {
@@ -940,6 +941,7 @@ int realm_create_protected_data_page(struct realm *realm,
 {
 	unsigned long rd = virt_to_phys(realm->rd);
 	phys_addr_t dst_phys, src_phys;
+	bool undelegate_failed = false;
 	int ret, offset;
 
 	dst_phys = page_to_phys(dst_page);
@@ -966,8 +968,8 @@ int realm_create_protected_data_page(struct realm *realm,
 err:
 	if (ret == -EIO) {
 		/* current offset needs undelegating */
-		if (!WARN_ON(rmi_granule_undelegate(dst_phys)))
-			put_page(dst_page);
+		if (WARN_ON(rmi_granule_undelegate(dst_phys)))
+			undelegate_failed = true;
 	}
 	while (offset > 0) {
 		ipa -= RMM_PAGE_SIZE;
@@ -976,8 +978,16 @@ err:
 
 		rmi_data_destroy(rd, ipa, NULL, NULL);
 
-		if (!WARN_ON(rmi_granule_undelegate(dst_phys)))
-			put_page(dst_page);
+		if (WARN_ON(rmi_granule_undelegate(dst_phys)))
+			undelegate_failed = true;
+	}
+
+	if (undelegate_failed) {
+		/*
+		 * A granule could not be undelegated,
+		 * so the page has to be leaked
+		 */
+		get_page(dst_page);
 	}
 
 	return -ENXIO;
@@ -1129,7 +1139,7 @@ int realm_map_protected(struct realm *realm,
 	}
 
 	for (size = 0; size < map_size; size += RMM_PAGE_SIZE) {
-		if (rmi_granule_delegate(phys)) {
+		if (rmi_granule_delegate_get(phys, realm)) {
 			/*
 			 * It's likely we raced with another VCPU on the same
 			 * fault. Assume the other VCPU has handled the fault
@@ -1138,7 +1148,6 @@ int realm_map_protected(struct realm *realm,
 			return 0;
 		}
 
-		get_page(phys_to_page(phys));
 		ret = rmi_data_create_unknown(rd, phys, ipa);
 
 		if (RMI_RETURN_STATUS(ret) == RMI_ERROR_RTT) {
@@ -1172,8 +1181,10 @@ int realm_map_protected(struct realm *realm,
 	return 0;
 
 err_undelegate:
-	if (!WARN_ON(rmi_granule_undelegate(phys)))
-		put_page(phys_to_page(phys));
+	if (WARN_ON(rmi_granule_undelegate(phys))) {
+		/* Page can't be returned to NS world so is lost */
+		get_page(phys_to_page(phys));
+	}
 err:
 	while (size > 0) {
 		unsigned long data, top;
@@ -1184,8 +1195,10 @@ err:
 
 		WARN_ON(rmi_data_destroy(rd, ipa, &data, &top));
 
-		if (!WARN_ON(rmi_granule_undelegate(phys)))
-			put_page(phys_to_page(phys));
+		if (WARN_ON(rmi_granule_undelegate(phys))) {
+			/* Page can't be returned to NS world so is lost */
+			get_page(phys_to_page(phys));
+		}
 	}
 	return -ENXIO;
 }
@@ -1572,7 +1585,9 @@ static int kvm_create_realm(struct kvm *kvm)
 	}
 
 	WRITE_ONCE(realm->state, REALM_STATE_NEW);
-
+	INIT_LIST_HEAD(&realm->page_list);
+	INIT_LIST_HEAD(&realm->hugetlb_page_list);
+	realm->cur_rhf = NULL;
 	/* The realm is up, free the parameters.  */
 	free_page((unsigned long)realm->params);
 	realm->params = NULL;
@@ -1703,6 +1718,105 @@ int _kvm_realm_enable_cap(struct kvm *kvm, struct kvm_enable_cap *cap)
 	return r;
 }
 
+int realm_add_hugetlb_folios(struct realm *realm, struct folio *folio)
+{
+	int ret = 0;
+	unsigned long flags;
+	struct realm_hugetlb_folios *rhf;
+	struct realm_hugetlb_folios *free_rhf = NULL;
+
+	spin_lock_irqsave(&realm->realm_lock, flags);
+	rhf = realm->cur_rhf;
+	if (!rhf || rhf->folio_num >= REALM_HUGETLB_FOLIO_NUM) {
+		realm->cur_rhf = NULL;
+		spin_unlock_irqrestore(&realm->realm_lock, flags);
+		free_rhf = (struct realm_hugetlb_folios *)get_zeroed_page(GFP_KERNEL);
+		if (!free_rhf)
+			return -ENOMEM;
+		pr_info("Alloc new hugetlb_folio page.\n");
+		INIT_LIST_HEAD(&free_rhf->page_node);
+
+		spin_lock_irqsave(&realm->realm_lock, flags);
+		if (!realm->cur_rhf) {
+			realm->cur_rhf = free_rhf;
+			list_add(&free_rhf->page_node, &realm->hugetlb_page_list);
+			free_rhf = NULL;
+		}
+		rhf = realm->cur_rhf;
+		if (rhf->folio_num >= REALM_HUGETLB_FOLIO_NUM) {
+			ret = -ENOMEM;
+			goto out;
+		}
+	}
+	rhf->folio_addr[rhf->folio_num] = (unsigned long)folio;
+	rhf->folio_num++;
+
+out:
+	spin_unlock_irqrestore(&realm->realm_lock, flags);
+	if (free_rhf)
+		free_page((unsigned long)free_rhf);
+	return ret;
+}
+
+int rmi_granule_delegate_get(unsigned long phys, void *realm_p)
+{
+	int ret;
+	struct realm *realm = (struct realm *)realm_p;
+	struct folio *folio = page_folio(phys_to_page(phys));
+
+	if (folio_test_hugetlb(folio)) {
+		if (rme_isolate_hugetlb(folio)) {
+			folio_put(folio);
+			if (realm) {
+				ret = realm_add_hugetlb_folios(realm, folio);
+				if (ret)
+					return ret;
+			}
+		}
+	} else if (folio_test_lru(folio)) {
+		if (folio_isolate_lru(folio)) {
+			folio_put(folio);
+			if (realm) {
+				unsigned long flags;
+
+				spin_lock_irqsave(&realm->realm_lock, flags);
+				folio_get(folio);
+				list_add(&folio->lru, &realm->page_list);
+				spin_unlock_irqrestore(&realm->realm_lock, flags);
+			}
+		}
+	}
+	return _rmi_granule_delegate(phys);
+}
+
+static void realm_put_folios(struct realm *realm)
+{
+	unsigned long flags;
+	struct folio *folio, *next;
+	struct realm_hugetlb_folios *rhf, *node;
+	unsigned long i;
+	LIST_HEAD(free_list);
+
+	spin_lock_irqsave(&realm->realm_lock, flags);
+	list_for_each_entry_safe(folio, next, &realm->page_list, lru) {
+		list_del(&folio->lru);
+		folio_put(folio);
+	}
+
+	list_for_each_entry_safe(rhf, node, &realm->hugetlb_page_list, page_node) {
+		for (i = 0; i < rhf->folio_num; i++)
+			folio_put((struct folio *)rhf->folio_addr[i]);
+		list_move(&rhf->page_node, &free_list);
+	}
+	realm->cur_rhf = NULL;
+	spin_unlock_irqrestore(&realm->realm_lock, flags);
+
+	list_for_each_entry_safe(rhf, node, &free_list, page_node) {
+		list_del(&rhf->page_node);
+		free_page((unsigned long)rhf);
+	}
+}
+
 void _kvm_destroy_realm(struct kvm *kvm)
 {
 	struct kvm_s2_mmu *mmu = &kvm->arch.mmu;
@@ -1723,10 +1837,10 @@ void _kvm_destroy_realm(struct kvm *kvm)
 	unmap_stage2_range(mmu, 0, BIT(realm->ia_bits - 1), true);
 	write_unlock(&kvm->mmu_lock);
 	kvm_realm_destroy_rtts(kvm, mmu->pgt->ia_bits);
-
 	/* undelegate and detach dev from realm */
 	realm_destroy_dev_list(realm);
 #endif
+	realm_put_folios(realm);
 
 	WRITE_ONCE(realm->state, REALM_STATE_DYING);
 
@@ -1806,6 +1920,9 @@ int _kvm_rec_pre_enter(struct kvm_vcpu *vcpu)
 	case RMI_EXIT_RIPAS_CHANGE:
 		kvm_complete_ripas_change(vcpu);
 		break;
+	case RMI_EXIT_DEV_VALIDATE:
+	case RMI_EXIT_DEV_START:
+		kvm_complete_dev_op(vcpu);
 	}
 
 	return 1;

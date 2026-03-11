@@ -182,6 +182,7 @@ static int rec_exit_dev(struct kvm_vcpu *vcpu)
 	/* Return to qemu to find the host dev by guest dev bdf */
 	vcpu->run->exit_reason = KVM_EXIT_ARM_RME_DEV;
 	vcpu->run->rme_dev.guest_dev_bdf = rec->run->exit.guest_dev_bdf;
+	vcpu->run->rme_dev.vfio_dev = false;
 
 	return 0;
 }

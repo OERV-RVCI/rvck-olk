@@ -116,7 +116,7 @@ static int hisi_cca_create_data_page_unknown(struct realm *realm,
 	int ret, offset;
 
 	for (offset = 0; offset < PAGE_SIZE; offset += RMM_PAGE_SIZE) {
-		if (rmi_granule_delegate(phys)) {
+		if (rmi_granule_delegate_get(phys, realm)) {
 			/*
 			 * It's likely we raced with another VCPU on the same
 			 * fault. Assume the other VCPU has handled the fault
@@ -188,7 +188,7 @@ static int hisi_cca_create_data_block(struct realm *realm, unsigned long ipa,
 	dst_phys = page_to_phys(dst_pages[0]);
 	tmp_phys = page_to_phys(tmp_block);
 
-	if (rmi_cca_hisi_delegate_range(dst_phys, RMM_L2_BLOCK_SIZE) != RMI_SUCCESS)
+	if (rmi_cca_hisi_delegate_range_get(dst_phys, RMM_L2_BLOCK_SIZE, realm) != RMI_SUCCESS)
 		return -ENXIO;
 
 	ret = rmi_cca_hisi_block_create(virt_to_phys(realm->rd), dst_phys, ipa,
@@ -233,7 +233,7 @@ static int hisi_cca_create_data_block_unknown(struct realm *realm,
 
 	dst_phys = page_to_phys(dst_pages[0]);
 
-	if (rmi_cca_hisi_delegate_range(dst_phys, map_size)) {
+	if (rmi_cca_hisi_delegate_range_get(dst_phys, map_size, realm)) {
 		/* Race with another thread. */
 		return 0;
 	}
@@ -607,27 +607,43 @@ int realm_hisi_cca_set_ipa_state(struct kvm_vcpu *vcpu, unsigned long start,
 	return ret;
 }
 
-int rmi_cca_hisi_delegate_range(unsigned long start_addr, unsigned long size)
+int rmi_cca_hisi_delegate_range_get(unsigned long start_addr, unsigned long size, void *realm_p)
 {
 	unsigned long start = start_addr;
 	unsigned long end = start_addr + size;
 	struct folio *folio;
-	unsigned long nr_pages;
+	struct realm *realm = (struct realm *)realm_p;
 
 	while (start < end) {
 		folio = page_folio(phys_to_page(start));
-		if (!folio || __pfn_to_phys(folio_pfn(folio)) != start)
+		if (!folio)
 			return -EINVAL;
-		nr_pages = folio_nr_pages(folio);
 
 		if (folio_test_hugetlb(folio)) {
-			if (rme_isolate_hugetlb(folio))
+			if (rme_isolate_hugetlb(folio)) {
 				folio_put(folio);
+				if (realm) {
+					int ret;
+
+					ret = realm_add_hugetlb_folios(realm, folio);
+					if (ret)
+						return ret;
+				}
+			}
 		} else if (folio_test_lru(folio)) {
-			if (folio_isolate_lru(folio))
+			if (folio_isolate_lru(folio)) {
 				folio_put(folio);
+				if (realm) {
+					unsigned long flags;
+
+					spin_lock_irqsave(&realm->realm_lock, flags);
+					folio_get(folio);
+					list_add(&folio->lru, &realm->page_list);
+					spin_unlock_irqrestore(&realm->realm_lock, flags);
+				}
+			}
 		}
-		start += nr_pages * PAGE_SIZE;
+		start = (folio_pfn(folio) + folio_nr_pages(folio)) * PAGE_SIZE;
 	}
 	return _rmi_cca_hisi_delegate_range(start_addr, size);
 }

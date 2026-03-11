@@ -4,6 +4,7 @@
 #include <linux/slab.h>
 #include <linux/ioport.h>
 #include <linux/wait.h>
+#include <linux/cca_cvm_domain.h>
 
 #ifdef CONFIG_HISI_VIRTCCA_CODA
 #ifndef __GENKSYMS__
@@ -102,6 +103,11 @@ int pci_generic_config_read(struct pci_bus *bus, unsigned int devfn,
 		return virtcca_pci_generic_config_read(addr, bus->number, devfn, size, val);
 #endif
 
+#ifdef CONFIG_HISI_CCADA_HOST
+	if (is_support_rme() && is_dev_ecam_protected(devfn))
+		return ccada_pci_generic_config_read(addr, bus->number, devfn, size, val);
+#endif
+
 	if (size == 1)
 		*val = readb(addr);
 	else if (size == 2)
@@ -127,6 +133,11 @@ int pci_generic_config_write(struct pci_bus *bus, unsigned int devfn,
 	    (is_cc_dev(PCI_DEVID(bus->number, devfn)) ||
 	     is_cc_root_bd((PCI_DEVID(bus->number, devfn)))))
 		return virtcca_pci_generic_config_write(addr, bus->number, devfn, size, val);
+#endif
+
+#ifdef CONFIG_HISI_CCADA_HOST
+	if (is_support_rme() && is_dev_ecam_protected(devfn))
+		return ccada_pci_generic_config_write(addr, bus->number, devfn, size, val);
 #endif
 
 	if (size == 1)

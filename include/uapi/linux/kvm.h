@@ -267,7 +267,7 @@ struct kvm_xen_exit {
 #define KVM_EXIT_NOTIFY           37
 #define KVM_EXIT_LOONGARCH_IOCSR  38
 #ifndef __GENKSYMS__
-#define KVM_EXIT_ARM_RME_DEV      39
+#define KVM_EXIT_ARM_RME_DEV      50
 #endif
 
 /* For KVM_EXIT_INTERNAL_ERROR */
@@ -526,6 +526,8 @@ struct kvm_run {
 		/* KVM_EXIT_ARM_RME_DEV */
 		struct {
 			__u16 guest_dev_bdf;
+			__u16 dev_bdf;
+			__u32 vfio_dev;
 		} rme_dev;
 #endif
 		/* Fix the size of the union. */
@@ -2498,15 +2500,5 @@ struct kvm_arm_rmm_psci_complete {
 };
 
 #define KVM_ARM_VCPU_RMM_PSCI_COMPLETE	_IOW(KVMIO, 0xd6, struct kvm_arm_rmm_psci_complete)
-
-/* Available with KVM_CAP_ARM_RME, only for VMs with KVM_VM_TYPE_ARM_REALM  */
-struct kvm_arm_rme_dev_validate {
-	__u16 dev_bdf; /* pci dev bdf in the host */
-	__u16 guest_dev_bdf; /* pci dev bdf in the realm */
-	__u32 vfio_dev; /* Whether the host dev bdf refers to a VFIO dev */
-	__u32 reserved[4];
-};
-
-#define KVM_ARM_VCPU_RME_DEV_VALIDATE	_IOW(KVMIO, 0xd4, struct kvm_arm_rme_dev_validate)
 
 #endif /* __LINUX_KVM_H */

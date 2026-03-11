@@ -46,9 +46,6 @@
 #include <kvm/arm_hypercalls.h>
 #include <kvm/arm_pmu.h>
 #include <kvm/arm_psci.h>
-#ifdef CONFIG_HISI_CCADA_HOST
-#include <asm/hisi_cca_da.h>
-#endif
 
 static enum kvm_mode kvm_mode = KVM_MODE_DEFAULT;
 
@@ -1975,17 +1972,6 @@ long kvm_arch_vcpu_ioctl(struct file *filp,
 			return -EFAULT;
 		return kvm_arm_vcpu_rmm_psci_complete(vcpu, &req);
 	}
-#ifdef CONFIG_HISI_CCADA_HOST
-	case KVM_ARM_VCPU_RME_DEV_VALIDATE: {
-		struct kvm_arm_rme_dev_validate args;
-
-		if (!_vcpu_is_rec(vcpu))
-			return -EPERM;
-		if (copy_from_user(&args, argp, sizeof(args)))
-			return -EFAULT;
-		return kvm_arm_vcpu_rme_dev_validate(vcpu, &args);
-	}
-#endif
 	default:
 		r = -EINVAL;
 	}

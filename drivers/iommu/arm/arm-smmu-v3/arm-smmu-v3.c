@@ -1752,6 +1752,10 @@ static void arm_smmu_write_ste(struct arm_smmu_master *master, u32 sid,
 		.sid = sid,
 	};
 
+#ifdef CONFIG_HISI_CCADA_HOST
+	realm_smmu_write_ste(master, sid, target);
+#endif
+
 	arm_smmu_write_entry(&ste_writer.writer, ste->data, target->data);
 
 	/* It's likely that we'll want to use the new STE soon */
@@ -3140,7 +3144,12 @@ static int arm_smmu_attach_dev(struct iommu_domain *domain, struct device *dev)
 	mutex_lock(&smmu_domain->init_mutex);
 
 	if (!smmu_domain->smmu) {
-		ret = arm_smmu_domain_finalise(smmu_domain, smmu, 0);
+		if (smmu->realm.enabled) {
+			ret = arm_smmu_domain_finalise(smmu_domain, smmu, 0);
+		} else {
+			pr_err("realm smmu has not enabled.\n");
+			ret = -EOPNOTSUPP;
+		}
 	} else if (smmu_domain->smmu != smmu)
 		ret = -EINVAL;
 
@@ -3985,7 +3994,7 @@ static int arm_smmu_enable_rme(struct iommu_domain *domain)
 	int ret = 0;
 
 	mutex_lock(&smmu_domain->init_mutex);
-	if (arm_smmu_support_rme(smmu))
+	if (!smmu || arm_smmu_support_rme(smmu))
 		smmu_domain->realm = true;
 	else
 		ret = -EOPNOTSUPP;

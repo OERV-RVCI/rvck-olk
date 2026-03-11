@@ -5,6 +5,8 @@
 #include <linux/hashtable.h>
 #include <linux/pci.h>
 #include <linux/vfio.h>
+#include <linux/io-64-nonatomic-lo-hi.h>
+#include <linux/io-64-nonatomic-hi-lo.h>
 #include <asm/rmi_cmds.h>
 #include <asm/kvm_emulate.h>
 #include <asm/hisi_cca_da.h>
@@ -33,6 +35,9 @@ static DEFINE_SPINLOCK(g_realm_dev_lock);
 
 static DECLARE_BITMAP(g_pcipc_ns, (PCI_BDF_MASK + 1));
 static DEFINE_SPINLOCK(g_pcipc_ns_lock);
+
+static DECLARE_BITMAP(g_dev_protected, (PCI_BDF_MASK + 1));
+static DEFINE_SPINLOCK(g_dev_protected_lock);
 
 bool is_support_rme(void)
 {
@@ -303,7 +308,7 @@ EXPORT_SYMBOL_GPL(realm_smmu_init_l2_strtab);
  * @ndev: Num of child devices
  */
 static int get_child_devices_rec(struct pci_dev *dev, uint16_t *devs,
-				  int max_devs, int *ndev)
+				  int max_devs, int *ndev, struct pci_dev **pdevs)
 {
 	struct pci_bus *bus = dev->subordinate;
 
@@ -312,7 +317,7 @@ static int get_child_devices_rec(struct pci_dev *dev, uint16_t *devs,
 		int ret = 0;
 
 		list_for_each_entry(child, &bus->devices, bus_list) {
-			ret = get_child_devices_rec(child, devs, max_devs, ndev);
+			ret = get_child_devices_rec(child, devs, max_devs, ndev, pdevs);
 			if (ret < 0)
 				return ret;
 		}
@@ -329,6 +334,8 @@ static int get_child_devices_rec(struct pci_dev *dev, uint16_t *devs,
 			return -EINVAL;
 
 		devs[*ndev] = bdf;
+		if (pdevs)
+			pdevs[*ndev] = dev;
 		*ndev = *ndev + 1;
 	}
 
@@ -355,7 +362,8 @@ static bool is_hisi_acc_dev(struct pci_dev *pdev)
 	}
 }
 
-static int get_vf_devices(struct pci_dev *pf_dev, uint16_t *devs, int max_devs)
+static int get_vf_devices(struct pci_dev *pf_dev, uint16_t *devs,
+				    int max_devs, struct pci_dev **pdevs)
 {
 	struct pci_dev *vf_dev;
 	unsigned short vf_device_id;
@@ -363,6 +371,8 @@ static int get_vf_devices(struct pci_dev *pf_dev, uint16_t *devs, int max_devs)
 
 	/* Add PF device */
 	devs[ndev] = pci_dev_id(pf_dev);
+	if (pdevs)
+		pdevs[ndev] = pf_dev;
 	ndev++;
 
 	/* Get VF device id */
@@ -381,6 +391,8 @@ static int get_vf_devices(struct pci_dev *pf_dev, uint16_t *devs, int max_devs)
 				return -EINVAL;
 
 			devs[ndev] = pci_dev_id(vf_dev);
+			if (pdevs)
+				pdevs[ndev] = vf_dev;
 			ndev++;
 		}
 		vf_dev = pci_get_device(pf_dev->vendor, vf_device_id, vf_dev);
@@ -398,7 +410,8 @@ static int get_vf_devices(struct pci_dev *pf_dev, uint16_t *devs, int max_devs)
  * %-EINVAL if the total number of devices under the root port exceeds the maximum
  */
 static int rme_get_all_dev_info(struct pci_dev *rp_dev,
-				struct rmi_dev_delegate_params *params)
+				struct rmi_dev_delegate_params *params,
+				struct pci_dev **pdevs)
 {
 	int ret;
 
@@ -410,12 +423,16 @@ static int rme_get_all_dev_info(struct pci_dev *rp_dev,
 			return -EINVAL;
 		}
 
-		ret = get_vf_devices(rp_dev, params->devs, MAX_DEV_PER_PORT);
+		ret = get_vf_devices(rp_dev, params->devs, MAX_DEV_PER_PORT, pdevs);
 	} else {
 		int ndev = 0;
 
+		params->devs[ndev] = pci_dev_id(rp_dev);
+		ndev++;
+
 		ret = get_child_devices_rec(rp_dev, params->devs,
-					    MAX_DEV_PER_PORT, &ndev);
+					    MAX_DEV_PER_PORT, &ndev,
+					    pdevs);
 	}
 
 	if (ret < 0) {
@@ -503,8 +520,6 @@ static int rme_root_dev_delegate(phys_addr_t params_addr)
 retry:
 	ret = rmi_root_dev_delegate(params_addr, &out_dev_bdf);
 	if (ret == RMI_ERROR_DEV_INFO) {
-		if (out_dev_bdf == last_dev_bdf)
-			return -ENXIO;
 
 		dev_info = (void *)get_zeroed_page(GFP_ATOMIC);
 		if (!dev_info) {
@@ -518,7 +533,6 @@ retry:
 			free_page((unsigned long)dev_info);
 			return -ENXIO;
 		}
-
 		ret = rmi_dev_init(out_dev_bdf, dev_info_phys);
 		if (ret && ret != RMI_ERROR_DEV_EXISTS) {
 			if (WARN_ON(rmi_granule_undelegate(dev_info_phys))) {
@@ -537,6 +551,55 @@ retry:
 	return 0;
 }
 
+/* Unbind the drivers before switching to secure state.
+ * In SR-IOV scenaios： Unbind all VFs' native drivers.
+ * Otherwise: Unbind the PF's native drivers.
+ */
+static int _realm_unbind_drivers(struct pci_dev **pdevs, uint16_t nr)
+{
+	bool is_sriov = false;
+	bool is_pcipc_ns_driver = false;
+
+	for (uint16_t i = 0; i < nr; i++) {
+		if (!pdevs[i] || pdevs[i] == pci_physfn(pdevs[i]))
+			continue;
+		is_sriov = true;
+		/* Only unbind the VF with its own driver */
+		if (!pdevs[i]->driver || !strcmp(pdevs[i]->driver->name, "vfio-pci"))
+			continue;
+		pci_info(pdevs[i], "rme unbind VF driver for device: %x\n", pci_dev_id(pdevs[i]));
+		device_release_driver(&pdevs[i]->dev);
+		cond_resched();
+	}
+
+	if (is_sriov)
+		return 0;
+
+	for (uint16_t i = 0; i < nr; i++) {
+		if (!pdevs[i] || !pdevs[i]->driver)
+			continue;
+		if (is_hisi_pcipc_ns(&pdevs[i]->dev)) {
+			is_pcipc_ns_driver = true;
+			break;
+		}
+	}
+
+	if (is_pcipc_ns_driver)
+		return 0;
+
+	for (uint16_t i = 0; i < nr; i++) {
+		if (!pdevs[i] || !pdevs[i]->driver)
+			continue;
+		if (pdevs[i] == pci_physfn(pdevs[i]) &&
+			strcmp(pdevs[i]->driver->name, "vfio-pci")) {
+			pci_info(pdevs[i], "rme unbind PF driver for device: %x\n",
+				     pci_dev_id(pdevs[i]));
+			device_release_driver(&pdevs[i]->dev);
+		}
+	}
+	return 0;
+}
+
 static int delegate_root_dev(struct pci_dev *root_dev)
 {
 	struct rmi_dev_delegate_params *params = NULL;
@@ -546,11 +609,16 @@ static int delegate_root_dev(struct pci_dev *root_dev)
 	if (!params)
 		return -ENOMEM;
 
-	ret = rme_get_all_dev_info(root_dev, params);
+	ret = rme_get_all_dev_info(root_dev, params, NULL);
 	if (ret) {
 		free_page((unsigned long)params);
 		return ret;
 	}
+
+	spin_lock(&g_dev_protected_lock);
+	for (int i = 0; i < params->num_dev; i++)
+		bitmap_set(g_dev_protected, params->devs[i], 1);
+	spin_unlock(&g_dev_protected_lock);
 
 	ret = rme_root_dev_delegate(virt_to_phys(params));
 	if (ret)
@@ -718,6 +786,34 @@ static int rme_dev_delegate(struct pci_dev *pdev, struct pci_dev *root_dev)
 	return 0;
 }
 
+static int realm_unbind_drivers(struct pci_dev *root_dev)
+{
+	struct rmi_dev_delegate_params *params = NULL;
+	struct pci_dev **pdevs;
+	int ret;
+
+	params = (struct rmi_dev_delegate_params *)get_zeroed_page(GFP_ATOMIC);
+	if (!params)
+		return -ENOMEM;
+
+	pdevs = kcalloc(MAX_DEV_PER_PORT, sizeof(struct pci_dev *), GFP_KERNEL);
+	if (!pdevs) {
+		free_page((unsigned long)params);
+		return -ENOMEM;
+	}
+
+	ret = rme_get_all_dev_info(root_dev, params, pdevs);
+	if (ret)
+		goto out;
+
+	ret = _realm_unbind_drivers(pdevs, params->num_dev);
+
+out:
+	kfree(pdevs);
+	free_page((unsigned long)params);
+	return ret;
+}
+
 int kvm_rme_assign_device(struct pci_dev *pdev, struct kvm *kvm)
 {
 	struct pci_dev *root_dev;
@@ -733,6 +829,14 @@ int kvm_rme_assign_device(struct pci_dev *pdev, struct kvm *kvm)
 			return -EINVAL;
 		else
 			return 0;
+	}
+
+	if (kvm_is_realm(kvm)) {
+		ret = realm_unbind_drivers(root_dev);
+		if (ret) {
+			pci_err(pdev, "Failed to unbind drivers\n");
+			return ret;
+		}
 	}
 
 	ret = rme_dev_assign(root_dev, kvm);
@@ -837,21 +941,48 @@ err_detach:
 	return ret;
 }
 
-int kvm_arm_vcpu_rme_dev_validate(struct kvm_vcpu *vcpu,
-				  struct kvm_arm_rme_dev_validate *args)
+void kvm_complete_dev_op(struct kvm_vcpu *vcpu)
 {
-	if (!vcpu || !args || !_vcpu_is_rec(vcpu))
-		return -EINVAL;
+	struct kvm_run *run = vcpu->run;
+	struct realm_rec *rec = vcpu->arch.rec;
 
-	/* Record host pdev bdf in rec_enter, complete dev validate in rmm */
-	vcpu->arch.rec->run->enter.vfio_dev = args->vfio_dev;
-	vcpu->arch.rec->run->enter.dev_bdf = args->dev_bdf;
-
-	return 0;
+	rec->run->enter.dev_bdf = run->rme_dev.dev_bdf;
+	rec->run->enter.vfio_dev = run->rme_dev.vfio_dev;
 }
 
-
+#define MMIO_REG_8_BIT 8
+#define MMIO_REG_16_BIT 16
 #define MMIO_REG_32_BIT 32
+#define MMIO_REG_64_BIT 64
+
+static u8 rme_mmio_read8(unsigned long addr, struct pci_dev *pdev)
+{
+	unsigned long value;
+	int ret;
+
+	ret = rmi_dev_mmio_read(addr, MMIO_REG_8_BIT, &value, pci_dev_id(pdev));
+	if (ret) {
+		pr_err("rmi_dev_mmio_read error, ret = %d\n", ret);
+		return 0;
+	}
+
+	return value;
+}
+
+static u16 rme_mmio_read16(unsigned long addr, struct pci_dev *pdev)
+{
+	unsigned long value;
+	int ret;
+
+	ret = rmi_dev_mmio_read(addr, MMIO_REG_16_BIT, &value, pci_dev_id(pdev));
+	if (ret) {
+		pr_err("rmi_dev_mmio_read error, ret = %d\n", ret);
+		return 0;
+	}
+
+	return value;
+}
+
 static u32 rme_mmio_read32(unsigned long addr, struct pci_dev *pdev)
 {
 	unsigned long value;
@@ -874,6 +1005,31 @@ static void rme_mmio_write32(unsigned long addr, unsigned long value,
 	ret = rmi_dev_mmio_write(addr, MMIO_REG_32_BIT, value, pci_dev_id(pdev));
 	if (ret)
 		pr_err("rmi_dev_mmio_write error, ret = %d\n", ret);
+}
+
+static u64 rme_mmio_read64(unsigned long addr, struct pci_dev *pdev)
+{
+	unsigned long value;
+	int ret;
+
+	ret = rmi_dev_mmio_read(addr, MMIO_REG_64_BIT, &value, pci_dev_id(pdev));
+	if (ret) {
+		pr_err("rmi_dev_mmio_read error, ret = %d\n", ret);
+		return 0;
+	}
+
+	return value;
+}
+
+static int rme_mmio_write64(unsigned long addr, unsigned long value,
+			     struct pci_dev *pdev)
+{
+	int ret;
+
+	ret = rmi_dev_mmio_write(addr, MMIO_REG_64_BIT, value, pci_dev_id(pdev));
+	if (ret)
+		pr_err("rmi_dev_mmio_write error, ret = %d\n", ret);
+	return ret;
 }
 
 static inline u64 get_pci_desc_pbase(struct pci_dev *dev, u16 msi_index)
@@ -1076,30 +1232,184 @@ static u64 rme_mmio_va_to_pa(const void *addr)
 		return pa;
 }
 
-u32 readl_hook(void __iomem *addr, struct pci_dev *pdev)
+u32 rme_readl_hook(void __iomem *addr, struct pci_dev *pdev)
 {
 	if (is_support_rme() && is_dev_delegated(pdev))
 		return rme_mmio_read32(rme_mmio_va_to_pa(addr), pdev);
 
 	return readl(addr);
 }
-EXPORT_SYMBOL_GPL(readl_hook);
+EXPORT_SYMBOL_GPL(rme_readl_hook);
 
-void writel_hook(u32 val, void __iomem *addr, struct pci_dev *pdev)
+int rme_writeq_hook(u64 val, void __iomem *addr, struct pci_dev *pdev)
 {
 	if (is_support_rme() && is_dev_delegated(pdev))
-		rme_mmio_write32(rme_mmio_va_to_pa(addr), val, pdev);
+		return rme_mmio_write64(rme_mmio_va_to_pa(addr), val, pdev);
+
+	writeq(val, addr);
+	return 0;
+}
+EXPORT_SYMBOL_GPL(rme_writeq_hook);
+
+u32 rme_read32be_hook(void __iomem *addr, struct pci_dev *pdev)
+{
+	if (is_support_rme() && is_dev_delegated(pdev)) {
+		u32 t = rme_mmio_read32(rme_mmio_va_to_pa(addr), pdev);
+
+		return cpu_to_be32(t);
+	}
+
+	return ioread32be(addr);
+}
+EXPORT_SYMBOL_GPL(rme_read32be_hook);
+
+u16 rme_read16be_hook(void __iomem *addr, struct pci_dev *pdev)
+{
+	if (is_support_rme() && is_dev_delegated(pdev)) {
+		u16 t = rme_mmio_read16(rme_mmio_va_to_pa(addr), pdev);
+
+		return cpu_to_be16(t);
+	}
+
+	return ioread16be(addr);
+}
+EXPORT_SYMBOL_GPL(rme_read16be_hook);
+
+u8 rme_read8_hook(void __iomem *addr, struct pci_dev *pdev)
+{
+	if (is_support_rme() && is_dev_delegated(pdev))
+		return rme_mmio_read8(rme_mmio_va_to_pa(addr), pdev);
+
+	return ioread8(addr);
+}
+EXPORT_SYMBOL_GPL(rme_read8_hook);
+
+void rme_writel_hook(u32 val, void __iomem *addr, struct pci_dev *pdev)
+{
+	if (is_support_rme() && is_dev_delegated(pdev))
+		return rme_mmio_write32(rme_mmio_va_to_pa(addr),
+			   (u32 __force)__cpu_to_le32(val), pdev);
 
 	writel(val, addr);
 }
-EXPORT_SYMBOL_GPL(writel_hook);
+EXPORT_SYMBOL_GPL(rme_writel_hook);
 
-void __raw_writel_hook(u32 val, void __iomem *addr,
-		       struct pci_dev *pdev)
+void __rme_raw_writel_hook(u32 val, void __iomem *addr, struct pci_dev *pdev)
 {
-	if (is_support_rme() && is_dev_delegated(pdev))
+	if (is_support_rme() && is_dev_delegated(pdev)) {
 		rme_mmio_write32(rme_mmio_va_to_pa(addr), val, pdev);
-
+		return;
+	}
 	__raw_writel(val, addr);
 }
-EXPORT_SYMBOL_GPL(__raw_writel_hook);
+EXPORT_SYMBOL_GPL(__rme_raw_writel_hook);
+
+void rme_write32be_hook(u32 val, void __iomem *addr, struct pci_dev *pdev)
+{
+	if (is_support_rme() && is_dev_delegated(pdev))
+		return rme_mmio_write32(rme_mmio_va_to_pa(addr), cpu_to_be32(val), pdev);
+
+	iowrite32be(val, addr);
+}
+EXPORT_SYMBOL_GPL(rme_write32be_hook);
+
+void rme_lo_hi_writeq_hook(__u64 val, void __iomem *addr, struct pci_dev *pdev)
+{
+	if (is_support_rme() && is_dev_delegated(pdev)) {
+		rme_mmio_write32(rme_mmio_va_to_pa(addr), (u32)val, pdev);
+		rme_mmio_write32(rme_mmio_va_to_pa(addr + 4), (u32)(val >> 32), pdev);
+		return;
+	}
+	lo_hi_writeq(val, addr);
+}
+EXPORT_SYMBOL_GPL(rme_lo_hi_writeq_hook);
+
+void rme_hi_lo_writeq_hook(__u64 val, void __iomem *addr, struct pci_dev *pdev)
+{
+	if (is_support_rme() && is_dev_delegated(pdev)) {
+		rme_mmio_write32(rme_mmio_va_to_pa(addr + 4), (u32)(val >> 32), pdev);
+		rme_mmio_write32(rme_mmio_va_to_pa(addr), (u32)val, pdev);
+		return;
+	}
+	hi_lo_writeq(val, addr);
+}
+EXPORT_SYMBOL_GPL(rme_hi_lo_writeq_hook);
+
+u64 rme_lo_hi_readq_hook(void __iomem *addr, struct pci_dev *pdev)
+{
+	if (is_support_rme() && is_dev_delegated(pdev))
+		return rme_mmio_read64(rme_mmio_va_to_pa(addr), pdev);
+
+	return lo_hi_readq(addr);
+}
+EXPORT_SYMBOL_GPL(rme_lo_hi_readq_hook);
+
+int __rme_iowrite64_copy_hook(void __iomem *to, const void *from,
+	size_t count, struct pci_dev *pdev)
+{
+	int ret = 0;
+
+	if (is_support_rme() && is_dev_delegated(pdev)) {
+		u64 __iomem *dst = to;
+		const u64 *src = from;
+		const u64 *end = src + count;
+
+		while (src < end) {
+			ret = rme_mmio_write64(rme_mmio_va_to_pa(dst++), *src++, pdev);
+			if (ret)
+				break;
+		}
+		return ret;
+	}
+	__iowrite64_copy(to, from, count);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(__rme_iowrite64_copy_hook);
+
+bool is_realm_device(struct device *dev, struct device_driver *drv)
+{
+	if (dev_is_pci(dev) && is_support_rme() &&
+		is_dev_delegated(to_pci_dev(dev)) &&
+		strcmp(drv->name, "vfio-pci"))
+		return true;
+
+	return false;
+}
+EXPORT_SYMBOL_GPL(is_realm_device);
+
+bool is_dev_ecam_protected(u16 dev_bdf)
+{
+	bool is_dev_ecam_protected = false;
+
+	spin_lock(&g_dev_protected_lock);
+	is_dev_ecam_protected = bitmap_read(g_dev_protected, dev_bdf, 1);
+	spin_unlock(&g_dev_protected_lock);
+
+	return is_dev_ecam_protected;
+}
+
+/* If device is realm dev, read config need transfer to rmm */
+int ccada_pci_generic_config_read(void __iomem *addr, unsigned char bus_num,
+				   unsigned int devfn, u32 size, u32 *val)
+{
+	u16 dev_bdf = PCI_DEVID(bus_num, devfn);
+	u64 bits = MMIO_RW_32BITS;
+
+	if (MMIO_RW_8BITS * size <= MMIO_RW_16BITS)
+		bits = MMIO_RW_8BITS * size;
+
+	return rmi_dev_mmio_read(rme_mmio_va_to_pa(addr), bits, (unsigned long *)val, dev_bdf);
+}
+
+/* If device is realm dev, write config need transfer to rmm */
+int ccada_pci_generic_config_write(void __iomem *addr, unsigned char bus_num,
+				    unsigned int devfn, u32 size, u32 val)
+{
+	u16 dev_bdf = PCI_DEVID(bus_num, devfn);
+	u64 bits = MMIO_RW_32BITS;
+
+	if (MMIO_RW_8BITS * size <= MMIO_RW_16BITS)
+		bits = MMIO_RW_8BITS * size;
+
+	return rmi_dev_mmio_write(rme_mmio_va_to_pa(addr), bits, val, dev_bdf);
+}

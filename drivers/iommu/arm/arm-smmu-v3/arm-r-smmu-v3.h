@@ -5,7 +5,7 @@
 
 #ifndef _ARM_R_SMMU_V3_H
 #define _ARM_R_SMMU_V3_H
-
+#ifdef CONFIG_HISI_CCADA_HOST
 #include <linux/iopoll.h>
 
 #define SMMU_R_IDR0			0
@@ -80,4 +80,7 @@ static inline void realm_smmu_set_stage(struct arm_smmu_domain *smmu_domain)
 		smmu_domain->stage = ARM_SMMU_DOMAIN_S2;
 }
 
+void realm_smmu_write_ste(struct arm_smmu_master *master, u32 sid,
+			  const struct arm_smmu_ste *target);
+#endif /* CONFIG_HISI_CCADA_HOST */
 #endif /* _ARM_R_SMMU_V3_H */

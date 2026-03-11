@@ -29,6 +29,7 @@
 #include <linux/pinctrl/devinfo.h>
 #include <linux/slab.h>
 #include <linux/virtcca_cvm_domain.h>
+#include <linux/cca_cvm_domain.h>
 
 #include "base.h"
 #include "power/power.h"
@@ -609,6 +610,9 @@ static int really_probe(struct device *dev, struct device_driver *drv)
 
 	/* Prevent seure VF probe its own driver */
 	if (is_virtcca_secure_vf(dev, drv))
+		return 0;
+
+	if (is_realm_device(dev, drv))
 		return 0;
 
 	if (defer_all_probes) {
