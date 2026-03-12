@@ -4297,6 +4297,19 @@ static void its_vpe_db_proxy_move(struct its_vpe *vpe, int from, int to)
 	raw_spin_unlock_irqrestore(&vpe_proxy.lock, flags);
 }
 
+bool is_its_map_exist(void)
+{
+	if (its_list_map)
+		return true;
+
+	return false;
+}
+
+struct cpumask *its_get_affinity_mask(int cpu)
+{
+	return gic_data_rdist_cpu(cpu)->vpe_table_mask;
+}
+
 static int its_vpe_set_affinity(struct irq_data *d,
 				const struct cpumask *mask_val,
 				bool force)

@@ -130,6 +130,9 @@ int kvm_arch_vcpu_should_kick(struct kvm_vcpu *vcpu)
 	return kvm_vcpu_exiting_guest_mode(vcpu) == IN_GUEST_MODE;
 }
 
+bool enable_vmovp_elision __read_mostly;
+module_param(enable_vmovp_elision, bool, 0644);
+
 #ifdef CONFIG_ARM64_HDBSS
 static void kvm_clear_hdbss(struct kvm *kvm)
 {
