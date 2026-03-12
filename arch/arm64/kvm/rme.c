@@ -1764,6 +1764,7 @@ int rmi_granule_delegate_get(unsigned long phys, void *realm_p)
 	struct realm *realm = (struct realm *)realm_p;
 	struct folio *folio = page_folio(phys_to_page(phys));
 
+#ifdef CONFIG_HISI_CCA
 	if (folio_test_hugetlb(folio)) {
 		if (rme_isolate_hugetlb(folio)) {
 			folio_put(folio);
@@ -1786,6 +1787,7 @@ int rmi_granule_delegate_get(unsigned long phys, void *realm_p)
 			}
 		}
 	}
+#endif
 	return _rmi_granule_delegate(phys);
 }
 
@@ -1819,7 +1821,6 @@ static void realm_put_folios(struct realm *realm)
 
 void _kvm_destroy_realm(struct kvm *kvm)
 {
-	struct kvm_s2_mmu *mmu = &kvm->arch.mmu;
 	struct realm *realm = &kvm->arch.realm;
 	size_t pgd_size = kvm_pgtable_stage2_pgd_size(kvm->arch.vtcr);
 	int i;
@@ -1834,9 +1835,9 @@ void _kvm_destroy_realm(struct kvm *kvm)
 
 #ifdef CONFIG_HISI_CCADA_HOST
 	write_lock(&kvm->mmu_lock);
-	unmap_stage2_range(mmu, 0, BIT(realm->ia_bits - 1), true);
+	unmap_stage2_range(&kvm->arch.mmu, 0, BIT(realm->ia_bits - 1), true);
 	write_unlock(&kvm->mmu_lock);
-	kvm_realm_destroy_rtts(kvm, mmu->pgt->ia_bits);
+	kvm_realm_destroy_rtts(kvm, kvm->arch.mmu.pgt->ia_bits);
 	/* undelegate and detach dev from realm */
 	realm_destroy_dev_list(realm);
 #endif
@@ -1920,9 +1921,11 @@ int _kvm_rec_pre_enter(struct kvm_vcpu *vcpu)
 	case RMI_EXIT_RIPAS_CHANGE:
 		kvm_complete_ripas_change(vcpu);
 		break;
+#ifdef CONFIG_HISI_CCADA_HOST
 	case RMI_EXIT_DEV_VALIDATE:
 	case RMI_EXIT_DEV_START:
 		kvm_complete_dev_op(vcpu);
+#endif
 	}
 
 	return 1;

@@ -3143,14 +3143,9 @@ static int arm_smmu_attach_dev(struct iommu_domain *domain, struct device *dev)
 
 	mutex_lock(&smmu_domain->init_mutex);
 
-	if (!smmu_domain->smmu) {
-		if (smmu->realm.enabled) {
-			ret = arm_smmu_domain_finalise(smmu_domain, smmu, 0);
-		} else {
-			pr_err("realm smmu has not enabled.\n");
-			ret = -EOPNOTSUPP;
-		}
-	} else if (smmu_domain->smmu != smmu)
+	if (!smmu_domain->smmu)
+		ret = arm_smmu_domain_finalise(smmu_domain, smmu, 0);
+	else if (smmu_domain->smmu != smmu)
 		ret = -EINVAL;
 
 	mutex_unlock(&smmu_domain->init_mutex);
