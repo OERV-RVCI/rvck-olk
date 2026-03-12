@@ -106,6 +106,11 @@ SCHED_FEAT(UTIL_EST_FASTUP, true)
 
 SCHED_FEAT(LATENCY_WARN, false)
 
+/*
+ * Do newidle balancing proportional to its success rate using randomization.
+ */
+SCHED_FEAT(NI_RANDOM, false)
+
 SCHED_FEAT(HZ_BW, true)
 SCHED_FEAT(IRQ_AVG, false)
 
