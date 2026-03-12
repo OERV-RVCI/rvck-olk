@@ -130,9 +130,6 @@ struct sched_domain {
 	unsigned int nr_balance_failed; /* initialise to 0 */
 
 	/* idle_balance() stats */
-	unsigned int newidle_call;
-	unsigned int newidle_success;
-	unsigned int newidle_ratio;
 	u64 max_newidle_lb_cost;
 	unsigned long last_decay_max_lb_cost;
 
@@ -179,6 +176,11 @@ struct sched_domain {
 	struct sched_domain_shared *shared;
 
 	unsigned int span_weight;
+
+	KABI_FILL_HOLE(unsigned int newidle_call : 10)
+	KABI_FILL_HOLE(unsigned int newidle_success : 11)
+	KABI_FILL_HOLE(unsigned int newidle_ratio : 11)
+
 	/*
 	 * Span of all CPUs in this domain.
 	 *

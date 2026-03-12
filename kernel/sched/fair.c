@@ -13653,14 +13653,20 @@ void update_max_interval(void)
 
 static inline void update_newidle_stats(struct sched_domain *sd, unsigned int success)
 {
-	sd->newidle_call++;
-	sd->newidle_success += success;
+	unsigned int newidle_call = sd->newidle_call;
+	unsigned int newidle_success = sd->newidle_success;
 
-	if (sd->newidle_call >= 1024) {
-		sd->newidle_ratio = sd->newidle_success;
-		sd->newidle_call /= 2;
-		sd->newidle_success /= 2;
+	newidle_call++;
+	newidle_success += success;
+
+	if (newidle_call >= 1024) {
+		sd->newidle_ratio = newidle_success;
+		newidle_call /= 2;
+		newidle_success /= 2;
 	}
+
+	sd->newidle_call = newidle_call;
+	sd->newidle_success = newidle_success;
 }
 
 static inline bool
