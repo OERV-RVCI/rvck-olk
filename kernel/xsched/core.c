@@ -472,8 +472,6 @@ int init_xsched_entity(struct xsched_context *ctx, struct vstream_info *vs)
 	if (!sched)
 		return -ENOENT;
 
-	sched->xse_init(xse);
-
 	atomic_set(&xse->kicks_pending_cnt, 0);
 	atomic_set(&xse->submitted_one_kick, 0);
 
@@ -497,6 +495,7 @@ int init_xsched_entity(struct xsched_context *ctx, struct vstream_info *vs)
 
 	WRITE_ONCE(xse->on_rq, false);
 	spin_lock_init(&xse->xse_lock);
+	sched->xse_init(xse);
 
 	return err;
 }
