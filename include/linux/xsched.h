@@ -313,27 +313,26 @@ struct xsched_group {
 #define for_each_xsched_group(__xg)		\
 	for (; (__xg) != root_xcg; (__xg) = (__xg)->parent)
 
-static inline struct xsched_group_xcu_priv *
-xse_this_grp_xcu(struct xsched_entity_cfs *xse_cfs)
+/**
+ * Only group xsched entities are permitted to call.
+ *
+ * These function assumes the caller represents a scheduling group and
+ * accesses group-level cfs_rq structures.
+ */
+static inline struct xsched_rq_cfs *
+xse_this_cfs_rq(struct xsched_entity *xse)
 {
-	struct xsched_entity *xse;
+	struct xsched_group_xcu_priv *xg_xcu =
+		container_of(xse, struct xsched_group_xcu_priv, xse);
 
-	xse = xse_cfs ? container_of(xse_cfs, struct xsched_entity, cfs) : NULL;
-	return xse ? container_of(xse, struct xsched_group_xcu_priv, xse) : NULL;
-}
-
-static inline struct xsched_group *
-xse_this_grp(struct xsched_entity_cfs *xse_cfs)
-{
-	return xse_cfs ? xse_this_grp_xcu(xse_cfs)->self : NULL;
+	return xg_xcu->cfs_rq;
 }
 
 static inline bool xsched_entity_throttled(struct xsched_entity *xse)
 {
-	struct xsched_group_xcu_priv *grp_xcu =
-		container_of(xse, struct xsched_group_xcu_priv, xse);
+	struct xsched_rq_cfs *cfs_rq = xse_this_cfs_rq(xse);
 
-	return grp_xcu->cfs_rq->throttled;
+	return cfs_rq->throttled;
 }
 #else
 
@@ -356,7 +355,7 @@ static inline int xse_integrity_check(struct xsched_entity *xse)
 	}
 
 #ifdef CONFIG_CGROUP_XCU
-	if (xse->is_group && !xse_this_grp_xcu(&xse->cfs)->cfs_rq) {
+	if (xse->is_group && !xse_this_cfs_rq(xse)) {
 		// Can only be in the free process
 		XSCHED_ERR("the sub_rq this cgroup-type xse [%d] owned cannot be NULL @ %s\n",
 			xse->tgid, __func__);
