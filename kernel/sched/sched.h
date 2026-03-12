@@ -2284,7 +2284,7 @@ enum {
  * To support run-time toggling of sched features, all the translation units
  * (but core.c) reference the sysctl_sched_features defined in core.c.
  */
-extern const_debug unsigned int sysctl_sched_features;
+extern const_debug unsigned long sysctl_sched_features;
 
 #ifdef CONFIG_JUMP_LABEL
 #define SCHED_FEAT(name, enabled)					\
