@@ -144,7 +144,7 @@ static int __init early_dvmbm_enable(char *buf)
 }
 early_param("kvm-arm.dvmbm_enabled", early_dvmbm_enable);
 
-static void hardware_enable_dvmbm(void *data)
+static void hardware_enable_dvmbm(void)
 {
 	u64 val;
 
@@ -245,18 +245,10 @@ bool hisi_dvmbm_supported(void)
 	if (!(read_sysreg(aidr_el1) & AIDR_EL1_DVMBM_MASK))
 		return false;
 
-	/* User provided kernel command-line parameter */
-	if (!dvmbm_enabled) {
-		on_each_cpu(hardware_disable_dvmbm, NULL, 1);
-		return false;
-	}
+	/* reset */
+	on_each_cpu(hardware_disable_dvmbm, NULL, 1);
 
-	/*
-	 * Enable TLBI Broadcast optimization by setting
-	 * LSUDVM_CTRL_EL2's bit[0].
-	 */
-	on_each_cpu(hardware_enable_dvmbm, NULL, 1);
-	return true;
+	return dvmbm_enabled;
 }
 
 int kvm_sched_affinity_vcpu_init(struct kvm_vcpu *vcpu)
@@ -555,6 +547,7 @@ void kvm_tlbi_dvmbm_vcpu_load(struct kvm_vcpu *vcpu)
 	if (!kvm_dvmbm_support)
 		return;
 
+	hardware_enable_dvmbm();
 	cpumask_copy(vcpu->arch.sched_cpus, current->cpus_ptr);
 
 	if (likely(cpumask_equal(vcpu->arch.sched_cpus,
@@ -605,6 +598,7 @@ void kvm_tlbi_dvmbm_vcpu_put(struct kvm_vcpu *vcpu)
 		return;
 
 	cpumask_copy(vcpu->arch.pre_sched_cpus, vcpu->arch.sched_cpus);
+	hardware_disable_dvmbm(NULL);
 }
 
 void kvm_get_pg_cfg(void)
