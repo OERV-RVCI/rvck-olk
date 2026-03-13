@@ -104,7 +104,7 @@ int pci_generic_config_read(struct pci_bus *bus, unsigned int devfn,
 #endif
 
 #ifdef CONFIG_HISI_CCADA_HOST
-	if (is_support_rme() && is_dev_ecam_protected(devfn))
+	if (is_support_rme() && is_dev_ecam_protected(PCI_DEVID(bus->number, devfn)))
 		return ccada_pci_generic_config_read(addr, bus->number, devfn, size, val);
 #endif
 
@@ -136,7 +136,7 @@ int pci_generic_config_write(struct pci_bus *bus, unsigned int devfn,
 #endif
 
 #ifdef CONFIG_HISI_CCADA_HOST
-	if (is_support_rme() && is_dev_ecam_protected(devfn))
+	if (is_support_rme() && is_dev_ecam_protected(PCI_DEVID(bus->number, devfn)))
 		return ccada_pci_generic_config_write(addr, bus->number, devfn, size, val);
 #endif
 

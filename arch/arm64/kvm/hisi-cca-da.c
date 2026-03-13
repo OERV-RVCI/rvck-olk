@@ -41,7 +41,7 @@ static DEFINE_SPINLOCK(g_dev_protected_lock);
 
 bool is_support_rme(void)
 {
-	return static_branch_unlikely(&kvm_rme_is_available);
+	return static_branch_unlikely(&kvm_rme_is_available) && (kvm_get_cvm_type() == ARMCCA_CVM);
 }
 EXPORT_SYMBOL_GPL(is_support_rme);
 
@@ -1392,13 +1392,19 @@ bool is_dev_ecam_protected(u16 dev_bdf)
 int ccada_pci_generic_config_read(void __iomem *addr, unsigned char bus_num,
 				   unsigned int devfn, u32 size, u32 *val)
 {
+	int ret;
 	u16 dev_bdf = PCI_DEVID(bus_num, devfn);
 	u64 bits = MMIO_RW_32BITS;
+	unsigned long ret_val;
 
 	if (MMIO_RW_8BITS * size <= MMIO_RW_16BITS)
 		bits = MMIO_RW_8BITS * size;
 
-	return rmi_dev_mmio_read(rme_mmio_va_to_pa(addr), bits, (unsigned long *)val, dev_bdf);
+	ret = rmi_dev_mmio_read(rme_mmio_va_to_pa(addr), bits, &ret_val, dev_bdf);
+	if (ret)
+		return ret;
+	*val = (u32)ret_val;
+	return ret;
 }
 
 /* If device is realm dev, write config need transfer to rmm */
