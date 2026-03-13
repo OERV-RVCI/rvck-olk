@@ -182,7 +182,7 @@ next_cfs_rq_of(struct xsched_entity_cfs *xse)
 	struct xsched_entity *se = container_of(xse, struct xsched_entity, cfs);
 
 	if (se->is_group)
-		return xse_this_grp_xcu(xse)->cfs_rq;
+		return xse_this_cfs_rq(se);
 #endif
 	return NULL;
 }

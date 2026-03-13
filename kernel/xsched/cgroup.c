@@ -296,7 +296,7 @@ static void xcu_css_offline(struct cgroup_subsys_state *css)
 	}
 }
 
-static void xcu_css_releasd(struct cgroup_subsys_state *css)
+static void xcu_css_released(struct cgroup_subsys_state *css)
 {
 	struct xsched_group *xcg = xcu_cg_from_css(css);
 
@@ -757,7 +757,7 @@ struct cgroup_subsys xcu_cgrp_subsys = {
 	.css_alloc = xcu_css_alloc,
 	.css_online = xcu_css_online,
 	.css_offline = xcu_css_offline,
-	.css_released = xcu_css_releasd,
+	.css_released = xcu_css_released,
 	.css_free = xcu_css_free,
 	.can_attach = xcu_can_attach,
 	.cancel_attach = xcu_cancel_attach,
