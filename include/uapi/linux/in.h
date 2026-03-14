@@ -83,6 +83,8 @@ enum {
 #define IPPROTO_RAW		IPPROTO_RAW
   IPPROTO_MPTCP = 262,		/* Multipath TCP connection		*/
 #define IPPROTO_MPTCP		IPPROTO_MPTCP
+  IPPROTO_SCMTCP = 518,		/* TCP with SCM_RIGHTS on loopback	*/
+#define IPPROTO_SCMTCP		IPPROTO_SCMTCP
   IPPROTO_MAX
 };
 #endif

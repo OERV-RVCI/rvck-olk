@@ -64,7 +64,7 @@ static __inline__ int scm_check_creds(struct ucred *creds)
 	return -EPERM;
 }
 
-static int scm_fp_copy(struct cmsghdr *cmsg, struct scm_fp_list **fplp)
+int scm_fp_copy(struct cmsghdr *cmsg, struct scm_fp_list **fplp)
 {
 	int *fdp = (int*)CMSG_DATA(cmsg);
 	struct scm_fp_list *fpl = *fplp;
@@ -129,6 +129,7 @@ static int scm_fp_copy(struct cmsghdr *cmsg, struct scm_fp_list **fplp)
 
 	return num;
 }
+EXPORT_SYMBOL_GPL(scm_fp_copy);
 
 void __scm_destroy(struct scm_cookie *scm)
 {
