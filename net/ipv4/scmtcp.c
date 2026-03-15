@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
+/* Copyright (c) 2026 Huawei Technologies Co., Ltd */
 #include <linux/module.h>
 #include <linux/socket.h>
 #include <linux/file.h>
@@ -266,7 +267,7 @@ static int file_htable_add_flist(uintptr_t owner_sk, struct scm_file_list *flist
 static struct scm_file_list *file_htable_del_flist(uintptr_t owner_sk, u32 flist_seq)
 {
 	struct scm_file_ctl *fctl;
-	struct scm_file_list *flist;
+	struct scm_file_list *flist = NULL;
 
 	spin_lock(&scm_fhtable.lock);
 	fctl = file_htable_get_ctl(owner_sk);
@@ -284,6 +285,8 @@ static struct scm_file_list *file_htable_del_flist(uintptr_t owner_sk, u32 flist
 static void __scmtcp_sk_init(struct sock *sk)
 {
 	struct scm_file_ctl *fctl;
+
+	scmtcp_sk(sk)->flist_seq = 0;
 
 	fctl = file_ctl_alloc(sk);
 	/* Don't worry, there will be errors in file_htable_add_flist(). */
