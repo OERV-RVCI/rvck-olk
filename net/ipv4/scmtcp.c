@@ -197,9 +197,9 @@ static int file_htable_destroy(void)
 {
 	u64 count;
 
-	spin_lock(&scm_fhtable.lock);
+	spin_lock_bh(&scm_fhtable.lock);
 	count = scm_fhtable.fctl_count + scm_fhtable.flist_count;
-	spin_unlock(&scm_fhtable.lock);
+	spin_unlock_bh(&scm_fhtable.lock);
 	return count != 0 ? -EBUSY : 0;
 }
 
@@ -220,7 +220,7 @@ static void file_htable_del_ctl(uintptr_t owner_sk)
 {
 	struct scm_file_ctl *fctl;
 
-	spin_lock(&scm_fhtable.lock);
+	spin_lock_bh(&scm_fhtable.lock);
 	fctl = file_htable_get_ctl(owner_sk);
 	if (fctl) {
 		hash_del(&fctl->hnode);
@@ -228,7 +228,7 @@ static void file_htable_del_ctl(uintptr_t owner_sk)
 		scm_fhtable.flist_count -= fctl->flist_count;
 		scm_fhtable.fd_count -= fctl->fd_count;
 	}
-	spin_unlock(&scm_fhtable.lock);
+	spin_unlock_bh(&scm_fhtable.lock);
 
 	if (fctl)
 		file_ctl_free(fctl);
@@ -238,12 +238,12 @@ static void file_htable_add_ctl(uintptr_t owner_sk, struct scm_file_ctl *fctl)
 {
 	u32 key32 = hash_ptr((void *)owner_sk, FILE_HASHTABLE_BITS);
 
-	spin_lock(&scm_fhtable.lock);
+	spin_lock_bh(&scm_fhtable.lock);
 	hash_add(scm_fhtable.htable, &fctl->hnode, key32);
 	scm_fhtable.fctl_count++;
 	scm_fhtable.flist_count += fctl->flist_count;
 	scm_fhtable.fd_count += fctl->fd_count;
-	spin_unlock(&scm_fhtable.lock);
+	spin_unlock_bh(&scm_fhtable.lock);
 }
 
 static int file_htable_add_flist(uintptr_t owner_sk, struct scm_file_list *flist)
@@ -251,7 +251,7 @@ static int file_htable_add_flist(uintptr_t owner_sk, struct scm_file_list *flist
 	struct scm_file_ctl *fctl;
 	int ret = -1;
 
-	spin_lock(&scm_fhtable.lock);
+	spin_lock_bh(&scm_fhtable.lock);
 	fctl = file_htable_get_ctl(owner_sk);
 	if (fctl && fctl->fd_count < SCM_MAX_FD &&
 	    scm_fhtable.flist_count < FILE_HASHTABLE_MAX) {
@@ -260,7 +260,7 @@ static int file_htable_add_flist(uintptr_t owner_sk, struct scm_file_list *flist
 		scm_fhtable.fd_count += flist->fp->count;
 		ret = 0;
 	}
-	spin_unlock(&scm_fhtable.lock);
+	spin_unlock_bh(&scm_fhtable.lock);
 	return ret;
 }
 
@@ -269,7 +269,7 @@ static struct scm_file_list *file_htable_del_flist(uintptr_t owner_sk, u32 flist
 	struct scm_file_ctl *fctl;
 	struct scm_file_list *flist = NULL;
 
-	spin_lock(&scm_fhtable.lock);
+	spin_lock_bh(&scm_fhtable.lock);
 	fctl = file_htable_get_ctl(owner_sk);
 	if (fctl) {
 		flist = file_ctl_del(fctl, flist_seq);
@@ -278,7 +278,7 @@ static struct scm_file_list *file_htable_del_flist(uintptr_t owner_sk, u32 flist
 			scm_fhtable.fd_count -= flist->fp->count;
 		}
 	}
-	spin_unlock(&scm_fhtable.lock);
+	spin_unlock_bh(&scm_fhtable.lock);
 	return flist;
 }
 
