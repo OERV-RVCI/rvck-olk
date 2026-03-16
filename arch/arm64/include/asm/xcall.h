@@ -1,4 +1,13 @@
 /* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * ARM64-specific xcall definitions and inline functions.
+ *
+ * Inspired by:
+ *   1. XPC (ISCA 2019) - Dong Du, Zhichao Hua, Yubin Xia, Binyu Zang, Haibo Chen;
+ *   2. Boosting IPC (TOCS 2022) - Yubin Xia, Dong Du, Zhichao Hua, Binyu Zang,
+ *      Haibo Chen, Haibing Guan.
+ */
+
 #ifndef __ASM_XCALL_H
 #define __ASM_XCALL_H
 
