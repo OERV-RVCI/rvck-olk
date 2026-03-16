@@ -25,6 +25,7 @@ struct realm_dev_entry {
 	u64 vttbr;
 	u64 ns_vttbr;
 	u64 msi_iova;
+	u64 msi_page_index;
 	bool realm;
 	bool pcipc_ns;
 	struct hlist_node node;
@@ -34,6 +35,8 @@ struct realm_dev_entry {
 #define MMIO_RW_8BITS			0x8
 #define MMIO_RW_16BITS			0x10
 #define MMIO_RW_32BITS			0x20
+#define MSI_PAGE_SIZE			0x1000
+#define MAX_MSI_PAGE			0x8
 
 int realm_attach_devs(struct realm *realm);
 void realm_destroy_dev_list(struct realm *realm);
@@ -49,7 +52,7 @@ struct realm *rme_get_realm(u64 vttbr);
 void rme_add_dev_entry(struct device *dev, u64 vttbr, bool realm, u64 ns_vttbr,
 		       bool pcipc_ns);
 u64 rme_get_ns_vttbr(struct device *dev);
-void rme_update_msi_iova(u64 vttbr, u64 msi_iova);
+void rme_update_msi_iova(u64 vttbr, u64 msi_iova, u64 iova);
 bool rme_is_realm_dev(struct device *dev);
 bool rme_is_pcipc_ns_dev(struct device *dev);
 void rme_remove_dev_entry(struct device *dev);
