@@ -2251,6 +2251,14 @@ static int mptcp_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 		if (skb_queue_empty(&msk->receive_queue) && __mptcp_move_skbs(msk))
 			continue;
 
+		if (bytes_read == 0 && (flags & MSG_PEEK)) {
+			struct sk_buff *last = skb_peek_tail(&msk->receive_queue);
+
+			__mptcp_move_skbs(msk);
+			if (last != skb_peek_tail(&msk->receive_queue))
+				continue;
+		}
+
 		/* only the MPTCP socket status is relevant here. The exit
 		 * conditions mirror closely tcp_recvmsg()
 		 */
