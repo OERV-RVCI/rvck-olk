@@ -110,8 +110,7 @@ static inline void arch_flush_tlb_batched_pending(struct mm_struct *mm)
 }
 
 extern void arch_tlbbatch_add_pending(struct arch_tlbflush_unmap_batch *batch,
-				struct mm_struct *mm,
-					unsigned long uaddr);
+		struct mm_struct *mm, unsigned long start, unsigned long end);
 extern void arch_tlbbatch_flush(struct arch_tlbflush_unmap_batch *batch);
 
 
