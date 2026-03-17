@@ -206,7 +206,8 @@ static int realm_mmio_map(struct realm_io_pgtable *data, unsigned long iova,
 	unsigned long msi_iova;
 	int ret;
 
-	if (iova != REALM_MSI_ORIG_IOVA)
+	if (iova < REALM_MSI_ORIG_IOVA ||
+		iova >= REALM_MSI_ORIG_IOVA + MAX_MSI_PAGE * MSI_PAGE_SIZE)
 		return 0;
 
 	if (size != SZ_4K || pgcount != 1) {
@@ -220,7 +221,7 @@ static int realm_mmio_map(struct realm_io_pgtable *data, unsigned long iova,
 		return -EINVAL;
 	}
 
-	rme_update_msi_iova(cfg->arm_lpae_s2_cfg.vttbr, msi_iova);
+	rme_update_msi_iova(cfg->arm_lpae_s2_cfg.vttbr, msi_iova, iova);
 
 	realm = rme_get_realm(cfg->arm_lpae_s2_cfg.vttbr);
 	if (!realm)
@@ -707,7 +708,8 @@ static int realm_mmio_unmap(struct io_pgtable_ops *ops,
 	u64 msi_iova;
 	int ret;
 
-	if (iova != REALM_MSI_ORIG_IOVA)
+	if (iova < REALM_MSI_ORIG_IOVA ||
+		iova >= REALM_MSI_ORIG_IOVA + MAX_MSI_PAGE * MSI_PAGE_SIZE)
 		return 0;
 
 	if (size != SZ_4K || pgcount != 1) {

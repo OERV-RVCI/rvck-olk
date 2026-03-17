@@ -41,7 +41,7 @@ static DEFINE_SPINLOCK(g_dev_protected_lock);
 
 bool is_support_rme(void)
 {
-	return static_branch_unlikely(&kvm_rme_is_available);
+	return static_branch_unlikely(&kvm_rme_is_available) && (kvm_get_cvm_type() == ARMCCA_CVM);
 }
 EXPORT_SYMBOL_GPL(is_support_rme);
 
@@ -180,15 +180,18 @@ void rme_add_dev_entry(struct device *dev, u64 vttbr, bool realm, u64 ns_vttbr,
 }
 EXPORT_SYMBOL_GPL(rme_add_dev_entry);
 
-void rme_update_msi_iova(u64 vttbr, u64 msi_iova)
+void rme_update_msi_iova(u64 vttbr, u64 msi_iova, u64 iova)
 {
 	struct realm_dev_entry *dev_entry;
 	int bkt;
 
 	spin_lock(&g_realm_dev_lock);
 	hash_for_each(g_realm_dev_htable, bkt, dev_entry, node) {
-		if (dev_entry->vttbr == vttbr)
+		if (dev_entry->vttbr == vttbr && dev_entry->msi_iova == 0) {
 			dev_entry->msi_iova = msi_iova;
+			dev_entry->msi_page_index = (iova - REALM_MSI_ORIG_IOVA) / MSI_PAGE_SIZE;
+			break;
+		}
 	}
 	spin_unlock(&g_realm_dev_lock);
 }
@@ -209,9 +212,34 @@ static struct realm_dev_entry rme_get_dev_entry(struct device *dev)
 	return ret;
 }
 
-u64 rme_get_msi_iova(struct device *dev)
+u64 rme_get_msi_iova(struct device *dev, u64 msi_page_index)
 {
-	return rme_get_dev_entry(dev).msi_iova;
+	struct realm_dev_entry *dev_entry = NULL;
+	u64 vttbr = 0;
+	int bkt;
+
+	spin_lock(&g_realm_dev_lock);
+	hash_for_each(g_realm_dev_htable, bkt, dev_entry, node) {
+		if (dev_entry->dev == dev) {
+			vttbr = dev_entry->vttbr;
+			break;
+		}
+	}
+	if (vttbr == 0)
+		goto out;
+
+	hash_for_each(g_realm_dev_htable, bkt, dev_entry, node) {
+		if (dev_entry->vttbr == vttbr &&
+		    dev_entry->msi_page_index == msi_page_index &&
+		    dev_entry->msi_iova) {
+			spin_unlock(&g_realm_dev_lock);
+			return dev_entry->msi_iova;
+		}
+	}
+
+out:
+	spin_unlock(&g_realm_dev_lock);
+	return REALM_MSI_ORIG_IOVA + msi_page_index * MSI_PAGE_SIZE;
 }
 
 u64 rme_get_ns_vttbr(struct device *dev)
@@ -1072,11 +1100,18 @@ static u64 rme_get_msi_addr(struct msi_desc *desc, struct msi_msg *msg)
 {
 	struct pci_dev *dev = msi_desc_to_pci_dev(desc);
 	u64 addr = (u64)msg->address_lo | ((u64)msg->address_hi << 32);
+	u64 iova_rel;
+	u64 msi_page_index;
+	u64 page_offset;
 
 	if (!addr)
 		return addr;
 
-	return (addr - REALM_MSI_ORIG_IOVA) + rme_get_msi_iova(&dev->dev);
+	iova_rel = addr - REALM_MSI_ORIG_IOVA;
+	msi_page_index = iova_rel / MSI_PAGE_SIZE;
+	page_offset = iova_rel % MSI_PAGE_SIZE;
+
+	return rme_get_msi_iova(&dev->dev, msi_page_index) + page_offset;
 }
 
 bool rme_dev_pci_write_msg_msi(struct msi_desc *desc, struct msi_msg *msg)
@@ -1392,13 +1427,19 @@ bool is_dev_ecam_protected(u16 dev_bdf)
 int ccada_pci_generic_config_read(void __iomem *addr, unsigned char bus_num,
 				   unsigned int devfn, u32 size, u32 *val)
 {
+	int ret;
 	u16 dev_bdf = PCI_DEVID(bus_num, devfn);
 	u64 bits = MMIO_RW_32BITS;
+	unsigned long ret_val;
 
 	if (MMIO_RW_8BITS * size <= MMIO_RW_16BITS)
 		bits = MMIO_RW_8BITS * size;
 
-	return rmi_dev_mmio_read(rme_mmio_va_to_pa(addr), bits, (unsigned long *)val, dev_bdf);
+	ret = rmi_dev_mmio_read(rme_mmio_va_to_pa(addr), bits, &ret_val, dev_bdf);
+	if (ret)
+		return ret;
+	*val = (u32)ret_val;
+	return ret;
 }
 
 /* If device is realm dev, write config need transfer to rmm */
