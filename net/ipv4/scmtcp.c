@@ -249,11 +249,11 @@ static void file_htable_add_ctl(uintptr_t owner_sk, struct scm_file_ctl *fctl)
 static int file_htable_add_flist(uintptr_t owner_sk, struct scm_file_list *flist)
 {
 	struct scm_file_ctl *fctl;
-	int ret = -1;
+	int ret = -ETOOMANYREFS;
 
 	spin_lock_bh(&scm_fhtable.lock);
 	fctl = file_htable_get_ctl(owner_sk);
-	if (fctl && fctl->fd_count < SCM_MAX_FD &&
+	if (fctl && fctl->fd_count + flist->fp->count <= SCM_MAX_FD &&
 	    scm_fhtable.flist_count < FILE_HASHTABLE_MAX) {
 		file_ctl_enqueue(fctl, flist);
 		scm_fhtable.flist_count++;
@@ -334,6 +334,18 @@ static void scm_set_skb_eor(struct sock *sk)
 		TCP_SKB_CB(skb)->eor = 1;
 }
 
+static int scm_count_fds(const void __user *msg_control_user)
+{
+	int cmlen, fd_count;
+	const struct cmsghdr __user *cm;
+
+	cm = (__force const struct cmsghdr __user *)msg_control_user;
+	if (get_user(cmlen, &cm->cmsg_len))
+		return -EFAULT;
+	fd_count = (cmlen - CMSG_LEN(0)) / sizeof(int);
+	return fd_count > 0 ? fd_count : -EMFILE;
+}
+
 /* see kernel_sendmsg() */
 static int scm_kernel_sendmsg(struct sock *sk, struct msghdr *msg,
 			      struct kvec *vec, size_t num, size_t size, int flags)
@@ -379,11 +391,11 @@ static int scmtcp_sk_sendmsg(struct sock *sk, struct msghdr *msg, size_t size)
 	struct cmsghdr *cmsg;
 	int count;
 
-	if (msg->msg_controllen && msg->msg_iter.nr_segs)
-		return -EINVAL;
-
 	if (!msg->msg_controllen)
 		return scm_kernel_sendmsg(sk, msg, NULL, 0, size, 0);
+
+	if (msg->msg_controllen < CMSG_LEN(sizeof(int)) || msg->msg_iter.nr_segs)
+		return -EINVAL;
 
 	/* send fmsg */
 	flist = file_list_alloc(sk);
@@ -420,7 +432,7 @@ static int scmtcp_sk_sendmsg(struct sock *sk, struct msghdr *msg, size_t size)
 	ret = file_htable_add_flist(fmsg.owner_sk, flist);
 	if (ret != 0) {
 		file_list_free(flist);
-		return -ENOBUFS;
+		return ret;
 	}
 
 	ret = scm_kernel_sendmsg(sk, &scm_msg, &scm_iov, 1,
@@ -448,12 +460,13 @@ static int scmtcp_sk_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 	struct msghdr scm_msg = {0};
 	struct kvec scm_iov;
 	struct scm_cookie scm = {0};
-
-	if (msg->msg_controllen && msg->msg_iter.nr_segs)
-		return -EINVAL;
+	const void __user *msg_control_user;
 
 	if (!msg->msg_controllen)
 		return scm_kernel_recvmsg(sk, msg, NULL, 0, len, flags);
+
+	if (msg->msg_controllen < CMSG_LEN(sizeof(int)) || msg->msg_iter.nr_segs)
+		return -EINVAL;
 
 	scm_iov.iov_base = &fmsg;
 	scm_iov.iov_len = sizeof(fmsg);
@@ -478,10 +491,10 @@ static int scmtcp_sk_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 	file_list_free(flist);
 	if (!scm.fp)
 		return -ENOMEM;
-	ret = scm.fp->count;
+	msg_control_user = msg->msg_control_user;
 	scm_detach_fds(msg, &scm);
 
-	return ret;
+	return scm_count_fds(msg_control_user);
 }
 
 static struct timewait_sock_ops scmtcp_timewait_sock_ops;
