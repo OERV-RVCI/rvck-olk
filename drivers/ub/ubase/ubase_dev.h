@@ -291,6 +291,7 @@ struct ubase_ctrlq {
 	struct ubase_ctrlq_crq_table	crq_table;
 	struct ubase_ctrlq_ue_req_table		ue_req_table;
 	struct ubase_ctrlq_ue_resp_table	ue_resp_table;
+	struct semaphore			sem;
 };
 
 #define UBASE_ACT_STAT_MAX_NUM 10U
@@ -355,6 +356,7 @@ struct ubase_log_rs {
 	struct ratelimit_state rs;
 	u16 ctrlq_other_seq_invalid_log_cnt;
 	u64 aeq_event_type_exceed_max_cnt;
+	u32 ctrlq_wait_resp_timeout_cnt;
 };
 
 enum ubase_node_type {
@@ -554,7 +556,7 @@ static inline u32 ubase_ta_timer_align_size(struct ubase_dev *udev)
 static inline bool ubase_mbx_ue_id_is_valid(u16 mbx_ue_id,
 					    struct ubase_dev *udev)
 {
-	if (!mbx_ue_id || (mbx_ue_id > udev->caps.dev_caps.ue_num - 1))
+	if (!mbx_ue_id || (mbx_ue_id >= udev->caps.dev_caps.ue_num))
 		return false;
 
 	return true;
