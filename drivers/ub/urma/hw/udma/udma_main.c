@@ -674,13 +674,23 @@ static int udma_construct_qos_param(struct udma_dev *dev)
 	for (i = 0; i < qos_info->ctp_sl_num; i++)
 		dev->udma_sl[qos_info->tp_sl_num + i] = qos_info->ctp_sl[i];
 
-	for (i = 0; i < UDMA_MAX_SL_NUM; i++) {
-		dev->priority_info[i].SL = dev->udma_tp_sl[UDMA_DEFAULT_SL_NUM];
-		dev->priority_info[i].tp_type.bs.rtp = 1;
+	if (qos_info->tp_sl_num != 0) {
+		for (i = 0; i < UDMA_MAX_SL_NUM; i++) {
+			dev->priority_info[i].SL = dev->udma_tp_sl[UDMA_DEFAULT_SL_NUM];
+			dev->priority_info[i].tp_type.bs.rtp = 1;
+		}
+	} else {
+		for (i = 0; i < UDMA_MAX_SL_NUM; i++) {
+			dev->priority_info[i].SL = dev->udma_ctp_sl[UDMA_DEFAULT_SL_NUM];
+			dev->priority_info[i].tp_type.bs.ctp = 1;
+		}
 	}
 
-	for (i = 0; i < dev->udma_tp_sl_num; i++)
+	for (i = 0; i < dev->udma_tp_sl_num; i++) {
 		dev->priority_info[dev->udma_tp_sl[i]].SL = dev->udma_tp_sl[i];
+		dev->priority_info[dev->udma_tp_sl[i]].tp_type.bs.rtp = 1;
+		dev->priority_info[dev->udma_tp_sl[i]].tp_type.bs.ctp = 0;
+	}
 
 	for (i = 0; i < dev->udma_ctp_sl_num; i++) {
 		dev->priority_info[dev->udma_ctp_sl[i]].SL = dev->udma_ctp_sl[i];
@@ -1217,7 +1227,7 @@ static int udma_init_dev(struct auxiliary_device *adev)
 	if (ret)
 		goto err_event_register;
 
-	ret = udma_register_activate_workqueue(udma_dev);
+	ret = udma_register_workqueue(udma_dev);
 	if (ret) {
 		dev_err(udma_dev->dev, "UDMA activate workqueue failed.\n");
 		goto err_register_act_init;
@@ -1241,9 +1251,9 @@ static int udma_init_dev(struct auxiliary_device *adev)
 	return 0;
 
 err_init_eid:
-	udma_unset_ubcore_dev(udma_dev);
+	ubcore_unregister_device(&udma_dev->ub_dev);
 err_set_ubcore_dev:
-	udma_unregister_activate_workqueue(udma_dev);
+	udma_unregister_workqueue(udma_dev);
 err_register_act_init:
 	udma_unregister_none_crq_event(adev);
 	udma_unregister_crq_event(adev);
@@ -1327,8 +1337,8 @@ void udma_reset_uninit(struct auxiliary_device *adev)
 	}
 
 	udma_unregister_none_crq_event(adev);
-	udma_unset_ubcore_dev(udma_dev);
-	udma_unregister_activate_workqueue(udma_dev);
+	ubcore_unregister_device(&udma_dev->ub_dev);
+	udma_unregister_workqueue(udma_dev);
 	udma_open_ue_rx(udma_dev, false, false, true, 0);
 	/* Crq event should unregister after wait flush done. */
 	udma_unregister_crq_event(adev);
@@ -1392,8 +1402,8 @@ void udma_remove(struct auxiliary_device *adev)
 	}
 	udma_report_reset_event(UBCORE_EVENT_ELR_ERR, udma_dev);
 	udma_unregister_none_crq_event(adev);
-	udma_unset_ubcore_dev(udma_dev);
-	udma_unregister_activate_workqueue(udma_dev);
+	ubcore_unregister_device(&udma_dev->ub_dev);
+	udma_unregister_workqueue(udma_dev);
 	check_and_wait_flush_done(udma_dev);
 	(void)ubase_activate_dev(adev);
 	udma_unregister_crq_event(adev);
