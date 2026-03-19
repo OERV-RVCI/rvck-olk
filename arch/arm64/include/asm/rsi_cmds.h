@@ -198,4 +198,22 @@ static inline void rsi_rdev_start(unsigned long bdf)
 }
 #endif
 
+#ifdef CONFIG_HISI_CCA
+static inline unsigned long rsi_attestation_dev_cert(phys_addr_t granule,
+								unsigned long size,
+								unsigned long *len)
+{
+	struct arm_smccc_1_2_regs regs = {
+		SMC_RSI_ATTESTATION_DEV_CERT,
+		granule,
+		size
+	};
+
+	arm_smccc_1_2_smc(&regs, &regs);
+
+	if (len)
+		*len = regs.a1;
+	return regs.a0;
+}
+#endif
 #endif /* __ASM_RSI_CMDS_H */

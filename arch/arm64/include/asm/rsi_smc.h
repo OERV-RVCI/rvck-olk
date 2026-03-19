@@ -204,5 +204,7 @@ struct realm_config {
  */
 #define SMC_RSI_RDEV_START			SMC_RSI_FID(0x1AA)
 #endif
-
+#ifdef CONFIG_HISI_CCA
+#define SMC_RSI_ATTESTATION_DEV_CERT	SMC_RSI_FID(0x19C)
+#endif
 #endif /* __ASM_RSI_SMC_H_ */
