@@ -7610,18 +7610,52 @@ void check_move_unevictable_folios(struct folio_batch *fbatch)
 }
 EXPORT_SYMBOL_GPL(check_move_unevictable_folios);
 
+static unsigned long shrinker_v2_to_v1_count_objects(struct shrinker_v2 *shk_v2,
+						     struct shrink_control *sc)
+{
+	if (shk_v2->v1)
+		return shk_v2->v1->count_objects(shk_v2->v1, sc);
+
+	return 0;
+}
+
+static unsigned long shrinker_v2_to_v1_scan_objects(struct shrinker_v2 *shk_v2,
+						    struct shrink_control *sc)
+{
+	if (shk_v2->v1)
+		return shk_v2->v1->count_objects(shk_v2->v1, sc);
+
+	return SHRINK_EMPTY;
+}
+
 int register_shrinker(struct shrinker *shrinker, const char *fmt, ...)
 {
-	pr_warn_once("%s interface is deprecated. Please use instead shrinker_register()\n",
-		     __func__);
-	return  -ENOSYS;
+	struct shrinker_v2 *shk_v2;
+
+	shk_v2 = shrinker_alloc(shrinker->flags, fmt);
+	if (!shk_v2)
+		return -ENOMEM;
+
+	shk_v2->count_objects = shrinker_v2_to_v1_count_objects;
+	shk_v2->scan_objects = shrinker_v2_to_v1_scan_objects;
+	shk_v2->batch = shrinker->batch;
+	shk_v2->seeks = shrinker->seeks;
+	shk_v2->flags |= shrinker->flags;
+	shk_v2->v1 = shrinker;
+
+	shrinker_register(shk_v2);
+	shrinker->v2 = shk_v2;
+
+	return 0;
 }
 EXPORT_SYMBOL(register_shrinker);
 
 void unregister_shrinker(struct shrinker *shrinker)
 {
-	pr_warn_once("%s interface is deprecated. Please use instead shrinker_free()\n",
-		     __func__);
+	if (shrinker->v2) {
+		shrinker_free(shrinker->v2);
+		shrinker->v2 = NULL;
+	}
 }
 EXPORT_SYMBOL(unregister_shrinker);
 

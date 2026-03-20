@@ -74,6 +74,7 @@ struct shrink_control {
 #define SHRINK_STOP (~0UL)
 #define SHRINK_EMPTY (~0UL - 1)
 
+struct shrinker;
 /*
  * A callback you can register to apply pressure to ageable caches.
  *
@@ -120,7 +121,7 @@ struct shrinker_v2 {
 	/* objs pending delete, per node */
 	atomic_long_t *nr_deferred;
 
-	KABI_RESERVE(1)
+	KABI_USE(1, struct shrinker *v1)
 	KABI_RESERVE(2)
 
 	/*
@@ -163,7 +164,7 @@ struct shrinker {
 	#endif
 	atomic_long_t *nr_deferred;
 
-	KABI_RESERVE(1)
+	KABI_USE(1, struct shrinker_v2 *v2)
 	KABI_RESERVE(2)
 };
 
