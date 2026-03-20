@@ -775,6 +775,8 @@ void unregister_irqchip_proc(struct irq_desc *desc);
 #ifdef CONFIG_HISILICON_ERRATUM_165010801
 extern void gic_irq_set_prio(struct irq_data *d, u8 prio);
 #endif
+extern bool is_its_map_exist(void);
+extern struct cpumask *its_get_affinity_mask(int cpu);
 #endif
 
 #endif

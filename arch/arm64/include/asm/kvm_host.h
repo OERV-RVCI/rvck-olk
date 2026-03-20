@@ -1364,5 +1364,6 @@ void kvm_set_vm_id_reg(struct kvm *kvm, u32 reg, u64 val);
 extern bool force_wfi_trap;
 extern bool kvm_ncsnp_support;
 extern bool kvm_dvmbm_support;
+extern bool enable_vmovp_elision;
 
 #endif /* __ARM64_KVM_HOST_H__ */

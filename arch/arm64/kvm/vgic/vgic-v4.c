@@ -408,8 +408,9 @@ int vgic_v4_put(struct kvm_vcpu *vcpu)
 
 int vgic_v4_load(struct kvm_vcpu *vcpu)
 {
-	struct its_vpe *vpe = &vcpu->arch.vgic_cpu.vgic_v3.its_vpe;
 	int err;
+	struct its_vpe *vpe = &vcpu->arch.vgic_cpu.vgic_v3.its_vpe;
+	const struct cpumask *mask = cpumask_of(smp_processor_id());
 
 	if (!vgic_supports_direct_msis(vcpu->kvm) || vpe->resident)
 		return 0;
@@ -417,16 +418,21 @@ int vgic_v4_load(struct kvm_vcpu *vcpu)
 	if (vcpu_get_flag(vcpu, IN_WFI))
 		return 0;
 
+	/* No need to set affinity when target and from CPU are in the same VPE affinity group*/
+	if (enable_vmovp_elision && same_affinity_group(vpe, mask))
+		goto make_resident;
+
 	/*
 	 * Before making the VPE resident, make sure the redistributor
 	 * corresponding to our current CPU expects us here. See the
 	 * doc in drivers/irqchip/irq-gic-v4.c to understand how this
 	 * turns into a VMOVP command at the ITS level.
 	 */
-	err = irq_set_affinity(vpe->irq, cpumask_of(smp_processor_id()));
+	err = irq_set_affinity(vpe->irq, mask);
 	if (err)
 		return err;
 
+make_resident:
 	err = its_make_vpe_resident(vpe, false, vcpu->kvm->arch.vgic.enabled);
 	if (err)
 		return err;
