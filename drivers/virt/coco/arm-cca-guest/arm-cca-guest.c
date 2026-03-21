@@ -64,7 +64,19 @@ static void arm_cca_attestation_continue(void *param)
 						      info->offset, size, &len);
 	info->offset += len;
 }
+#ifdef CONFIG_HISI_CCA
+static void arm_cca_attestation_dev_cert(void *param)
+{
+	unsigned long len;
 
+	struct arm_cca_token_info *info;
+
+	info = (struct arm_cca_token_info *)param;
+	info->result = rsi_attestation_dev_cert(info->granule,
+							RSI_GRANULE_SIZE, &len);
+	info->offset = len;
+}
+#endif
 /**
  * arm_cca_report_new - Generate a new attestation token.
  *
@@ -95,6 +107,11 @@ static int arm_cca_report_new(struct tsm_report *report, void *data)
 	struct arm_cca_token_info info;
 	void *buf;
 	u8 *token __free(kvfree) = NULL;
+#ifdef CONFIG_HISI_CCA
+	u8 *dev_cert __free(kvfree) = NULL;
+	unsigned long dev_cert_size = 0;
+	int dev_cert_ret;
+#endif
 	struct tsm_desc *desc = &report->desc;
 
 	if (desc->inblob_len < 32 || desc->inblob_len > 64)
@@ -125,7 +142,12 @@ static int arm_cca_report_new(struct tsm_report *report, void *data)
 	token = kvzalloc(max_size, GFP_KERNEL);
 	if (!token)
 		return -ENOMEM;
-
+#ifdef CONFIG_HISI_CCA
+	/* Allocate auxblob */
+	dev_cert = kvzalloc(RSI_GRANULE_SIZE, GFP_KERNEL);
+	if (!dev_cert)
+		return -ENOMEM;
+#endif
 	/*
 	 * Since the outblob may not be physically contiguous, use a page
 	 * to bounce the buffer from RMM.
@@ -174,6 +196,17 @@ static int arm_cca_report_new(struct tsm_report *report, void *data)
 	} while (info.result == RSI_INCOMPLETE);
 
 	report->outblob = no_free_ptr(token);
+#ifdef CONFIG_HISI_CCA
+	dev_cert_ret = smp_call_function_single(cpu,
+							arm_cca_attestation_dev_cert,
+							(void *)&info, true);
+	if (dev_cert_ret == 0 && info.result == RSI_SUCCESS) {
+		memcpy(dev_cert, buf, info.offset);
+		dev_cert_size = info.offset;
+		report->auxblob = no_free_ptr(dev_cert);
+		report->auxblob_len = dev_cert_size;
+	}
+#endif
 exit_free_granule_page:
 	report->outblob_len = token_size;
 	free_pages_exact(buf, RSI_GRANULE_SIZE);
@@ -200,8 +233,11 @@ static int __init arm_cca_guest_init(void)
 
 	if (!is_realm_world())
 		return -ENODEV;
-
+#ifdef CONFIG_HISI_CCA
+	ret = tsm_register(&arm_cca_tsm_ops, NULL, &tsm_report_extra_type);
+#else
 	ret = tsm_register(&arm_cca_tsm_ops, NULL, NULL);
+#endif
 	if (ret < 0)
 		pr_err("Error %d registering with TSM\n", ret);
 
