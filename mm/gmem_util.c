@@ -173,7 +173,7 @@ static int alloc_va_in_peer_devices(unsigned long addr, unsigned long len,
 	int ret;
 
 	vma = find_vma(mm, addr);
-	if (!vma) {
+	if (!vma || vma->vm_start >= addr + len) {
 		gmem_err("vma for addr %lx is NULL, should not happen\n", addr);
 		return -EINVAL;
 	}
@@ -218,10 +218,11 @@ static int alloc_va_in_peer_devices(unsigned long addr, unsigned long len,
 		ret = 0;
 	}
 
-	if (!vma->vm_obj)
+	if (ret == 0 && !vma->vm_obj) {
 		vma->vm_obj = vm_object_create(vma);
-	if (!vma->vm_obj)
-		return -ENOMEM;
+		if (!vma->vm_obj)
+			return -ENOMEM;
+	}
 
 	return ret;
 }
