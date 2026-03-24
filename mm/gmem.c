@@ -776,7 +776,12 @@ static void do_hmemcpy(struct mm_struct *mm, int hnid, unsigned long dest,
 	if (gm_mapping_dest && gm_mapping_dest != gm_mapping_src)
 		mutex_lock(&gm_mapping_dest->lock);
 
-	mutex_lock(&gm_mapping_src->lock);
+	if (!mutex_trylock(&gm_mapping_src->lock)) {
+		gmem_err("hmemcpy failed due to src/dest conflict");
+		if (gm_mapping_dest && gm_mapping_dest != gm_mapping_src)
+			mutex_unlock(&gm_mapping_dest->lock);
+		goto unlock_mm;
+	}
 	if (gm_mapping_nomap(gm_mapping_src)) {
 		gmem_err("hmemcpy: src address is not mapping to CPU or device");
 		goto unlock_gm_mapping;

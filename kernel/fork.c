@@ -1794,6 +1794,9 @@ static struct mm_struct *dup_mm(struct task_struct *tsk,
 
 	memcpy(mm, oldmm, sizeof(*mm));
 
+#ifdef CONFIG_GMEM
+	mm->gm_as = NULL;
+#endif
 	if (!mm_init(mm, tsk, mm->user_ns))
 		goto fail_nomem;
 
@@ -1801,9 +1804,6 @@ static struct mm_struct *dup_mm(struct task_struct *tsk,
 	if (err)
 		goto free_pt;
 
-#ifdef CONFIG_GMEM
-	mm->gm_as = NULL;
-#endif
 	mm->hiwater_rss = get_mm_rss(mm);
 	mm->hiwater_vm = mm->total_vm;
 

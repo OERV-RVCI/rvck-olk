@@ -4444,7 +4444,8 @@ static inline bool vma_is_peer_shared(struct vm_area_struct *vma)
 {
 	if (!gmem_is_enabled())
 		return false;
-
+	if (!vma)
+		return false;
 	return !!(vma->vm_flags & VM_PEER_SHARED);
 }
 #else
