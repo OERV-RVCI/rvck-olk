@@ -16,6 +16,7 @@
 #include <fcntl.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <poll.h>
 #include <string.h>
 #include <dirent.h>
@@ -23,6 +24,7 @@
 #include <sys/statfs.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
+#include <pthread.h>
 
 #include <map>
 #include <string>
