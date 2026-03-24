@@ -3846,22 +3846,26 @@ found:
 	return 1;
 }
 
-#ifdef CONFIG_ZONE_EXTMEM
-static void hugetlb_drain_remote_pcp(struct hstate *h, int nid)
+static void hugetlb_drain_zone(struct zone *zone)
+{
+	if (!zone_managed_pages(zone))
+		return;
+
+	drain_all_pages(zone);
+}
+
+static void hugetlb_drain_pcp(int nid)
 {
 	pg_data_t *pgdat = NODE_DATA(nid);
-	struct zone *zone;
 
-	zone = &pgdat->node_zones[ZONE_EXTMEM];
+	if (movable_node_is_enabled())
+		hugetlb_drain_zone(&pgdat->node_zones[ZONE_MOVABLE]);
 
-	if (zone_managed_pages(zone))
-		drain_all_pages(zone);
-}
-#else
-static inline void hugetlb_drain_remote_pcp(struct hstate *h, int nid)
-{
-}
+#ifdef CONFIG_ZONE_EXTMEM
+	if (numa_remote_hugetlb_nowatermark(nid))
+		hugetlb_drain_zone(&pgdat->node_zones[ZONE_EXTMEM]);
 #endif
+}
 
 #define persistent_huge_pages(h) (h->nr_huge_pages - h->surplus_huge_pages)
 static int set_max_huge_pages(struct hstate *h, unsigned long count, int nid,
@@ -3958,8 +3962,8 @@ static int set_max_huge_pages(struct hstate *h, unsigned long count, int nid,
 		/* yield cpu to avoid soft lockup */
 		cond_resched();
 
-		if ((nid != NUMA_NO_NODE) && numa_remote_hugetlb_nowatermark(nid) && !drained) {
-			hugetlb_drain_remote_pcp(h, nid);
+		if ((nid != NUMA_NO_NODE) && !drained) {
+			hugetlb_drain_pcp(nid);
 			drained = true;
 		}
 
