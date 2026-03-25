@@ -366,6 +366,8 @@ int udma_mmap(struct ubcore_ucontext *uctx, struct vm_area_struct *vma)
 
 		vm_flags_set(vma, VM_WIPEONFORK | VM_DONTEXPAND | VM_DONTDUMP |
 			     VM_DONTCOPY | VM_PFNMAP | VM_LOCKED | VM_WRITE | VM_IO);
+		vma->vm_page_prot = __pgprot(((~PTE_ATTRINDX_MASK) & vma->vm_page_prot.pgprot)
+					     | PTE_ATTRINDX(MT_NORMAL));
 		break;
 	case UDMA_MMAP_KERNEL_BUF:
 		return udma_mmap_kernel_buf(udma_dev, uctx, vma);

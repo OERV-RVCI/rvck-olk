@@ -52,7 +52,6 @@
 
 #define UDMA_DEF_JFR_SLEEP_TIME 1000
 #define UDMA_SLEEP_DELAY_TIME 10
-#define UDMA_INIT_JFR_ID -1
 
 enum jfr_state {
 	UDMA_JFR_STATE_RESET = 0,
