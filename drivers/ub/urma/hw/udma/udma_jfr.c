@@ -397,6 +397,9 @@ static void set_jfr_param(struct udma_jfr *jfr, struct ubcore_jfr_cfg *cfg)
 
 	if (!cfg->flag.bs.lock_free)
 		spin_lock_init(&jfr->lock);
+
+	jfr->rq.pi = 0;
+	jfr->rq.ci = 0;
 }
 
 static int udma_alloc_jfr_id(struct udma_dev *udma_dev, uint32_t cfg_id, uint32_t *idx)
@@ -997,37 +1000,6 @@ struct ubcore_tjetty *udma_import_jfr_ex(struct ubcore_device *dev,
 	return &udma_tjfr->ubcore_tjetty;
 }
 
-static int udma_set_jfr_id(struct udma_dev *dev, struct udma_jfr *udma_jfr, void *buf)
-{
-	struct udma_ida *ida_table = &dev->jfr_table.ida_table;
-	uint32_t cfg_id;
-	int id;
-
-	cfg_id = *(uint32_t *)buf;
-	if (!cfg_id || (cfg_id < ida_table->min || cfg_id > ida_table->max)) {
-		dev_err(dev->dev, "user set id %u error, min %u max %u.\n",
-			cfg_id, ida_table->min, ida_table->max);
-		return -EINVAL;
-	}
-
-	spin_lock(&ida_table->lock);
-	id = ida_alloc_range(&ida_table->ida, cfg_id, cfg_id, GFP_ATOMIC);
-	if (id < 0) {
-		dev_err(dev->dev, "failed to set jfr id, id is invalid or used. cfg_id=%u.\n",
-			cfg_id);
-		spin_unlock(&ida_table->lock);
-		return -EINVAL;
-	}
-	spin_unlock(&ida_table->lock);
-
-	if (udma_jfr->rq.id != UDMA_INIT_JFR_ID)
-		udma_id_free(&dev->jfr_table.ida_table, udma_jfr->rq.id);
-
-	udma_jfr->rq.id = (uint32_t)id;
-
-	return 0;
-}
-
 int udma_free_jfr(struct ubcore_jfr *jfr, struct ubcore_udata *udata)
 {
 	kfree(jfr);
@@ -1174,8 +1146,7 @@ static int udma_k_set_jfr_param(struct udma_dev *dev, struct ubcore_jfr *ubcore_
 		udma_jfr->rq.cstm = true;
 		break;
 	case UBCORE_JFR_ID:
-		if (udma_set_jfr_id(dev, udma_jfr, buf))
-			return -EINVAL;
+		udma_jfr->rq.id = *(uint32_t *)buf;
 		break;
 	case UBCORE_JFR_DB_ADDR:
 	case UBCORE_JFR_DB_STATUS:
@@ -1220,7 +1191,6 @@ int udma_alloc_jfr(struct ubcore_device *dev, struct ubcore_jfr_cfg *cfg, struct
 		return -EINVAL;
 
 	udma_jfr->ubcore_jfr.jfr_cfg = *cfg;
-	udma_jfr->rq.id = UDMA_INIT_JFR_ID;
 	*jfr = &udma_jfr->ubcore_jfr;
 
 	return 0;
@@ -1237,10 +1207,8 @@ int udma_active_jfr(struct ubcore_jfr *jfr, struct ubcore_udata *udata)
 	if (udma_verify_jfr_param(udma_dev, cfg))
 		return -EINVAL;
 
-	if (udma_jfr->rq.id == UDMA_INIT_JFR_ID) {
-		if (udma_alloc_jfr_id(udma_dev, jfr_opt->urma_jfr_id, &udma_jfr->rq.id))
-			return -EINVAL;
-	}
+	if (udma_alloc_jfr_id(udma_dev, jfr_opt->urma_jfr_id, &udma_jfr->rq.id))
+		return -EINVAL;
 
 	set_jfr_param(udma_jfr, cfg);
 

@@ -64,6 +64,7 @@ void udma_init_jfc_param(struct ubcore_jfc_cfg *cfg,
 	jfc->lock_free = cfg->flag.bs.lock_free;
 	jfc->inline_en = cfg->flag.bs.jfc_inline;
 	jfc->cq_shift = ilog2(jfc->buf.entry_cnt);
+	jfc->ci = 0;
 }
 
 int udma_check_jfc_cfg(struct udma_dev *dev, struct udma_jfc *jfc,
