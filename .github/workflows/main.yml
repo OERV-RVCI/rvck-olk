@@ -13,7 +13,7 @@ jobs:
     permissions:
       issues: write
       pull-requests: write
-    uses: OERV-RVCI/RVCK-RAVA/.github/workflows/rvck-actions.yml@main
+    uses: OERV-RVCI/RVCK-RAVA/.github/workflows/rvck-actions.yml@lava-add-hardware-support
     secrets:
       LAVA_TOKEN: ${{ secrets.LAVA_TOKEN }}
       RSYNC_PASSPHRASE: ${{ secrets.RSYNC_PASSPHRASE }}
