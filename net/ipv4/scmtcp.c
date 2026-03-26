@@ -184,13 +184,21 @@ static void file_ctl_free(struct scm_file_ctl *fctl)
 
 static int file_htable_init(void)
 {
+	int ret;
+
 	memset(&scm_fhtable, 0, sizeof(scm_fhtable));
 
 	hash_init(scm_fhtable.htable);
 	spin_lock_init(&scm_fhtable.lock);
 
-	return read_proc_uuid("/sys/class/dmi/id/product_uuid",
-			      &scm_fhtable.dmi_uuid);
+	/* ignore ENOENT */
+	ret = read_proc_uuid("/sys/class/dmi/id/product_uuid", &scm_fhtable.dmi_uuid);
+	if (ret != -ENOENT)
+		return ret;
+	ret = read_proc_uuid("/proc/sys/kernel/random/boot_id", &scm_fhtable.dmi_uuid);
+	if (ret != -ENOENT)
+		return ret;
+	return 0;
 }
 
 static int file_htable_destroy(void)
