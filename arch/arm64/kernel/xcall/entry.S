@@ -1,10 +1,15 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * Low-level exception handling code
+ * xcall low-level exception handling and register saving.
  *
  * Copyright (C) 2012 ARM Ltd.
  * Authors:	Catalin Marinas <catalin.marinas@arm.com>
  *		Will Deacon <will.deacon@arm.com>
+ *
+ * Inspired by:
+ *   1. XPC (ISCA 2019) - Dong Du, Zhichao Hua, Yubin Xia, Binyu Zang, Haibo Chen;
+ *   2. Boosting IPC (TOCS 2022) - Yubin Xia, Dong Du, Zhichao Hua, Binyu Zang,
+ *      Haibo Chen, Haibing Guan.
  */
 
 	.macro hw_xcall_save_base_regs

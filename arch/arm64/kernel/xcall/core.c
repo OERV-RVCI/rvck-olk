@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
+ * xcall core implementation: syscall interception and xcall_area management.
+ *
  * Copyright (C) 2025 Huawei Limited.
+ *
+ * Inspired by:
+ *   1. XPC (ISCA 2019) - Dong Du, Zhichao Hua, Yubin Xia, Binyu Zang, Haibo Chen;
+ *   2. Boosting IPC (TOCS 2022) - Yubin Xia, Dong Du, Zhichao Hua, Binyu Zang,
+ *      Haibo Chen, Haibing Guan.
  */
 
 #define pr_fmt(fmt)	"xcall: " fmt
