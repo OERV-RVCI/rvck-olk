@@ -4456,4 +4456,16 @@ static inline bool vma_is_peer_shared(struct vm_area_struct *vma)
 }
 #endif
 
+#ifdef CONFIG_ACPI_APEI_RAS_CRITICAL
+static inline bool mm_is_critical_error(struct mm_struct *mm)
+{
+	return mm && test_bit(MMF_CRITICAL_ERR, &mm->flags);
+}
+#else
+static inline bool mm_is_critical_error(struct mm_struct *mm)
+{
+	return false;
+}
+#endif
+
 #endif /* _LINUX_MM_H */

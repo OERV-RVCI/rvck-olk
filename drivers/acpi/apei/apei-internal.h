@@ -10,6 +10,7 @@
 #include <linux/acpi.h>
 
 struct apei_exec_context;
+struct cper_sec_proc_arm;
 
 typedef int (*apei_exec_ins_func_t)(struct apei_exec_context *ctx,
 				    struct acpi_whea_header *entry);
@@ -136,6 +137,16 @@ bool apei_page_should_offline(unsigned long pfn);
 static inline bool apei_page_should_offline(unsigned long pfn)
 {
 	return true;
+}
+#endif
+
+#ifdef CONFIG_ACPI_APEI_GHES_ARMP_VENDOR_INFO
+bool ghes_armp_vendor_critical_error(struct cper_sec_proc_arm *err, bool sync);
+#else
+static inline bool
+ghes_armp_vendor_critical_error(struct cper_sec_proc_arm *err, bool sync)
+{
+	return false;
 }
 #endif
 #endif
