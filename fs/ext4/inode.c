@@ -4778,7 +4778,7 @@ int ext4_punch_hole(struct file *file, loff_t offset, loff_t length)
 		up_write(&EXT4_I(inode)->i_data_sem);
 	}
 	ext4_fc_track_range(handle, inode, first_block, stop_block);
-	if (IS_SYNC(inode))
+	if ((file->f_flags & O_SYNC) || IS_SYNC(inode))
 		ext4_handle_sync(handle);
 
 	inode_set_mtime_to_ts(inode, inode_set_ctime_current(inode));

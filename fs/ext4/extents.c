@@ -4736,7 +4736,7 @@ static long ext4_zero_range(struct file *file, loff_t offset,
 		goto out_handle;
 
 	ext4_update_inode_fsync_trans(handle, inode, 1);
-	if (file->f_flags & O_SYNC)
+	if ((file->f_flags & O_SYNC) || IS_SYNC(inode))
 		ext4_handle_sync(handle);
 
 out_handle:
@@ -4835,7 +4835,8 @@ long ext4_fallocate(struct file *file, int mode, loff_t offset, loff_t len)
 	if (ret)
 		goto out;
 
-	if (file->f_flags & O_SYNC && EXT4_SB(inode->i_sb)->s_journal) {
+	if (((file->f_flags & O_SYNC) || IS_SYNC(inode)) &&
+	    EXT4_SB(inode->i_sb)->s_journal) {
 		ret = ext4_fc_commit(EXT4_SB(inode->i_sb)->s_journal,
 					EXT4_I(inode)->i_sync_tid);
 	}
@@ -5450,7 +5451,7 @@ static int ext4_collapse_range(struct file *file, loff_t offset, loff_t len)
 	EXT4_I(inode)->i_disksize = new_size;
 
 	up_write(&EXT4_I(inode)->i_data_sem);
-	if (IS_SYNC(inode))
+	if ((file->f_flags & O_SYNC) || IS_SYNC(inode))
 		ext4_handle_sync(handle);
 	inode_set_mtime_to_ts(inode, inode_set_ctime_current(inode));
 	ret = ext4_mark_inode_dirty(handle, inode);
@@ -5618,7 +5619,7 @@ static int ext4_insert_range(struct file *file, loff_t offset, loff_t len)
 		max(ee_start_lblk, offset_lblk), len_lblk, SHIFT_RIGHT);
 
 	up_write(&EXT4_I(inode)->i_data_sem);
-	if (IS_SYNC(inode))
+	if ((file->f_flags & O_SYNC) || IS_SYNC(inode))
 		ext4_handle_sync(handle);
 	if (ret >= 0)
 		ext4_update_inode_fsync_trans(handle, inode, 1);
