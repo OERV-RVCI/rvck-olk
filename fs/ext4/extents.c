@@ -4485,43 +4485,44 @@ retry_remove_space:
 	return err;
 }
 
-static int ext4_alloc_file_blocks(struct file *file, ext4_lblk_t offset,
-				  ext4_lblk_t len, loff_t new_size,
-				  int flags)
+static int ext4_alloc_file_blocks(struct file *file, loff_t offset, loff_t len,
+				  loff_t new_size, int flags)
 {
 	struct inode *inode = file_inode(file);
 	handle_t *handle;
 	int ret = 0, ret2 = 0, ret3 = 0;
 	int retries = 0;
 	int depth = 0;
+	ext4_lblk_t len_lblk;
 	struct ext4_map_blocks map;
 	unsigned int credits;
 	loff_t epos, old_size = i_size_read(inode);
+	unsigned int blkbits = inode->i_blkbits;
 
 	BUG_ON(!ext4_test_inode_flag(inode, EXT4_INODE_EXTENTS));
-	map.m_lblk = offset;
-	map.m_len = len;
+	map.m_lblk = offset >> blkbits;
+	map.m_len = len_lblk = EXT4_MAX_BLOCKS(len, offset, blkbits);
 	/*
 	 * Don't normalize the request if it can fit in one extent so
 	 * that it doesn't get unnecessarily split into multiple
 	 * extents.
 	 */
-	if (len <= EXT_UNWRITTEN_MAX_LEN)
+	if (len_lblk <= EXT_UNWRITTEN_MAX_LEN)
 		flags |= EXT4_GET_BLOCKS_NO_NORMALIZE;
 
 	/*
 	 * credits to insert 1 extent into extent tree
 	 */
-	credits = ext4_chunk_trans_blocks(inode, len);
+	credits = ext4_chunk_trans_blocks(inode, len_lblk);
 	depth = ext_depth(inode);
 
 retry:
-	while (len) {
+	while (len_lblk) {
 		/*
 		 * Recalculate credits when extent tree depth changes.
 		 */
 		if (depth != ext_depth(inode)) {
-			credits = ext4_chunk_trans_blocks(inode, len);
+			credits = ext4_chunk_trans_blocks(inode, len_lblk);
 			depth = ext_depth(inode);
 		}
 
@@ -4546,7 +4547,7 @@ retry:
 		 */
 		retries = 0;
 		map.m_lblk += ret;
-		map.m_len = len = len - ret;
+		map.m_len = len_lblk = len_lblk - ret;
 		epos = (loff_t)map.m_lblk << inode->i_blkbits;
 		inode_set_ctime_current(inode);
 		if (new_size) {
@@ -4647,11 +4648,8 @@ static long ext4_zero_range(struct file *file, loff_t offset,
 
 	/* Preallocate the range including the unaligned edges */
 	if (partial_begin || partial_end) {
-		ret = ext4_alloc_file_blocks(file,
-				round_down(offset, 1 << blkbits) >> blkbits,
-				(round_up((offset + len), 1 << blkbits) -
-				 round_down(offset, 1 << blkbits)) >> blkbits,
-				new_size, flags);
+		ret = ext4_alloc_file_blocks(file, offset, len, new_size,
+					     flags);
 		if (ret)
 			goto out_mutex;
 
@@ -4698,7 +4696,7 @@ static long ext4_zero_range(struct file *file, loff_t offset,
 
 		inode_set_mtime_to_ts(inode, inode_set_ctime_current(inode));
 
-		ret = ext4_alloc_file_blocks(file, lblk, max_blocks, new_size,
+		ret = ext4_alloc_file_blocks(file, start, end - start, new_size,
 					     flags);
 		filemap_invalidate_unlock(mapping);
 		if (ret)
@@ -4753,11 +4751,8 @@ long ext4_fallocate(struct file *file, int mode, loff_t offset, loff_t len)
 {
 	struct inode *inode = file_inode(file);
 	loff_t new_size = 0;
-	unsigned int max_blocks;
 	int ret = 0;
 	int flags;
-	ext4_lblk_t lblk;
-	unsigned int blkbits = inode->i_blkbits;
 
 	/*
 	 * Encrypted inodes can't handle collapse range or insert
@@ -4801,9 +4796,7 @@ long ext4_fallocate(struct file *file, int mode, loff_t offset, loff_t len)
 		goto exit;
 	}
 	trace_ext4_fallocate_enter(inode, offset, len, mode);
-	lblk = offset >> blkbits;
 
-	max_blocks = EXT4_MAX_BLOCKS(len, offset, blkbits);
 	flags = EXT4_GET_BLOCKS_CREATE_UNWRIT_EXT;
 
 	inode_lock(inode);
@@ -4832,7 +4825,7 @@ long ext4_fallocate(struct file *file, int mode, loff_t offset, loff_t len)
 	if (ret)
 		goto out;
 
-	ret = ext4_alloc_file_blocks(file, lblk, max_blocks, new_size, flags);
+	ret = ext4_alloc_file_blocks(file, offset, len, new_size, flags);
 	if (ret)
 		goto out;
 
@@ -4842,7 +4835,8 @@ long ext4_fallocate(struct file *file, int mode, loff_t offset, loff_t len)
 	}
 out:
 	inode_unlock(inode);
-	trace_ext4_fallocate_exit(inode, offset, max_blocks, ret);
+	trace_ext4_fallocate_exit(inode, offset,
+			EXT4_MAX_BLOCKS(len, offset, inode->i_blkbits), ret);
 exit:
 	return ret;
 }
