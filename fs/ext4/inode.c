@@ -4729,6 +4729,10 @@ int ext4_punch_hole(struct file *file, loff_t offset, loff_t length)
 	if (ret)
 		goto out_dio;
 
+	ret = ext4_zero_partial_blocks(inode, offset, length);
+	if (ret)
+		goto out_dio;
+
 	if (ext4_test_inode_flag(inode, EXT4_INODE_EXTENTS))
 		credits = ext4_writepage_trans_blocks(inode);
 	else
@@ -4739,10 +4743,6 @@ int ext4_punch_hole(struct file *file, loff_t offset, loff_t length)
 		ext4_std_error(sb, ret);
 		goto out_dio;
 	}
-
-	ret = ext4_zero_partial_blocks(inode, offset, length);
-	if (ret)
-		goto out_stop;
 
 	first_block = (offset + sb->s_blocksize - 1) >>
 		EXT4_BLOCK_SIZE_BITS(sb);
@@ -4778,7 +4778,7 @@ int ext4_punch_hole(struct file *file, loff_t offset, loff_t length)
 		ret = ret2;
 	if (ret >= 0)
 		ext4_update_inode_fsync_trans(handle, inode, 1);
-out_stop:
+
 	ext4_journal_stop(handle);
 out_dio:
 	filemap_invalidate_unlock(mapping);
