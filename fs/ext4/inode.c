@@ -4085,8 +4085,10 @@ static int ext4_iomap_write_end(struct file *file,
 	folio_unlock(folio);
 	folio_put(folio);
 
-	if (old_size < pos)
+	if (old_size < pos) {
 		pagecache_isize_extended(inode, old_size, pos);
+		ext4_block_zero_eof(inode, old_size, pos);
+	}
 
 	/*
 	 * For delalloc, if we have pre-allocated more blocks and copied

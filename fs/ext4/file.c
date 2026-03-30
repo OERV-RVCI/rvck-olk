@@ -291,6 +291,23 @@ static ssize_t ext4_iomap_buffered_write(struct kiocb *iocb,
 {
 	struct inode *inode = file_inode(iocb->ki_filp);
 	const struct iomap_ops *iomap_ops;
+	unsigned int blocksize = i_blocksize(inode);
+	loff_t old_size = i_size_read(inode);
+	int ret;
+
+	/*
+	 * If the position is beyond the EOF, it is necessary to zero out the
+	 * partial block that beyond the existing EOF, as it may contains
+	 * stale data written through mmap.
+	 */
+	if (iocb->ki_pos > old_size && (old_size & (blocksize - 1))) {
+		loff_t end = round_up(old_size, blocksize);
+		if (iocb->ki_pos < end)
+			end = iocb->ki_pos;
+		ret = ext4_block_zero_eof(inode, old_size, end);
+		if (ret < 0)
+			return ret;
+	}
 
 	if (test_opt(inode->i_sb, DELALLOC) && !ext4_nonda_switch(inode->i_sb))
 		iomap_ops = &ext4_iomap_buffered_da_write_ops;
