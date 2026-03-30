@@ -4556,13 +4556,10 @@ retry:
 		map.m_lblk += ret;
 		map.m_len = len_lblk = len_lblk - ret;
 		epos = (loff_t)map.m_lblk << inode->i_blkbits;
-		inode_set_ctime_current(inode);
 		if (new_size) {
 			if (epos > new_size)
 				epos = new_size;
-			if (ext4_update_inode_size(inode, epos) & 0x1)
-				inode_set_mtime_to_ts(inode,
-						      inode_get_ctime(inode));
+			ext4_update_inode_size(inode, epos);
 			if (epos > old_size)
 				pagecache_isize_extended(inode, old_size, epos);
 		}
