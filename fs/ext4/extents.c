@@ -4597,6 +4597,7 @@ static long ext4_zero_range(struct file *file, loff_t offset,
 	loff_t start, end;
 	ext4_lblk_t lblk;
 	unsigned int blkbits = inode->i_blkbits;
+	bool partial_zeroed = false;
 
 	trace_ext4_zero_range(inode, offset, len, mode);
 
@@ -4710,9 +4711,15 @@ static long ext4_zero_range(struct file *file, loff_t offset,
 		goto out_mutex;
 
 	/* Zero out partial block at the edges of the range */
-	ret = ext4_zero_partial_blocks(inode, offset, len);
+	ret = ext4_zero_partial_blocks(inode, offset, len, &partial_zeroed);
 	if (ret)
 		goto out_mutex;
+	if (((file->f_flags & O_SYNC) || IS_SYNC(inode)) && partial_zeroed) {
+		ret = filemap_write_and_wait_range(inode->i_mapping, offset,
+						   offset + len - 1);
+		if (ret)
+			goto out_mutex;
+	}
 
 	handle = ext4_journal_start(inode, EXT4_HT_MISC, 1);
 	if (IS_ERR(handle)) {
