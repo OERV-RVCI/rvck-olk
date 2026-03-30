@@ -4236,35 +4236,23 @@ void ext4_set_aops(struct inode *inode)
 		inode->i_mapping->a_ops = &ext4_aops;
 }
 
-static int __ext4_block_zero_page_range(handle_t *handle,
-					struct address_space *mapping,
-					loff_t from, loff_t length,
-					bool *did_zero)
+static struct buffer_head *ext4_block_get_zero_range(struct inode *inode,
+				      loff_t from, loff_t length)
 {
 	ext4_fsblk_t index = from >> PAGE_SHIFT;
 	unsigned offset = from & (PAGE_SIZE-1);
 	unsigned blocksize, pos;
 	ext4_lblk_t iblock;
-	struct inode *inode = mapping->host;
+	struct address_space *mapping = inode->i_mapping;
 	struct buffer_head *bh;
 	struct folio *folio;
 	int err = 0;
-	bool orig_handle_valid = true;
-
-	if (ext4_should_journal_data(inode) && handle == NULL) {
-		handle = ext4_journal_start(inode, EXT4_HT_MISC, 1);
-		if (IS_ERR(handle))
-			return PTR_ERR(handle);
-		orig_handle_valid = false;
-	}
 
 	folio = __filemap_get_folio(mapping, from >> PAGE_SHIFT,
 				    FGP_LOCK | FGP_ACCESSED | FGP_CREAT,
 				    mapping_gfp_constraint(mapping, ~__GFP_FS));
-	if (IS_ERR(folio)) {
-		err = PTR_ERR(folio);
-		goto out;
-	}
+	if (IS_ERR(folio))
+		return ERR_CAST(folio);
 
 	blocksize = inode->i_sb->s_blocksize;
 
@@ -4317,36 +4305,75 @@ static int __ext4_block_zero_page_range(handle_t *handle,
 			}
 		}
 	}
-
-	if (ext4_should_journal_data(inode)) {
-		BUFFER_TRACE(bh, "get write access");
-		err = ext4_journal_get_write_access(handle, inode->i_sb, bh,
-						    EXT4_JTR_NONE);
-		if (err)
-			goto unlock;
-		folio_zero_range(folio, offset, length);
-		BUFFER_TRACE(bh, "zeroed end of block");
-
-		err = ext4_dirty_journalled_data(handle, bh);
-		if (err)
-			goto unlock;
-	} else {
-		err = 0;
-		folio_zero_range(folio, offset, length);
-		BUFFER_TRACE(bh, "zeroed end of block");
-
-		mark_buffer_dirty(bh);
-	}
-
-	if (did_zero)
-		*did_zero = true;
+	return bh;
 
 unlock:
 	folio_unlock(folio);
 	folio_put(folio);
+	return err ? ERR_PTR(err) : NULL;
+}
+
+static int ext4_block_do_zero_range(handle_t *handle, struct inode *inode,
+				    loff_t from, loff_t length, bool *did_zero)
+{
+	struct buffer_head *bh;
+	struct folio *folio;
+	int err = 0;
+
+	bh = ext4_block_get_zero_range(inode, from, length);
+	if (IS_ERR_OR_NULL(bh))
+		return PTR_ERR_OR_ZERO(bh);
+
+	folio = bh->b_folio;
+	folio_zero_range(folio, offset_in_folio(folio, from), length);
+	BUFFER_TRACE(bh, "zeroed end of block");
+
+	mark_buffer_dirty(bh);
+	/*
+	 * Only the written block requires ordered data to prevent exposing
+	 * stale data.
+	 */
+	if (ext4_should_order_data(inode) &&
+	    !buffer_unwritten(bh) && !buffer_delay(bh))
+		err = ext4_jbd2_inode_add_write(handle, inode, from, length);
+	if (!err && did_zero)
+		*did_zero = true;
+
+	folio_unlock(folio);
+	folio_put(folio);
+	return err;
+}
+
+static int ext4_block_journalled_zero_range(handle_t *handle,
+		struct inode *inode, loff_t from, loff_t length, bool *did_zero)
+{
+	struct buffer_head *bh;
+	struct folio *folio;
+	int err;
+
+	bh = ext4_block_get_zero_range(inode, from, length);
+	if (IS_ERR_OR_NULL(bh))
+		return PTR_ERR_OR_ZERO(bh);
+	folio = bh->b_folio;
+
+	BUFFER_TRACE(bh, "get write access");
+	err = ext4_journal_get_write_access(handle, inode->i_sb, bh,
+					    EXT4_JTR_NONE);
+	if (err)
+		goto out;
+
+	folio_zero_range(folio, offset_in_folio(folio, from), length);
+	BUFFER_TRACE(bh, "zeroed end of block");
+
+	err = ext4_dirty_journalled_data(handle, bh);
+	if (err)
+		goto out;
+
+	if (did_zero)
+		*did_zero = true;
 out:
-	if (ext4_should_journal_data(inode) && orig_handle_valid == false)
-		ext4_journal_stop(handle);
+	folio_unlock(folio);
+	folio_put(folio);
 	return err;
 }
 
@@ -4384,11 +4411,13 @@ static int ext4_block_zero_page_range(handle_t *handle,
 	if (IS_DAX(inode)) {
 		return dax_zero_range(inode, from, length, NULL,
 				      &ext4_iomap_ops);
+	} else if (ext4_should_journal_data(inode)) {
+		return ext4_block_journalled_zero_range(handle, inode, from,
+							  length, did_zero);
 	} else if (ext4_test_inode_state(inode, EXT4_STATE_BUFFERED_IOMAP)) {
 		return ext4_iomap_zero_range(inode, from, length, did_zero);
 	}
-	return __ext4_block_zero_page_range(handle, mapping, from, length,
-					    did_zero);
+	return ext4_block_do_zero_range(handle, inode, from, length, did_zero);
 }
 
 /*
