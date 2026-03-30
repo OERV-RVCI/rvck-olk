@@ -4557,8 +4557,7 @@ retry:
 						      inode_get_ctime(inode));
 			if (epos > old_size) {
 				pagecache_isize_extended(inode, old_size, epos);
-				ext4_block_zero_eof(handle, inode, old_size,
-						    epos);
+				ext4_block_zero_eof(inode, old_size, epos);
 			}
 		}
 		ret2 = ext4_mark_inode_dirty(handle, inode);
@@ -4729,7 +4728,7 @@ static long ext4_zero_range(struct file *file, loff_t offset,
 	if (unlikely(ret))
 		goto out_handle;
 	/* Zero out partial block at the edges of the range */
-	ret = ext4_zero_partial_blocks(handle, inode, offset, len);
+	ret = ext4_zero_partial_blocks(inode, offset, len);
 	if (ret >= 0)
 		ext4_update_inode_fsync_trans(handle, inode, 1);
 

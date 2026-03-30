@@ -1347,7 +1347,7 @@ static int ext4_write_end(struct file *file,
 
 	if (old_size < pos && !verity) {
 		pagecache_isize_extended(inode, old_size, pos);
-		ext4_block_zero_eof(handle, inode, old_size, pos);
+		ext4_block_zero_eof(inode, old_size, pos);
 	}
 	/*
 	 * Don't mark the inode dirty under folio lock. First, it unnecessarily
@@ -1466,7 +1466,7 @@ static int ext4_journalled_write_end(struct file *file,
 
 	if (old_size < pos && !verity) {
 		pagecache_isize_extended(inode, old_size, pos);
-		ext4_block_zero_eof(handle, inode, old_size, pos);
+		ext4_block_zero_eof(inode, old_size, pos);
 	}
 
 	if (size_changed) {
@@ -3092,7 +3092,7 @@ static int ext4_da_do_write_end(struct address_space *mapping,
 	if (IS_ERR(handle))
 		return PTR_ERR(handle);
 	if (zero_len)
-		ext4_block_zero_eof(handle, inode, old_size, pos);
+		ext4_block_zero_eof(inode, old_size, pos);
 	ext4_mark_inode_dirty(handle, inode);
 	ext4_journal_stop(handle);
 
@@ -4339,16 +4339,23 @@ static int ext4_block_do_zero_range(struct inode *inode, loff_t from,
 	return 0;
 }
 
-static int ext4_block_journalled_zero_range(handle_t *handle,
-		struct inode *inode, loff_t from, loff_t length, bool *did_zero)
+static int ext4_block_journalled_zero_range(struct inode *inode, loff_t from,
+					    loff_t length, bool *did_zero)
 {
 	struct buffer_head *bh;
 	struct folio *folio;
+	handle_t *handle;
 	int err;
 
+	handle = ext4_journal_start(inode, EXT4_HT_MISC, 1);
+	if (IS_ERR(handle))
+		return PTR_ERR(handle);
+
 	bh = ext4_block_get_zero_range(inode, from, length);
-	if (IS_ERR_OR_NULL(bh))
-		return PTR_ERR_OR_ZERO(bh);
+	if (IS_ERR_OR_NULL(bh)) {
+		err = PTR_ERR_OR_ZERO(bh);
+		goto out_handle;
+	}
 	folio = bh->b_folio;
 
 	BUFFER_TRACE(bh, "get write access");
@@ -4369,6 +4376,8 @@ static int ext4_block_journalled_zero_range(handle_t *handle,
 out:
 	folio_unlock(folio);
 	folio_put(folio);
+out_handle:
+	ext4_journal_stop(handle);
 	return err;
 }
 
@@ -4386,7 +4395,7 @@ static int ext4_iomap_zero_range(struct inode *inode, loff_t from,
  * the end of the block it will be shortened to end of the block
  * that corresponds to 'from'
  */
-static int ext4_block_zero_range(handle_t *handle, struct inode *inode,
+static int ext4_block_zero_range(struct inode *inode,
 				 loff_t from, loff_t length, bool *did_zero,
 				 bool *zero_written)
 {
@@ -4405,8 +4414,8 @@ static int ext4_block_zero_range(handle_t *handle, struct inode *inode,
 		return dax_zero_range(inode, from, length, NULL,
 				      &ext4_iomap_ops);
 	} else if (ext4_should_journal_data(inode)) {
-		return ext4_block_journalled_zero_range(handle, inode, from,
-							  length, did_zero);
+		return ext4_block_journalled_zero_range(inode, from, length,
+							did_zero);
 	} else if (ext4_test_inode_state(inode, EXT4_STATE_BUFFERED_IOMAP)) {
 		return ext4_iomap_zero_range(inode, from, length, did_zero);
 	}
@@ -4421,8 +4430,7 @@ static int ext4_block_zero_range(handle_t *handle, struct inode *inode,
  * to physically zero the tail end of that block so it doesn't yield old
  * data if the file is grown. Return the zeroed length on success.
  */
-int ext4_block_zero_eof(handle_t *handle, struct inode *inode,
-			loff_t from, loff_t end)
+int ext4_block_zero_eof(struct inode *inode, loff_t from, loff_t end)
 {
 	unsigned int blocksize = i_blocksize(inode);
 	unsigned int offset;
@@ -4441,7 +4449,7 @@ int ext4_block_zero_eof(handle_t *handle, struct inode *inode,
 	if (length > blocksize - offset)
 		length = blocksize - offset;
 
-	err = ext4_block_zero_range(handle, inode, from, length,
+	err = ext4_block_zero_range(inode, from, length,
 				    &did_zero, &zero_written);
 	if (err)
 		return err;
@@ -4453,7 +4461,14 @@ int ext4_block_zero_eof(handle_t *handle, struct inode *inode,
 	 */
 	if (ext4_should_order_data(inode) &&
 	    did_zero && zero_written && !IS_DAX(inode)) {
+		handle_t *handle;
+
+		handle = ext4_journal_start(inode, EXT4_HT_MISC, 1);
+		if (IS_ERR(handle))
+			return PTR_ERR(handle);
+
 		err = ext4_jbd2_inode_add_write(handle, inode, from, length);
+		ext4_journal_stop(handle);
 		if (err)
 			return err;
 	}
@@ -4461,8 +4476,7 @@ int ext4_block_zero_eof(handle_t *handle, struct inode *inode,
 	return did_zero ? length : 0;
 }
 
-int ext4_zero_partial_blocks(handle_t *handle, struct inode *inode,
-			     loff_t lstart, loff_t length)
+int ext4_zero_partial_blocks(struct inode *inode, loff_t lstart, loff_t length)
 {
 	struct super_block *sb = inode->i_sb;
 	unsigned partial_start, partial_end;
@@ -4479,21 +4493,19 @@ int ext4_zero_partial_blocks(handle_t *handle, struct inode *inode,
 	/* Handle partial zero within the single block */
 	if (start == end &&
 	    (partial_start || (partial_end != sb->s_blocksize - 1))) {
-		err = ext4_block_zero_range(handle, inode, lstart,
-					    length, NULL, NULL);
+		err = ext4_block_zero_range(inode, lstart, length, NULL, NULL);
 		return err;
 	}
 	/* Handle partial zero out on the start of the range */
 	if (partial_start) {
-		err = ext4_block_zero_range(handle, inode, lstart,
-					    sb->s_blocksize, NULL, NULL);
+		err = ext4_block_zero_range(inode, lstart, sb->s_blocksize,
+					    NULL, NULL);
 		if (err)
 			return err;
 	}
 	/* Handle partial zero out on the end of the range */
 	if (partial_end != sb->s_blocksize - 1)
-		err = ext4_block_zero_range(handle, inode,
-					    byte_end - partial_end,
+		err = ext4_block_zero_range(inode, byte_end - partial_end,
 					    partial_end + 1, NULL, NULL);
 	return err;
 }
@@ -4728,8 +4740,7 @@ int ext4_punch_hole(struct file *file, loff_t offset, loff_t length)
 		goto out_dio;
 	}
 
-	ret = ext4_zero_partial_blocks(handle, inode, offset,
-				       length);
+	ret = ext4_zero_partial_blocks(inode, offset, length);
 	if (ret)
 		goto out_stop;
 
@@ -4866,7 +4877,7 @@ int ext4_truncate(struct inode *inode)
 		if (err)
 			goto out_trace;
 
-		zero_len = ext4_block_zero_eof(NULL, inode, inode->i_size, LLONG_MAX);
+		zero_len = ext4_block_zero_eof(inode, inode->i_size, LLONG_MAX);
 		if (zero_len < 0) {
 			err = zero_len;
 			goto out_trace;
@@ -6239,8 +6250,8 @@ int ext4_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
 			if (!shrink && oldsize & (inode->i_sb->s_blocksize - 1)) {
 				loff_t zero_len;
 
-				zero_len = ext4_block_zero_eof(NULL, inode,
-							    oldsize, LLONG_MAX);
+				zero_len = ext4_block_zero_eof(inode, oldsize,
+								LLONG_MAX);
 				if (zero_len < 0) {
 					error = zero_len;
 					goto out_mmap_sem;
