@@ -1347,7 +1347,7 @@ static int ext4_write_end(struct file *file,
 
 	if (old_size < pos && !verity) {
 		pagecache_isize_extended(inode, old_size, pos);
-		ext4_zero_partial_blocks(handle, inode, old_size, pos - old_size);
+		ext4_block_zero_eof(handle, inode, old_size, pos);
 	}
 	/*
 	 * Don't mark the inode dirty under folio lock. First, it unnecessarily
@@ -1466,7 +1466,7 @@ static int ext4_journalled_write_end(struct file *file,
 
 	if (old_size < pos && !verity) {
 		pagecache_isize_extended(inode, old_size, pos);
-		ext4_zero_partial_blocks(handle, inode, old_size, pos - old_size);
+		ext4_block_zero_eof(handle, inode, old_size, pos);
 	}
 
 	if (size_changed) {
@@ -3092,7 +3092,7 @@ static int ext4_da_do_write_end(struct address_space *mapping,
 	if (IS_ERR(handle))
 		return PTR_ERR(handle);
 	if (zero_len)
-		ext4_zero_partial_blocks(handle, inode, old_size, zero_len);
+		ext4_block_zero_eof(handle, inode, old_size, pos);
 	ext4_mark_inode_dirty(handle, inode);
 	ext4_journal_stop(handle);
 
@@ -4392,50 +4392,37 @@ static int ext4_block_zero_page_range(handle_t *handle,
 }
 
 /*
- * ext4_block_truncate_page() zeroes out a mapping from file offset `from'
- * up to the end of the block which corresponds to `from'.
- * This required during truncate. We need to physically zero the tail end
- * of that block so it doesn't yield old data if the file is later grown.
+ * Zero out a mapping from file offset 'from' up to the end of the block
+ * which corresponds to 'from' or to the given 'end' inside this block.
+ * This required during truncate up and performing append writes. We need
+ * to physically zero the tail end of that block so it doesn't yield old
+ * data if the file is grown. Return the zeroed length on success.
  */
-static loff_t ext4_block_truncate_page(struct address_space *mapping,
-				       loff_t from)
+int ext4_block_zero_eof(handle_t *handle, struct inode *inode,
+			loff_t from, loff_t end)
 {
-	unsigned offset = from & (PAGE_SIZE-1);
-	unsigned length;
-	unsigned blocksize;
-	struct inode *inode = mapping->host;
+	unsigned int blocksize = i_blocksize(inode);
+	unsigned int offset;
+	loff_t length = end - from;
 	bool did_zero = false;
 	int err;
 
+	offset = from & (blocksize - 1);
+	if (!offset || from >= end)
+		return 0;
 	/* If we are processing an encrypted inode during orphan list handling */
 	if (IS_ENCRYPTED(inode) && !fscrypt_has_encryption_key(inode))
 		return 0;
 
-	blocksize = inode->i_sb->s_blocksize;
-	length = blocksize - (offset & (blocksize - 1));
+	if (length > blocksize - offset)
+		length = blocksize - offset;
 
-	err = ext4_block_zero_page_range(NULL, mapping, from, length,
+	err = ext4_block_zero_page_range(handle, inode->i_mapping, from, length,
 					 &did_zero);
 	if (err)
 		return err;
 
-	/*
-	 * inode with an iomap buffered I/O path does not order data,
-	 * so it is necessary to write out zeroed data before the
-	 * updating i_disksize transaction is committed. Otherwise,
-	 * stale data may remain in the last block, which could be
-	 * exposed during the next expand truncate operation.
-	 */
-	if (length && ext4_test_inode_state(inode, EXT4_STATE_BUFFERED_IOMAP)) {
-		loff_t zero_end = inode->i_size + length;
-
-		err = filemap_write_and_wait_range(mapping,
-						inode->i_size, zero_end - 1);
-		if (err)
-			return err;
-	}
-
-	return length;
+	return did_zero ? length : 0;
 }
 
 int ext4_zero_partial_blocks(handle_t *handle, struct inode *inode,
@@ -4826,7 +4813,6 @@ int ext4_truncate(struct inode *inode)
 	unsigned int credits;
 	int err = 0, err2;
 	handle_t *handle;
-	struct address_space *mapping = inode->i_mapping;
 	loff_t zero_len = 0;
 
 	/*
@@ -4858,7 +4844,7 @@ int ext4_truncate(struct inode *inode)
 		if (err)
 			goto out_trace;
 
-		zero_len = ext4_block_truncate_page(mapping, inode->i_size);
+		zero_len = ext4_block_zero_eof(NULL, inode, inode->i_size, LLONG_MAX);
 		if (zero_len < 0) {
 			err = zero_len;
 			goto out_trace;
@@ -6231,8 +6217,8 @@ int ext4_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
 			if (!shrink && oldsize & (inode->i_sb->s_blocksize - 1)) {
 				loff_t zero_len;
 
-				zero_len = ext4_block_truncate_page(
-						inode->i_mapping, oldsize);
+				zero_len = ext4_block_zero_eof(NULL, inode,
+							    oldsize, LLONG_MAX);
 				if (zero_len < 0) {
 					error = zero_len;
 					goto out_mmap_sem;
