@@ -9,7 +9,7 @@
 #include <asm/cacheflush.h>
 #include <asm/cpufeature.h>
 #include <asm/kvm_csr.h>
-#include <asm/kvm_extioi.h>
+#include <asm/kvm_eiointc.h>
 #include <asm/kvm_pch_pic.h>
 #include "trace.h"
 
@@ -293,16 +293,16 @@ int kvm_arch_hardware_enable(void)
 	/*
 	 * Enable virtualization features granting guest direct control of
 	 * certain features:
-	 * GCI=2:       Trap on init or unimplement cache instruction.
+	 * GCI=2:       Trap on init or unimplemented cache instruction.
 	 * TORU=0:      Trap on Root Unimplement.
 	 * CACTRL=1:    Root control cache.
-	 * TOP=0:       Trap on Previlege.
+	 * TOP=0:       Trap on Privilege.
 	 * TOE=0:       Trap on Exception.
 	 * TIT=0:       Trap on Timer.
 	 */
-	if (env & CSR_GCFG_GCIP_ALL)
+	if (env & CSR_GCFG_GCIP_SECURE)
 		gcfg |= CSR_GCFG_GCI_SECURE;
-	if (env & CSR_GCFG_MATC_ROOT)
+	if (env & CSR_GCFG_MATP_ROOT)
 		gcfg |= CSR_GCFG_MATC_ROOT;
 
 	write_csr_gcfg(gcfg);
@@ -396,8 +396,8 @@ static int kvm_loongarch_env_init(void)
 	if (ret)
 		return ret;
 
-	/* Register loongarch extioi interrupt controller interface. */
-	ret = kvm_loongarch_register_extioi_device();
+	/* Register loongarch eiointc interrupt controller interface. */
+	ret = kvm_loongarch_register_eiointc_device();
 	if (ret)
 		return ret;
 
