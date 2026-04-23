@@ -21,6 +21,7 @@
 #include <linux/pci.h>
 #include <linux/pci_ids.h>
 #include <asm/amd_nb.h>
+#include <asm/amd_node.h>
 #include <asm/processor.h>
 
 MODULE_DESCRIPTION("AMD Family 10h+ CPU core temperature monitor");
@@ -157,6 +158,11 @@ static void read_tempreg_nb_f15(struct pci_dev *pdev, u32 *regval)
 			  F15H_M60H_REPORTED_TEMP_CTRL_OFFSET, regval);
 }
 
+static u16 amd_pci_dev_to_node_id(struct pci_dev *pdev)
+{
+	return PCI_SLOT(pdev->devfn) - AMD_NODE0_PCI_SLOT;
+}
+
 static void read_tempreg_nb_zen(struct pci_dev *pdev, u32 *regval)
 {
 	if (amd_smn_read(amd_pci_dev_to_node_id(pdev),
@@ -214,15 +220,18 @@ static void hygon_read_temp(struct k10temp_data *data, int channel,
 	struct hygon_private *h_priv;
 
 	h_priv = (struct hygon_private *)data->priv;
-	if ((channel - 2) < h_priv->index_2nd)
-		amd_smn_read(amd_pci_dev_to_node_id(data->pdev),
+	if ((channel - 2) < h_priv->index_2nd){
+		if (amd_smn_read(amd_pci_dev_to_node_id(data->pdev),
 			     ZEN_CCD_TEMP(data->ccd_offset, channel - 2),
-					  regval);
-	else
-		amd_smn_read(amd_pci_dev_to_node_id(data->pdev),
+					  regval))
+			*regval = 0;
+	} else {
+		if (amd_smn_read(amd_pci_dev_to_node_id(data->pdev),
 			     ZEN_CCD_TEMP(h_priv->offset_2nd,
 					  channel - 2 - h_priv->index_2nd),
-					  regval);
+					  regval))
+			*regval = 0;
+	}
 }
 
 static int k10temp_read_temp(struct device *dev, u32 attr, int channel,
@@ -441,10 +450,11 @@ static void k10temp_get_ccd_support_2nd(struct pci_dev *pdev,
 
 	h_priv = (struct hygon_private *)data->priv;
 	for (i = h_priv->index_2nd; i < limit; i++) {
-		amd_smn_read(amd_pci_dev_to_node_id(pdev),
+		if (amd_smn_read(amd_pci_dev_to_node_id(pdev),
 			     ZEN_CCD_TEMP(h_priv->offset_2nd,
 			     i - h_priv->index_2nd),
-			     &regval);
+			     &regval))
+			continue;
 		if (regval & ZEN_CCD_TEMP_VALID)
 			data->show_temp |= BIT(TCCD_BIT(i));
 	}
