@@ -2807,13 +2807,12 @@ static int hns3_setup_tc(struct net_device *netdev, void *type_data)
 static int hns3_setup_tc_cls_flower(struct hns3_nic_priv *priv,
 				    struct flow_cls_offload *flow)
 {
-	int tc = tc_classid_to_hwtc(priv->netdev, flow->classid);
 	struct hnae3_handle *h = hns3_get_handle(priv->netdev);
 
 	switch (flow->command) {
 	case FLOW_CLS_REPLACE:
 		if (h->ae_algo->ops->add_cls_flower)
-			return h->ae_algo->ops->add_cls_flower(h, flow, tc);
+			return h->ae_algo->ops->add_cls_flower(h, flow);
 		break;
 	case FLOW_CLS_DESTROY:
 		if (h->ae_algo->ops->del_cls_flower)
@@ -2829,9 +2828,10 @@ static int hns3_setup_tc_cls_flower(struct hns3_nic_priv *priv,
 static int hns3_setup_tc_block_cb(enum tc_setup_type type, void *type_data,
 				  void *cb_priv)
 {
+	struct flow_cls_common_offload *common = type_data;
 	struct hns3_nic_priv *priv = cb_priv;
 
-	if (!tc_cls_can_offload_and_chain0(priv->netdev, type_data))
+	if (!tc_can_offload_extack(priv->netdev, common->extack))
 		return -EOPNOTSUPP;
 
 	switch (type) {

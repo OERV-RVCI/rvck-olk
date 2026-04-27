@@ -359,6 +359,7 @@ enum hnae3_dbg_cmd {
 	HNAE3_DBG_CMD_TX_QUEUE_INFO,
 	HNAE3_DBG_CMD_FD_TCAM,
 	HNAE3_DBG_CMD_FD_COUNTER,
+	HNAE3_DBG_CMD_FD_RULE,
 	HNAE3_DBG_CMD_MAC_TNL_STATUS,
 	HNAE3_DBG_CMD_SERV_INFO,
 	HNAE3_DBG_CMD_UMV_INFO,
@@ -619,6 +620,10 @@ typedef int (*read_func)(struct seq_file *s, void *data);
  *   Request to update pfc storm configuration
  * get_pfc_storm_config
  *   Get pfc storm config
+ * set_pfc_storm_prevention_tout
+ *   Set_pfc_storm_prevention_tout
+ * get_pfc_storm_prevention_tout
+ *   Get_pfc_storm_prevention_tout
  * set_tx_hwts_info
  *   Save information for 1588 tx packet
  * get_rx_hwts
@@ -810,7 +815,7 @@ struct hnae3_ae_ops {
 				 u32 len, u8 *data);
 	bool (*get_cmdq_stat)(struct hnae3_handle *handle);
 	int (*add_cls_flower)(struct hnae3_handle *handle,
-			      struct flow_cls_offload *cls_flower, int tc);
+			      struct flow_cls_offload *cls_flower);
 	int (*del_cls_flower)(struct hnae3_handle *handle,
 			      struct flow_cls_offload *cls_flower);
 	bool (*cls_flower_active)(struct hnae3_handle *handle);
@@ -821,6 +826,8 @@ struct hnae3_ae_ops {
 	void (*request_pfc_storm_config)(struct hnae3_handle *handle,
 					 bool enable);
 	int (*get_pfc_storm_config)(struct hnae3_handle *handle, bool *enable);
+	int (*set_pfc_storm_prevention_tout)(struct hnae3_handle *handle, u16 times);
+	int (*get_pfc_storm_prevention_tout)(struct hnae3_handle *handle, u16 *times);
 	bool (*set_tx_hwts_info)(struct hnae3_handle *handle,
 				 struct sk_buff *skb);
 	void (*get_rx_hwts)(struct hnae3_handle *handle, struct sk_buff *skb,
