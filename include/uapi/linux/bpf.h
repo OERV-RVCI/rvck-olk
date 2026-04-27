@@ -1336,6 +1336,9 @@ enum {
 
 /* Get path from provided FD in BPF_OBJ_PIN/BPF_OBJ_GET commands */
 	BPF_F_PATH_FD		= (1U << 14),
+
+/* Flag for value_type_btf_obj_fd, the fd is available */
+	BPF_F_VTYPE_BTF_OBJ_FD	= (1U << 15),
 };
 
 /* Flags for BPF_PROG_QUERY. */
@@ -1409,6 +1412,13 @@ union bpf_attr {
 		 * to using 5 hash functions).
 		 */
 		__u64	map_extra;
+
+#if !defined(__GENKSYMS__)
+		__s32   value_type_btf_obj_fd;	/* fd pointing to a BTF
+						 * type data for
+						 * btf_vmlinux_value_type_id.
+						 */
+#endif
 	};
 
 	struct { /* anonymous struct used by BPF_MAP_*_ELEM commands */
@@ -5124,6 +5134,8 @@ union bpf_attr {
  *		**BPF_F_TIMER_ABS**
  *			Start the timer in absolute expire value instead of the
  *			default relative one.
+ *		**BPF_F_TIMER_CPU_PIN**
+ *			Timer will be pinned to the CPU of the caller.
  *
  *	Return
  *		0 on success.
@@ -6483,7 +6495,7 @@ struct bpf_map_info {
 	__u32 btf_id;
 	__u32 btf_key_type_id;
 	__u32 btf_value_type_id;
-	__u32 :32;	/* alignment pad */
+	__u32 btf_vmlinux_id;
 	__u64 map_extra;
 } __attribute__((aligned(8)));
 
@@ -7348,9 +7360,11 @@ struct bpf_core_relo {
  * Flags to control bpf_timer_start() behaviour.
  *     - BPF_F_TIMER_ABS: Timeout passed is absolute time, by default it is
  *       relative to current time.
+ *     - BPF_F_TIMER_CPU_PIN: Timer will be pinned to the CPU of the caller.
  */
 enum {
 	BPF_F_TIMER_ABS = (1ULL << 0),
+	BPF_F_TIMER_CPU_PIN = (1ULL << 1),
 };
 
 /* BPF numbers iterator state */
