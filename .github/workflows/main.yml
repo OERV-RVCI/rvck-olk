@@ -13,7 +13,7 @@ jobs:
     permissions:
       issues: write
       pull-requests: write
-    uses: OERV-RVCI/RVCK-RAVA/.github/workflows/rvck-actions.yml@dev/fix-check-patch-log-too-large
+    uses: OERV-RVCI/RVCK-RAVA/.github/workflows/rvck-actions.yml@dev/fix-lava-trigger
     secrets:
       LAVA_TOKEN: ${{ secrets.LAVA_TOKEN }}
       RSYNC_PASSPHRASE: ${{ secrets.RSYNC_PASSPHRASE }}
